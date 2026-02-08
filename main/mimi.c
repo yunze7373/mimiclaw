@@ -27,6 +27,7 @@
 #include "imu/imu_manager.h"
 #include "rgb/rgb.h"
 #include "cron/cron_service.h"
+#include "heartbeat/heartbeat.h"
 
 static const char *TAG = "mimi";
 
@@ -128,6 +129,7 @@ void app_main(void)
     ESP_ERROR_CHECK(llm_proxy_init());
     ESP_ERROR_CHECK(tool_registry_init());
     ESP_ERROR_CHECK(cron_service_init());
+    ESP_ERROR_CHECK(heartbeat_init());
     ESP_ERROR_CHECK(agent_loop_init());
 
     /* Start Serial CLI first (works without WiFi) */
@@ -146,6 +148,7 @@ void app_main(void)
             ESP_ERROR_CHECK(telegram_bot_start());
             ESP_ERROR_CHECK(agent_loop_start());
             cron_service_start();
+            heartbeat_start();
             ESP_ERROR_CHECK(ws_server_start());
 
             /* Outbound dispatch task */
