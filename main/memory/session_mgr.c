@@ -13,7 +13,7 @@ static const char *TAG = "session";
 
 static void session_path(const char *chat_id, char *buf, size_t size)
 {
-    snprintf(buf, size, "%s/tg_%s.jsonl", MIMI_SPIFFS_SESSION_DIR, chat_id);
+    snprintf(buf, size, "%s/%s.jsonl", MIMI_SPIFFS_SESSION_DIR, chat_id);
 }
 
 esp_err_t session_mgr_init(void)
@@ -152,7 +152,7 @@ void session_list(void)
     struct dirent *entry;
     int count = 0;
     while ((entry = readdir(dir)) != NULL) {
-        if (strstr(entry->d_name, "tg_") && strstr(entry->d_name, ".jsonl")) {
+        if (strstr(entry->d_name, ".jsonl")) {
             ESP_LOGI(TAG, "  Session: %s", entry->d_name);
             count++;
         }
