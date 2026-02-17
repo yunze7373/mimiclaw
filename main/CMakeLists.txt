@@ -28,6 +28,7 @@ idf_component_register(
         "tools/tool_get_time.c"
         "tools/tool_files.c"
         "tools/tool_cron.c"
+        "tools/tool_hardware.c"
         "cron/cron_service.c"
         "heartbeat/heartbeat.c"
         "web_ui/web_ui.c"
