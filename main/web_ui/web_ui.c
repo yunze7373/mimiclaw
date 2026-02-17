@@ -112,17 +112,17 @@ static const char *HTML_PAGE =
 "    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }"
 "    /* Views */"
 "    .view { display: none; }"
-"    .view.active { display: block; }
-    /* Board Layout */
-    .board-layout { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; }
-    .board-col { display: flex; flex-direction: column; gap: 4px; min-width: 140px; }
-    .pin-row { display: flex; justify-content: space-between; align-items: center; background: #eaeff5; padding: 6px 10px; border-radius: 4px; height: 36px; border: 1px solid #dae1e7; }
-    .pin-row.restricted { opacity: 0.7; background: #f1f5f9; }
-    .label-only { background: transparent; color: #64748b; justify-content: center; font-weight: bold; border: 1px dashed #cbd5e1; }
-    .pin-lbl { font-family: monospace; font-size: 13px; color: #334155; font-weight: 600; }
-    .btn-group { display: flex; gap: 2px; }
-    .btn-xs { padding: 2px 8px; font-size: 11px; }
-    .badge-warn { font-size: 10px; color: #b45309; background: #fef3c7; padding: 2px 6px; border-radius: 4px; border: 1px solid #fcd34d; font-weight: 600; }"
+"    .view.active { display: block; }"
+"    /* Board Layout */"
+"    .board-layout { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; }"
+"    .board-col { display: flex; flex-direction: column; gap: 4px; min-width: 140px; }"
+"    .pin-row { display: flex; justify-content: space-between; align-items: center; background: #eaeff5; padding: 6px 10px; border-radius: 4px; height: 36px; border: 1px solid #dae1e7; }"
+"    .pin-row.restricted { opacity: 0.7; background: #f1f5f9; }"
+"    .label-only { background: transparent; color: #64748b; justify-content: center; font-weight: bold; border: 1px dashed #cbd5e1; }"
+"    .pin-lbl { font-family: monospace; font-size: 13px; color: #334155; font-weight: 600; }"
+"    .btn-group { display: flex; gap: 2px; }"
+"    .btn-xs { padding: 2px 8px; font-size: 11px; }"
+"    .badge-warn { font-size: 10px; color: #b45309; background: #fef3c7; padding: 2px 6px; border-radius: 4px; border: 1px solid #fcd34d; font-weight: 600; }"
 "  </style>"
 "</head>"
 "<body>"

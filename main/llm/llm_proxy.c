@@ -217,7 +217,7 @@ static esp_err_t llm_http_direct(const char *post_data, resp_buf_t *rb, int *out
         .url = llm_api_url(),
         .event_handler = http_event_handler,
         .user_data = rb,
-        .timeout_ms = 120 * 1000,
+        .timeout_ms = 300 * 1000,
         .buffer_size = 4096,
         .buffer_size_tx = 4096,
         .crt_bundle_attach = esp_crt_bundle_attach,
@@ -286,7 +286,7 @@ static esp_err_t llm_http_via_proxy(const char *post_data, resp_buf_t *rb, int *
     /* Read full response into buffer */
     char tmp[4096];
     while (1) {
-        int n = proxy_conn_read(conn, tmp, sizeof(tmp), 120000);
+        int n = proxy_conn_read(conn, tmp, sizeof(tmp), 300000);
         if (n <= 0) break;
         if (resp_buf_append(rb, tmp, n) != ESP_OK) break;
     }
