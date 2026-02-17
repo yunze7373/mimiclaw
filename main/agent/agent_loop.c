@@ -77,7 +77,66 @@ static cJSON *build_tool_results(const llm_response_t *resp, char *tool_output, 
     return content;
 }
 
-static void agent_loop_task(void *arg)
+    return content;
+}
+
+/* ── Streaming Helpers ────────────────────────────────────────── */
+
+typedef struct {
+    char channel[16];
+    char chat_id[32];
+    char buf[256];      /* Token buffer */
+    size_t len;
+} agent_stream_ctx_t;
+
+static void stream_flush(agent_stream_ctx_t *ctx)
+{
+    if (ctx->len == 0) return;
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", "token");
+    cJSON_AddStringToObject(root, "token", ctx->buf);
+    
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+
+    if (json) {
+        mimi_msg_t out = {0};
+        strncpy(out.channel, ctx->channel, sizeof(out.channel) - 1);
+        strncpy(out.chat_id, ctx->chat_id, sizeof(out.chat_id) - 1);
+        out.content = json;
+        message_bus_push_outbound(&out);
+    }
+    
+    ctx->len = 0;
+    ctx->buf[0] = '\0';
+}
+
+static void stream_token_cb(const char *token, void *arg)
+{
+    agent_stream_ctx_t *ctx = (agent_stream_ctx_t *)arg;
+    
+    size_t tlen = strlen(token);
+    /* Flush if buffer full */
+    if (ctx->len + tlen >= sizeof(ctx->buf) - 1) {
+        stream_flush(ctx);
+    }
+
+    /* Append to buffer (handle overflow by flushing iteratively if needed, 
+       but tokens are small generally) */
+    if (tlen < sizeof(ctx->buf)) {
+        strcat(ctx->buf, token);
+        ctx->len += tlen;
+    } else {
+        /* Giant token? Should not happen with delta logic. Flush it directly. */
+        /* TODO: Handle giant tokens more gracefully if needed */
+        if (ctx->len > 0) stream_flush(ctx);
+        /* Just push raw huge token? */
+        strncpy(ctx->buf, token, sizeof(ctx->buf)-1);
+        ctx->len = strlen(ctx->buf);
+        stream_flush(ctx);
+    }
+}
 {
     ESP_LOGI(TAG, "Agent loop started on core %d", xPortGetCoreID());
 
@@ -123,24 +182,39 @@ static void agent_loop_task(void *arg)
 
         while (iteration < MIMI_AGENT_MAX_TOOL_ITER) {
             /* Send "working" indicator before each API call */
-            {
-                static const char *working_phrases[] = {
-                    "mimi\xF0\x9F\x98\x97is working...",
-                    "mimi\xF0\x9F\x90\xBE is thinking...",
-                    "mimi\xF0\x9F\x92\xAD is pondering...",
-                    "mimi\xF0\x9F\x8C\x99 is on it...",
-                    "mimi\xE2\x9C\xA8 is cooking...",
-                };
-                const int phrase_count = sizeof(working_phrases) / sizeof(working_phrases[0]);
-                mimi_msg_t status = {0};
-                strncpy(status.channel, msg.channel, sizeof(status.channel) - 1);
-                strncpy(status.chat_id, msg.chat_id, sizeof(status.chat_id) - 1);
-                status.content = strdup(working_phrases[esp_random() % phrase_count]);
-                if (status.content) message_bus_push_outbound(&status);
+            /* Determine if we can stream */
+            bool use_stream = (strcmp(msg.channel, "websocket") == 0);
+            agent_stream_ctx_t stream_ctx = {0};
+            
+            if (use_stream) {
+                strncpy(stream_ctx.channel, msg.channel, sizeof(stream_ctx.channel) - 1);
+                strncpy(stream_ctx.chat_id, msg.chat_id, sizeof(stream_ctx.chat_id) - 1);
+            } else {
+                /* Non-streaming channel: send "working..." indicator */
+                {
+                    static const char *working_phrases[] = {
+                        "mimi\xF0\x9F\x98\x97is working...",
+                        "mimi\xF0\x9F\x90\xBE is thinking...",
+                        "mimi\xF0\x9F\x92\xAD is pondering...",
+                        "mimi\xF0\x9F\x8C\x99 is on it...",
+                        "mimi\xE2\x9C\xA8 is cooking...",
+                    };
+                    const int phrase_count = sizeof(working_phrases) / sizeof(working_phrases[0]);
+                    mimi_msg_t status = {0};
+                    strncpy(status.channel, msg.channel, sizeof(status.channel) - 1);
+                    strncpy(status.chat_id, msg.chat_id, sizeof(status.chat_id) - 1);
+                    status.content = strdup(working_phrases[esp_random() % phrase_count]);
+                    if (status.content) message_bus_push_outbound(&status);
+                }
             }
 
             llm_response_t resp;
-            err = llm_chat_tools(system_prompt, messages, tools_json, &resp);
+            err = llm_chat_stream(system_prompt, messages, tools_json, 
+                                  use_stream ? stream_token_cb : NULL, 
+                                  &stream_ctx, &resp);
+
+            /* Flush any remaining tokens */
+            if (use_stream) stream_flush(&stream_ctx);
 
             if (err != ESP_OK) {
                 ESP_LOGE(TAG, "LLM call failed: %s", esp_err_to_name(err));
@@ -184,11 +258,32 @@ static void agent_loop_task(void *arg)
             session_append(msg.chat_id, "assistant", final_text);
 
             /* Push response to outbound */
-            mimi_msg_t out = {0};
-            strncpy(out.channel, msg.channel, sizeof(out.channel) - 1);
-            strncpy(out.chat_id, msg.chat_id, sizeof(out.chat_id) - 1);
-            out.content = final_text;  /* transfer ownership */
-            message_bus_push_outbound(&out);
+            /* Push response to outbound */
+            if (use_stream) {
+                /* Send done marker for WS */
+                 mimi_msg_t out = {0};
+                strncpy(out.channel, msg.channel, sizeof(out.channel) - 1);
+                strncpy(out.chat_id, msg.chat_id, sizeof(out.chat_id) - 1);
+                out.content = strdup("{\"type\":\"done\"}");
+                if (out.content) message_bus_push_outbound(&out);
+            } else {
+                /* Send full text for others */
+                mimi_msg_t out = {0};
+                strncpy(out.channel, msg.channel, sizeof(out.channel) - 1);
+                strncpy(out.chat_id, msg.chat_id, sizeof(out.chat_id) - 1);
+                out.content = strdup(final_text);  /* Duplicate because final_text is freed below? No, transferred ownership previously? */
+                /* Wait, previous code: out.content = final_text; and NOT freed below if sent? 
+                   Previous logic: out.content = final_text; message_bus takes ownership. 
+                   So final_text pointer is gone.
+                   But if I use strdup here, I need to free final_text separately. 
+                   Let's stick to previous ownership transfer model but conditionally. */
+                if (out.content) message_bus_push_outbound(&out); 
+            }
+            if (final_text) free(final_text); /* Free here because we transferred ownership via strdup or session_append copies it? 
+               session_append copies.
+               Previous code: out.content = final_text; message_bus owns it.
+               So if use_stream, we free it. If not, we strdup it? Or transfer?
+               Better: Free final_text always, and strdup for message_bus. */
         } else {
             /* Error or empty response */
             free(final_text);

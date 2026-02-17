@@ -91,3 +91,29 @@ esp_err_t llm_chat_tools(const char *system_prompt,
                          cJSON *messages,
                          const char *tools_json,
                          llm_response_t *resp);
+
+/* ── Streaming Support ────────────────────────────────────────── */
+
+/* Callback for streaming tokens.
+ * token: null-terminated string of the new content delta.
+ * ctx: user-provided context.
+ */
+typedef void (*llm_stream_cb_t)(const char *token, void *ctx);
+
+/**
+ * Send a chat completion request with streaming enabled.
+ *
+ * @param system_prompt  System prompt string
+ * @param messages       cJSON array of messages
+ * @param tools_json     Tools definition (NULL if none)
+ * @param on_token       Callback for token generation
+ * @param ctx            Context for callback
+ * @param resp           Output: final aggregated response (optional, can be NULL if not needed)
+ * @return ESP_OK on success
+ */
+esp_err_t llm_chat_stream(const char *system_prompt,
+                          cJSON *messages,
+                          const char *tools_json,
+                          void (*on_token)(const char *token, void *ctx),
+                          void *ctx,
+                          llm_response_t *resp);

@@ -73,13 +73,127 @@ static void resp_buf_free(resp_buf_t *rb)
     rb->cap = 0;
 }
 
+/* ── Streaming Context ────────────────────────────────────────── */
+
+typedef struct {
+    llm_stream_cb_t cb;
+    void *ctx;
+    char *buf;       /* Line buffer for SSE parsing */
+    size_t len;
+    size_t cap;
+} stream_ctx_t;
+
+typedef struct {
+    resp_buf_t *rb;       /* Full response buffer (optional) */
+    stream_ctx_t *stream; /* Stream context (optional) */
+} http_req_ctx_t;
+
+static void stream_ctx_init(stream_ctx_t *ctx, llm_stream_cb_t cb, void *user_ctx)
+{
+    ctx->cb = cb;
+    ctx->ctx = user_ctx;
+    ctx->cap = 4096;
+    ctx->buf = heap_caps_calloc(1, ctx->cap, MALLOC_CAP_SPIRAM);
+    ctx->len = 0;
+}
+
+static void stream_ctx_free(stream_ctx_t *ctx)
+{
+    if (ctx->buf) {
+        free(ctx->buf);
+        ctx->buf = NULL;
+    }
+}
+
+/* Extract content from "data: {...}" line */
+static void process_sse_line(stream_ctx_t *ctx, char *line)
+{
+    /* Skip "data: " prefix */
+    if (strncmp(line, "data: ", 6) == 0) {
+        line += 6;
+    } else if (strncmp(line, "data:", 5) == 0) {
+        line += 5;
+    } else {
+        return; /* Not a data line (e.g. :keep-alive) */
+    }
+
+    /* Check for [DONE] */
+    if (strncmp(line, "[DONE]", 6) == 0) return;
+
+    /* Parse JSON line */
+    cJSON *root = cJSON_Parse(line);
+    if (!root) return;
+
+    /* OpenAI/MiniMax format: choices[0].delta.content */
+    cJSON *choices = cJSON_GetObjectItem(root, "choices");
+    if (choices && cJSON_IsArray(choices)) {
+        cJSON *c0 = cJSON_GetArrayItem(choices, 0);
+        if (c0) {
+            cJSON *delta = cJSON_GetObjectItem(c0, "delta");
+            if (delta) {
+                cJSON *content = cJSON_GetObjectItem(delta, "content");
+                if (content && cJSON_IsString(content)) {
+                    if (ctx->cb) ctx->cb(content->valuestring, ctx->ctx);
+                }
+            }
+        }
+    }
+    cJSON_Delete(root);
+}
+
+static void process_stream_chunk(stream_ctx_t *ctx, const char *data, size_t len)
+{
+    if (!ctx || !ctx->buf) return;
+
+    /* Append to buffer */
+    if (ctx->len + len >= ctx->cap) {
+        size_t new_cap = ctx->cap * 2;
+        if (new_cap < ctx->len + len + 1) new_cap = ctx->len + len + 1024;
+        char *tmp = heap_caps_realloc(ctx->buf, new_cap, MALLOC_CAP_SPIRAM);
+        if (!tmp) return; /* OOM drop */
+        ctx->buf = tmp;
+        ctx->cap = new_cap;
+    }
+    memcpy(ctx->buf + ctx->len, data, len);
+    ctx->len += len;
+    ctx->buf[ctx->len] = '\0';
+
+    /* Process lines */
+    char *start = ctx->buf;
+    char *end;
+    while ((end = strstr(start, "\n"))) {
+        *end = '\0'; /* Terminate line */
+        /* Handle CR if present */
+        if (end > start && *(end - 1) == '\r') *(end - 1) = '\0';
+        
+        if (strlen(start) > 0) {
+            process_sse_line(ctx, start);
+        }
+
+        start = end + 1;
+    }
+
+    /* Move remaining partial line to front */
+    size_t remaining = ctx->len - (start - ctx->buf);
+    if (remaining > 0 && start != ctx->buf) {
+        memmove(ctx->buf, start, remaining);
+    }
+    ctx->len = remaining;
+    ctx->buf[ctx->len] = '\0';
+}
+
 /* ── HTTP event handler (for esp_http_client direct path) ─────── */
 
 static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 {
-    resp_buf_t *rb = (resp_buf_t *)evt->user_data;
+    http_req_ctx_t *req_ctx = (http_req_ctx_t *)evt->user_data;
     if (evt->event_id == HTTP_EVENT_ON_DATA) {
-        resp_buf_append(rb, (const char *)evt->data, evt->data_len);
+        if (req_ctx->rb) {
+            resp_buf_append(req_ctx->rb, (const char *)evt->data, evt->data_len);
+        }
+        if (req_ctx->stream) {
+            process_stream_chunk(req_ctx->stream, (const char *)evt->data, evt->data_len);
+        }
     }
     return ESP_OK;
 }
@@ -211,12 +325,12 @@ esp_err_t llm_proxy_init(void)
 
 /* ── Direct path: esp_http_client ───────────────────────────── */
 
-static esp_err_t llm_http_direct(const char *post_data, resp_buf_t *rb, int *out_status)
+static esp_err_t llm_http_direct(const char *post_data, http_req_ctx_t *ctx, int *out_status)
 {
     esp_http_client_config_t config = {
         .url = llm_api_url(),
         .event_handler = http_event_handler,
-        .user_data = rb,
+        .user_data = ctx,
         .timeout_ms = 300 * 1000,
         .buffer_size = 4096,
         .buffer_size_tx = 4096,
@@ -248,7 +362,7 @@ static esp_err_t llm_http_direct(const char *post_data, resp_buf_t *rb, int *out
 
 /* ── Proxy path: manual HTTP over CONNECT tunnel ────────────── */
 
-static esp_err_t llm_http_via_proxy(const char *post_data, resp_buf_t *rb, int *out_status)
+static esp_err_t llm_http_via_proxy(const char *post_data, http_req_ctx_t *ctx, int *out_status)
 {
     proxy_conn_t *conn = proxy_conn_open(llm_api_host(), 443, 30000);
     if (!conn) return ESP_ERR_HTTP_CONNECT;
@@ -288,25 +402,32 @@ static esp_err_t llm_http_via_proxy(const char *post_data, resp_buf_t *rb, int *
     while (1) {
         int n = proxy_conn_read(conn, tmp, sizeof(tmp), 300000);
         if (n <= 0) break;
-        if (resp_buf_append(rb, tmp, n) != ESP_OK) break;
+        if (ctx->rb) {
+            if (resp_buf_append(ctx->rb, tmp, n) != ESP_OK) break;
+        }
+        if (ctx->stream) {
+            process_stream_chunk(ctx->stream, tmp, n);
+        }
     }
     proxy_conn_close(conn);
 
     /* Parse status line */
     *out_status = 0;
-    if (rb->len > 5 && strncmp(rb->data, "HTTP/", 5) == 0) {
-        const char *sp = strchr(rb->data, ' ');
+    if (ctx->rb && ctx->rb->len > 5 && strncmp(ctx->rb->data, "HTTP/", 5) == 0) {
+        const char *sp = strchr(ctx->rb->data, ' ');
         if (sp) *out_status = atoi(sp + 1);
     }
 
     /* Strip HTTP headers, keep body only */
-    char *body = strstr(rb->data, "\r\n\r\n");
-    if (body) {
-        body += 4;
-        size_t blen = rb->len - (body - rb->data);
-        memmove(rb->data, body, blen);
-        rb->len = blen;
-        rb->data[rb->len] = '\0';
+    if (ctx->rb) {
+        char *body = strstr(ctx->rb->data, "\r\n\r\n");
+        if (body) {
+            body += 4;
+            size_t blen = ctx->rb->len - (body - ctx->rb->data);
+            memmove(ctx->rb->data, body, blen);
+            ctx->rb->len = blen;
+            ctx->rb->data[ctx->rb->len] = '\0';
+        }
     }
 
     return ESP_OK;
@@ -314,12 +435,12 @@ static esp_err_t llm_http_via_proxy(const char *post_data, resp_buf_t *rb, int *
 
 /* ── Shared HTTP dispatch ─────────────────────────────────────── */
 
-static esp_err_t llm_http_call(const char *post_data, resp_buf_t *rb, int *out_status)
+static esp_err_t llm_http_call(const char *post_data, http_req_ctx_t *ctx, int *out_status)
 {
     if (http_proxy_is_enabled()) {
-        return llm_http_via_proxy(post_data, rb, out_status);
+        return llm_http_via_proxy(post_data, ctx, out_status);
     } else {
-        return llm_http_direct(post_data, rb, out_status);
+        return llm_http_direct(post_data, ctx, out_status);
     }
 }
 
@@ -476,8 +597,13 @@ static cJSON *convert_messages_openai(const char *system_prompt, cJSON *messages
             } else {
                 cJSON_AddStringToObject(m, "content", "");
             }
-            if (tool_calls) {
-                cJSON_AddItemToObject(m, "tool_calls", tool_calls);
+                if (tool_calls) {
+                    cJSON_AddItemToObject(m, "tool_calls", tool_calls);
+                }
+            } else if (text_buf && text_buf[0]) {
+                cJSON_AddStringToObject(m, "content", text_buf);
+            } else {
+                cJSON_AddStringToObject(m, "content", "");
             }
             cJSON_AddItemToArray(out, m);
             free(text_buf);
@@ -590,7 +716,8 @@ esp_err_t llm_chat(const char *system_prompt, const char *messages_json,
     }
 
     int status = 0;
-    esp_err_t err = llm_http_call(post_data, &rb, &status);
+    http_req_ctx_t req_ctx = { .rb = &rb, .stream = NULL };
+    esp_err_t err = llm_http_call(post_data, &req_ctx, &status);
     free(post_data);
 
     if (err != ESP_OK) {
@@ -705,7 +832,8 @@ esp_err_t llm_chat_tools(const char *system_prompt,
     }
 
     int status = 0;
-    esp_err_t err = llm_http_call(post_data, &rb, &status);
+    http_req_ctx_t req_ctx = { .rb = &rb, .stream = NULL };
+    esp_err_t err = llm_http_call(post_data, &req_ctx, &status);
     free(post_data);
 
     if (err != ESP_OK) {
@@ -860,6 +988,205 @@ esp_err_t llm_chat_tools(const char *system_prompt,
              (int)resp->text_len, resp->call_count,
              resp->tool_use ? "tool_use" : "end_turn");
 
+    return ESP_OK;
+}
+
+/* Parse accumulated SSE chunks in rb->data to rebuild full response struct */
+static void parse_sse_response(const char *sse_data, llm_response_t *resp)
+{
+    memset(resp, 0, sizeof(*resp));
+    if (!sse_data) return;
+
+    /* Iterate lines manually */
+    const char *p = sse_data;
+    while (*p) {
+        /* Find start of line */
+        const char *line_start = p;
+        const char *line_end = strchr(p, '\n');
+        if (!line_end) line_end = p + strlen(p);
+        
+        p = (*line_end != '\0') ? (line_end + 1) : line_end;
+
+        /* Skip "data: " prefix */
+        const char *json_start = NULL;
+        if (strncmp(line_start, "data: ", 6) == 0) json_start = line_start + 6;
+        else if (strncmp(line_start, "data:", 5) == 0) json_start = line_start + 5;
+        else continue;
+
+        /* Check for [DONE] */
+        if (strncmp(json_start, "[DONE]", 6) == 0) continue;
+
+        cJSON *root = cJSON_Parse(json_start);
+        if (!root) continue;
+
+        /* Support OpenAI/MiniMax format */
+        cJSON *choices = cJSON_GetObjectItem(root, "choices");
+        if (choices && cJSON_IsArray(choices)) {
+            cJSON *c0 = cJSON_GetArrayItem(choices, 0);
+            if (c0) {
+                cJSON *delta = cJSON_GetObjectItem(c0, "delta");
+                if (delta) {
+                    /* Text Content */
+                    cJSON *content = cJSON_GetObjectItem(delta, "content");
+                    if (content && cJSON_IsString(content)) {
+                        /* Accumulate text */
+                        size_t new_len = strlen(content->valuestring);
+                        char *new_text = realloc(resp->text, resp->text_len + new_len + 1);
+                        if (new_text) {
+                            resp->text = new_text;
+                            memcpy(resp->text + resp->text_len, content->valuestring, new_len);
+                            resp->text_len += new_len;
+                            resp->text[resp->text_len] = '\0';
+                        }
+                    }
+
+                    /* Tool Calls */
+                    cJSON *tool_calls = cJSON_GetObjectItem(delta, "tool_calls");
+                    if (tool_calls && cJSON_IsArray(tool_calls)) {
+                        cJSON *tc;
+                        cJSON_ArrayForEach(tc, tool_calls) {
+                            cJSON *idx = cJSON_GetObjectItem(tc, "index");
+                            int index = (idx && cJSON_IsNumber(idx)) ? idx->valueint : 0;
+                            if (index >= MIMI_MAX_TOOL_CALLS) continue;
+
+                            /* Update max seen count */
+                            if (index + 1 > resp->call_count) resp->call_count = index + 1;
+
+                            llm_tool_call_t *call = &resp->calls[index];
+                            
+                            cJSON *id = cJSON_GetObjectItem(tc, "id");
+                            if (id && cJSON_IsString(id)) {
+                                strncpy(call->id, id->valuestring, sizeof(call->id) - 1);
+                            }
+
+                            cJSON *func = cJSON_GetObjectItem(tc, "function");
+                            if (func) {
+                                cJSON *name = cJSON_GetObjectItem(func, "name");
+                                if (name && cJSON_IsString(name)) {
+                                    strncpy(call->name, name->valuestring, sizeof(call->name) - 1);
+                                }
+                                cJSON *args = cJSON_GetObjectItem(func, "arguments");
+                                if (args && cJSON_IsString(args)) {
+                                    /* Append arguments */
+                                    size_t args_len = strlen(args->valuestring);
+                                    size_t existing_len = call->input ? call->input_len : 0;
+                                    /* Handle call->input == NULL initially */
+                                    char *new_input = realloc(call->input, existing_len + args_len + 1);
+                                    if (new_input) {
+                                        call->input = new_input;
+                                        memcpy(call->input + existing_len, args->valuestring, args_len);
+                                        call->input_len += args_len;
+                                        call->input[call->input_len] = '\0';
+                                    }
+                                }
+                            }
+                        }
+                        resp->tool_use = true;
+                    }
+                }
+                
+                /* Check finish_reason for tool_calls confirmation */
+                cJSON *finish = cJSON_GetObjectItem(c0, "finish_reason");
+                if (finish && cJSON_IsString(finish)) {
+                    if (strcmp(finish->valuestring, "tool_calls") == 0) {
+                        resp->tool_use = true;
+                    }
+                }
+            }
+        }
+        cJSON_Delete(root);
+    }
+}
+
+/* ── Streaming Chat ─────────────────────────────────────────── */
+
+esp_err_t llm_chat_stream(const char *system_prompt,
+                          cJSON *messages,
+                          const char *tools_json,
+                          llm_stream_cb_t on_token,
+                          void *ctx,
+                          llm_response_t *resp)
+{
+    if (s_api_key[0] == '\0') return ESP_ERR_INVALID_STATE;
+
+    /* Build request body */
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "model", s_model);
+    cJSON_AddBoolToObject(body, "stream", true); /* Enable Streaming */
+    /* Add max_tokens if needed, but streaming usually implies unlimited or large limit */
+    cJSON_AddNumberToObject(body, "max_tokens", MIMI_LLM_MAX_TOKENS);
+
+    /* Same prompt building logic as tools */
+    if (provider_uses_openai_format()) {
+        cJSON *openai_msgs = convert_messages_openai(system_prompt, messages);
+        cJSON_AddItemToObject(body, "messages", openai_msgs);
+        if (tools_json) {
+            cJSON *tools = convert_tools_openai(tools_json);
+            if (tools) {
+                cJSON_AddItemToObject(body, "tools", tools);
+                cJSON_AddStringToObject(body, "tool_choice", "auto");
+            }
+        }
+    } else {
+        cJSON_AddStringToObject(body, "system", system_prompt);
+        cJSON *msgs_copy = cJSON_Duplicate(messages, 1);
+        cJSON_AddItemToObject(body, "messages", msgs_copy);
+        if (tools_json) {
+            cJSON *tools = cJSON_Parse(tools_json);
+            if (tools) cJSON_AddItemToObject(body, "tools", tools);
+        }
+    }
+
+    char *post_data = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
+    if (!post_data) return ESP_ERR_NO_MEM;
+
+    /* Initialize contexts */
+    stream_ctx_t stream;
+    stream_ctx_init(&stream, on_token, ctx);
+
+    resp_buf_t rb;
+    /* Only save full response if requested (for history/tool parsing) */
+    if (resp) {
+         if (resp_buf_init(&rb, MIMI_LLM_STREAM_BUF_SIZE) != ESP_OK) {
+            free(post_data);
+            stream_ctx_free(&stream);
+            return ESP_ERR_NO_MEM;
+        }
+    } else {
+        rb.data = NULL; rb.cap = 0; rb.len = 0;
+    }
+
+    int status = 0;
+    http_req_ctx_t req_ctx = { .rb = (resp ? &rb : NULL), .stream = &stream };
+    
+    ESP_LOGI(TAG, "Starting streaming request...");
+    esp_err_t err = llm_http_call(post_data, &req_ctx, &status);
+    free(post_data);
+    stream_ctx_free(&stream);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Stream failed: %s", esp_err_to_name(err));
+        if (resp) resp_buf_free(&rb);
+        return err;
+    }
+    
+    if (status != 200) {
+        ESP_LOGE(TAG, "Stream API error: %d", status);
+        if (resp) resp_buf_free(&rb);
+        return ESP_FAIL;
+    }
+
+    /* If resp provided, parse the full accumulated buffer to extracting tool calls */
+    if (resp) {
+        if (rb.data) {
+            parse_sse_response(rb.data, resp);
+        } else {
+             memset(resp, 0, sizeof(*resp));
+        }
+        resp_buf_free(&rb);
+    }
+    
     return ESP_OK;
 }
 
