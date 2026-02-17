@@ -600,11 +600,6 @@ static cJSON *convert_messages_openai(const char *system_prompt, cJSON *messages
                 if (tool_calls) {
                     cJSON_AddItemToObject(m, "tool_calls", tool_calls);
                 }
-            } else if (text_buf && text_buf[0]) {
-                cJSON_AddStringToObject(m, "content", text_buf);
-            } else {
-                cJSON_AddStringToObject(m, "content", "");
-            }
             cJSON_AddItemToArray(out, m);
             free(text_buf);
         } else if (strcmp(role->valuestring, "user") == 0) {
