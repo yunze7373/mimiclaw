@@ -17,8 +17,9 @@ static const char *TAG = "web_ui";
 #define WS_PORT 18789
 #endif
 
-/* Helper macro for stringification */
-#define STRINGIFY(x) #x
+/* Helper macro for stringification (two-level for macro expansion) */
+#define STRINGIFY_HELPER(x) #x
+#define STRINGIFY(x) STRINGIFY_HELPER(x)
 
 /* ── SPA HTML Page ───────────────────────────────────────────────── */
 
