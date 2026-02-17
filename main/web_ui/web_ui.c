@@ -699,7 +699,7 @@ static const char *HTML_PAGE =
 "    }\n"
 "\n"
 "    function initGPIO() {\n"
-"      const pins = [1, 2, 4, 5, 12, 13, 14, 15, 16, 17, 18, 21, 38, 43, 44, 48];\n"
+"      const pins = [2, 4, 5, 12, 13, 14, 15, 16, 17, 18, 21, 38];\n"
 "      let html = '';\n"
 "      pins.forEach(p => {\n"
 "        html += '<div style=\"display:flex;align-items:center;background:#2d2d44;padding:4px 8px;border-radius:4px\">';\n"

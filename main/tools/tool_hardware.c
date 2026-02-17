@@ -22,16 +22,30 @@ static bool is_safe_pin(int pin) {
     if (pin < 0 || pin > 48) return false;
     /* System pins */
     if (pin == 0) return false; // Boot
-    if (pin == 1 || pin == 3) return false; // UART0
+    if (pin == 1 || pin == 3) return false; // UART0 (Legacy)
+    if (pin == 43 || pin == 44) return false; // UART0 (S3 Default)
     if (pin >= 6 && pin <= 11) return false; // Flash/PSRAM
     if (pin >= 19 && pin <= 20) return false; // USB JTAG
     /* Display / Touch / I2C (based on current board config) */
-    /* LCD: 39, 40, 41, 42, 45, 46 */
-    if (pin == 39 || pin == 40 || pin == 41 || pin == 42 || pin == 45 || pin == 46) return false;
-    /* I2C/Touch: 47, 48 */
-    if (pin == 47 || pin == 48) return false;
-    
-    return true;
+    /* Restricted pins: 39, 40, 41, 42, 45, 46 (LCD), 47, 48 (I2C/Touch) */
+    /* Safe pins for general use: 2, 4, 5, 12, 13, 14, 15, 16, 17, 18, 21, 38 */
+    switch (pin) {
+        case 2:
+        case 4:
+        case 5:
+        case 12:
+        case 13:
+        case 14:
+        case 15:
+        case 16:
+        case 17:
+        case 18:
+        case 21:
+        case 38:
+            return true;
+        default:
+            return false; // All other pins are considered unsafe for general control
+    }
 }
 
 /* --- Helper: Get internal temperature (if supported) --- */
@@ -119,7 +133,7 @@ esp_err_t tool_gpio_control(const char *input, char *output, size_t out_len) {
 
     /* Configure as output if needed */
     gpio_reset_pin(pin);
-    gpio_set_direction(pin, GPIO_MODE_OUTPUT);
+    gpio_set_direction(pin, GPIO_MODE_INPUT_OUTPUT);
     gpio_set_level(pin, state);
 
 
