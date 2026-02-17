@@ -10,6 +10,6 @@ esp_err_t tool_hardware_init(void);
 void tool_hardware_register_handlers(httpd_handle_t server);
 
 /* Tool function prototypes for LLM usage */
-char *tool_system_status(const char *input);
-char *tool_gpio_control(const char *input);
-char *tool_i2c_scan(const char *input);
+esp_err_t tool_system_status(const char *input, char *output, size_t out_len);
+esp_err_t tool_gpio_control(const char *input, char *output, size_t out_len);
+esp_err_t tool_i2c_scan(const char *input, char *output, size_t out_len);

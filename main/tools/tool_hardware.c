@@ -49,7 +49,8 @@ static float get_cpu_temp(void) {
 /* --- Tool Implementation --- */
 
 /* Get System Status */
-char *tool_system_status(const char *input) {
+/* Get System Status */
+esp_err_t tool_system_status(const char *input, char *output, size_t out_len) {
     cJSON *root = cJSON_CreateObject();
     
     /* CPU Freq */
@@ -70,20 +71,31 @@ char *tool_system_status(const char *input) {
 
     char *out = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
-    return out;
+    
+    if (out) {
+        snprintf(output, out_len, "%s", out);
+        free(out);
+        return ESP_OK;
+    }
+    return ESP_FAIL;
 }
 
 /* GPIO Control */
-char *tool_gpio_control(const char *input) {
+/* GPIO Control */
+esp_err_t tool_gpio_control(const char *input, char *output, size_t out_len) {
     cJSON *in_json = cJSON_Parse(input);
-    if (!in_json) return strdup("Error: Invalid JSON");
+    if (!in_json) {
+        snprintf(output, out_len, "Error: Invalid JSON");
+        return ESP_OK; // Return OK so Agent sees the error message
+    }
 
     cJSON *pin_item = cJSON_GetObjectItem(in_json, "pin");
     cJSON *state_item = cJSON_GetObjectItem(in_json, "state");
     
     if (!pin_item || !cJSON_IsNumber(pin_item) || !state_item || !cJSON_IsBool(state_item)) {
         cJSON_Delete(in_json);
-        return strdup("Error: Missing 'pin' (int) or 'state' (bool)");
+        snprintf(output, out_len, "Error: Missing 'pin' (int) or 'state' (bool)");
+        return ESP_OK;
     }
 
     int pin = pin_item->valueint;
@@ -91,9 +103,8 @@ char *tool_gpio_control(const char *input) {
     cJSON_Delete(in_json);
 
     if (!is_safe_pin(pin)) {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "Error: Pin %d is restricted/system/display pin.", pin);
-        return strdup(buf);
+        snprintf(output, out_len, "Error: Pin %d is restricted/system/display pin.", pin);
+        return ESP_OK;
     }
 
     /* Configure as output if needed */
@@ -101,13 +112,13 @@ char *tool_gpio_control(const char *input) {
     gpio_set_direction(pin, GPIO_MODE_OUTPUT);
     gpio_set_level(pin, state);
 
-    char buf[64];
-    snprintf(buf, sizeof(buf), "OK: GPIO %d set to %s", pin, state ? "HIGH (1)" : "LOW (0)");
-    return strdup(buf);
+    snprintf(output, out_len, "OK: GPIO %d set to %s", pin, state ? "HIGH (1)" : "LOW (0)");
+    return ESP_OK;
 }
 
 /* I2C Scan */
-char *tool_i2c_scan(const char *input) {
+/* I2C Scan */
+esp_err_t tool_i2c_scan(const char *input, char *output, size_t out_len) {
     (void)input; /* Assuming bus 0 for now */
     
     /* Port 0 should be initialized by IMU manager. We just scan. */
@@ -132,16 +143,16 @@ char *tool_i2c_scan(const char *input) {
 
     if (count == 0) {
         cJSON_Delete(root);
-        return strdup("No I2C devices found.");
+        snprintf(output, out_len, "No I2C devices found.");
+        return ESP_OK;
     }
 
     char *out = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     /* Prefix with message for LLM context */
-    char final_out[256];
-    snprintf(final_out, sizeof(final_out), "Detected %d devices: %s", count, out);
+    snprintf(output, out_len, "Detected %d devices: %s", count, out);
     free(out);
-    return strdup(final_out);
+    return ESP_OK;
 }
 
 
@@ -149,10 +160,10 @@ char *tool_i2c_scan(const char *input) {
 
 /* GET /api/hardware/status */
 static esp_err_t hw_status_handler(httpd_req_t *req) {
-    char *json = tool_system_status(NULL);
+    char json[512] = {0};
+    tool_system_status(NULL, json, sizeof(json));
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json, strlen(json));
-    free(json);
     return ESP_OK;
 }
 
@@ -163,18 +174,18 @@ static esp_err_t hw_gpio_handler(httpd_req_t *req) {
     if (ret <= 0) return ESP_FAIL;
     content[ret] = '\0';
 
-    char *res = tool_gpio_control(content);
+    char res[256] = {0};
+    tool_gpio_control(content, res, sizeof(res));
     bool is_error = (strncmp(res, "Error", 5) == 0);
     
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_send(req, res, strlen(res));
-    free(res);
     return is_error ? ESP_FAIL : ESP_OK; /* Or strictly ESP_OK with error msg */
 }
 
 /* POST /api/hardware/scan */
 static esp_err_t hw_scan_handler(httpd_req_t *req) {
-    char *res = tool_i2c_scan(NULL);
+    // char *res = tool_i2c_scan(NULL);
     httpd_resp_set_type(req, "text/plain"); /* Or JSON? scan returns text description for LLM */
     /* For Web UI, we might prefer raw JSON array. But let's stick to tool output for consistency */
     /* Wait, for Web UI list, JSON array is better. 
