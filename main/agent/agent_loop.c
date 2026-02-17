@@ -77,8 +77,7 @@ static cJSON *build_tool_results(const llm_response_t *resp, char *tool_output, 
     return content;
 }
 
-    return content;
-}
+
 
 /* ── Streaming Helpers ────────────────────────────────────────── */
 
@@ -137,6 +136,8 @@ static void stream_token_cb(const char *token, void *arg)
         stream_flush(ctx);
     }
 }
+
+void agent_loop_task(void *pvParameters)
 {
     ESP_LOGI(TAG, "Agent loop started on core %d", xPortGetCoreID());
 
