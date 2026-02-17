@@ -12,7 +12,10 @@
 #include "driver/temperature_sensor.h"
 #include "soc/rtc.h"
 
+esp_err_t tool_hardware_init(void);
+
 static const char *TAG = "tool_hw";
+static temperature_sensor_handle_t temp_handle = NULL;
 
 /* --- Helper: Check Safe Pin --- */
 static bool is_safe_pin(int pin) {
@@ -32,18 +35,13 @@ static bool is_safe_pin(int pin) {
 }
 
 /* --- Helper: Get internal temperature (if supported) --- */
+/* --- Helper: Get internal temperature (if supported) --- */
 static float get_cpu_temp(void) {
-    float tsens_out;
-    temperature_sensor_handle_t temp_handle = NULL;
-    temperature_sensor_config_t temp_sensor = TEMPERATURE_SENSOR_CONFIG_DEFAULT(20, 100);
-    if (temperature_sensor_install(&temp_sensor, &temp_handle) == ESP_OK) {
-        temperature_sensor_enable(temp_handle);
+    float tsens_out = 0.0f;
+    if (temp_handle) {
         temperature_sensor_get_celsius(temp_handle, &tsens_out);
-        temperature_sensor_disable(temp_handle);
-        temperature_sensor_uninstall(temp_handle);
-        return tsens_out;
     }
-    return 0.0f;
+    return tsens_out;
 }
 
 /* --- Tool Implementation --- */
@@ -68,6 +66,18 @@ esp_err_t tool_system_status(const char *input, char *output, size_t out_len) {
 
     /* Uptime */
     cJSON_AddNumberToObject(root, "uptime_s", esp_timer_get_time() / 1000000);
+
+    /* GPIO States */
+    cJSON *gpio_obj = cJSON_CreateObject();
+    cJSON_AddItemToObject(root, "gpio", gpio_obj);
+    for (int i=0; i<=48; i++) {
+        if (is_safe_pin(i)) {
+            int level = gpio_get_level(i);
+            char pin_str[8];
+            snprintf(pin_str, sizeof(pin_str), "%d", i);
+            cJSON_AddNumberToObject(gpio_obj, pin_str, level);
+        }
+    }
 
     char *out = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -227,6 +237,8 @@ static esp_err_t hw_scan_handler(httpd_req_t *req) {
 }
 
 void tool_hardware_register_handlers(httpd_handle_t server) {
+    tool_hardware_init();
+    
     httpd_uri_t uri_status = {
         .uri = "/api/hardware/status",
         .method = HTTP_GET,
@@ -253,6 +265,13 @@ void tool_hardware_register_handlers(httpd_handle_t server) {
 }
 
 esp_err_t tool_hardware_init(void) {
-    /* Nothing special to init, I2C is init by IMU manager */
+    /* Init Temperature Sensor */
+    temperature_sensor_config_t temp_sensor = TEMPERATURE_SENSOR_CONFIG_DEFAULT(20, 100);
+    if (temperature_sensor_install(&temp_sensor, &temp_handle) == ESP_OK) {
+        temperature_sensor_enable(temp_handle);
+        ESP_LOGI(TAG, "Temperature sensor initialized");
+    } else {
+        ESP_LOGW(TAG, "Temperature sensor init failed");
+    }
     return ESP_OK;
 }
