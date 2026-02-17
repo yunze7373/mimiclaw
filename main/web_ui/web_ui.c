@@ -9,6 +9,7 @@
 #include "esp_http_server.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 
 static const char *TAG = "web_ui";
 
@@ -126,6 +127,10 @@ static const char *HTML_PAGE =
 "        <span class='nav-icon'>💬</span>"
 "        <span class='nav-label'>聊天</span>"
 "      </div>"
+"      <div class='nav-item' data-view='agent'>"
+"        <span class='nav-icon'>🤖</span>"
+"        <span class='nav-label'>Agent</span>"
+"      </div>"
 "      <div class='nav-item' data-view='settings'>"
 "        <span class='nav-icon'>⚙️</span>"
 "        <span class='nav-label'>设置</span>"
@@ -195,6 +200,34 @@ static const char *HTML_PAGE =
 "            </select>"
 "            <input type='text' id='chatInput' placeholder='发送消息...' onkeypress='handleChatKey(event)'>"
 "            <button onclick='sendChat()' id='sendBtn'>发送</button>"
+"          </div>"
+"        </div>"
+"      </div>"
+"    </div>"
+""
+"    <!-- Agent View -->"
+"    <div class='view' id='view-agent'>"
+"      <div class='content'>"
+"        <div class='card'>"
+"          <div class='card-header'>"
+"            <span class='card-title'>Agent 配置</span>"
+"            <button class='btn btn-sm btn-primary' onclick='saveAgent()'>保存</button>"
+"          </div>"
+"          <div class='form-group'>"
+"            <label>SOUL.md (性格设定)</label>"
+"            <textarea id='agentSoul' rows='6' style='width:100%;font-family:monospace;font-size:13px;padding:8px;border:1px solid #333;border-radius:6px;background:#1a1a2e;color:#e0e0e0;resize:vertical'></textarea>"
+"          </div>"
+"          <div class='form-group'>"
+"            <label>USER.md (用户信息)</label>"
+"            <textarea id='agentUser' rows='6' style='width:100%;font-family:monospace;font-size:13px;padding:8px;border:1px solid #333;border-radius:6px;background:#1a1a2e;color:#e0e0e0;resize:vertical'></textarea>"
+"          </div>"
+"          <div class='form-group'>"
+"            <label>MEMORY.md (长期记忆)</label>"
+"            <textarea id='agentMemory' rows='6' style='width:100%;font-family:monospace;font-size:13px;padding:8px;border:1px solid #333;border-radius:6px;background:#1a1a2e;color:#e0e0e0;resize:vertical'></textarea>"
+"          </div>"
+"          <div class='form-group'>"
+"            <label>HEARTBEAT.md (定时任务)</label>"
+"            <textarea id='agentHeartbeat' rows='6' style='width:100%;font-family:monospace;font-size:13px;padding:8px;border:1px solid #333;border-radius:6px;background:#1a1a2e;color:#e0e0e0;resize:vertical'></textarea>"
 "          </div>"
 "        </div>"
 "      </div>"
@@ -283,7 +316,7 @@ static const char *HTML_PAGE =
 "      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));"
 "      document.getElementById('view-' + view).classList.add('active');"
 "      document.querySelector('[data-view=' + view + ']').classList.add('active');"
-"      const titles = { dashboard: '仪表盘', chat: '聊天', settings: '设置', tools: '工具' };"
+"      const titles = { dashboard: '仪表盘', chat: '聊天', agent: 'Agent', settings: '设置', tools: '工具' };"
 "      document.getElementById('pageTitle').textContent = titles[view] || view;"
 "    }"
 ""
@@ -461,9 +494,40 @@ static const char *HTML_PAGE =
 "      }"
 "    }"
 ""
+"    /* Agent */"
+"    async function loadAgent() {"
+"      try {"
+"        const resp = await fetch('/api/agent');"
+"        const data = await resp.json();"
+"        document.getElementById('agentSoul').value = data.soul || '';"
+"        document.getElementById('agentUser').value = data.user || '';"
+"        document.getElementById('agentMemory').value = data.memory || '';"
+"        document.getElementById('agentHeartbeat').value = data.heartbeat || '';"
+"      } catch(e) { console.error(e); }"
+"    }"
+""
+"    async function saveAgent() {"
+"      const body = {"
+"        soul: document.getElementById('agentSoul').value,"
+"        user: document.getElementById('agentUser').value,"
+"        memory: document.getElementById('agentMemory').value,"
+"        heartbeat: document.getElementById('agentHeartbeat').value"
+"      };"
+"      try {"
+"        const resp = await fetch('/api/agent', {"
+"          method: 'POST',"
+"          headers: {'Content-Type': 'application/json'},"
+"          body: JSON.stringify(body)"
+"        });"
+"        if (resp.ok) { showToast('Agent 配置已保存', 'success'); }"
+"        else { showToast('保存失败', 'error'); }"
+"      } catch(e) { showToast('保存失败: ' + e, 'error'); }"
+"    }"
+""
 "    /* Init */"
 "    refreshStatus();"
 "    loadSettings();"
+"    loadAgent();"
 "    connectWS();"
 "  </script>"
 "</body>"
@@ -600,6 +664,158 @@ static esp_err_t reboot_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ── Agent file helpers ───────────────────────────────────────── */
+
+static int read_spiffs_file(const char *path, char *buf, size_t size)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) { buf[0] = '\0'; return 0; }
+    int n = fread(buf, 1, size - 1, f);
+    fclose(f);
+    if (n < 0) n = 0;
+    buf[n] = '\0';
+    return n;
+}
+
+static void write_spiffs_file(const char *path, const char *data, size_t len)
+{
+    FILE *f = fopen(path, "w");
+    if (!f) { ESP_LOGE(TAG, "Cannot write %s", path); return; }
+    fwrite(data, 1, len, f);
+    fclose(f);
+}
+
+/* JSON-escape a string into buf, return bytes written */
+static int json_escape(const char *src, char *buf, size_t size)
+{
+    int pos = 0;
+    for (const char *p = src; *p && pos < (int)size - 2; p++) {
+        if (*p == '"')       { if (pos + 2 >= (int)size) break; buf[pos++] = '\\'; buf[pos++] = '"'; }
+        else if (*p == '\\') { if (pos + 2 >= (int)size) break; buf[pos++] = '\\'; buf[pos++] = '\\'; }
+        else if (*p == '\n') { if (pos + 2 >= (int)size) break; buf[pos++] = '\\'; buf[pos++] = 'n'; }
+        else if (*p == '\r') { /* skip */ }
+        else if (*p == '\t') { if (pos + 2 >= (int)size) break; buf[pos++] = '\\'; buf[pos++] = 't'; }
+        else { buf[pos++] = *p; }
+    }
+    buf[pos] = '\0';
+    return pos;
+}
+
+static esp_err_t agent_get_handler(httpd_req_t *req)
+{
+    /* Read each file — use PSRAM if available */
+    char *fbuf = heap_caps_malloc(4096, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    char *ebuf = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    char *resp = heap_caps_malloc(40960, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!fbuf || !ebuf || !resp) {
+        free(fbuf); free(ebuf); free(resp);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+
+    int off = 0;
+    off += snprintf(resp + off, 40960 - off, "{\n");
+
+    read_spiffs_file(MIMI_SOUL_FILE, fbuf, 4096);
+    json_escape(fbuf, ebuf, 8192);
+    off += snprintf(resp + off, 40960 - off, "  \"soul\": \"%s\",\n", ebuf);
+
+    read_spiffs_file(MIMI_USER_FILE, fbuf, 4096);
+    json_escape(fbuf, ebuf, 8192);
+    off += snprintf(resp + off, 40960 - off, "  \"user\": \"%s\",\n", ebuf);
+
+    read_spiffs_file(MIMI_MEMORY_FILE, fbuf, 4096);
+    json_escape(fbuf, ebuf, 8192);
+    off += snprintf(resp + off, 40960 - off, "  \"memory\": \"%s\",\n", ebuf);
+
+    read_spiffs_file(MIMI_HEARTBEAT_FILE, fbuf, 4096);
+    json_escape(fbuf, ebuf, 8192);
+    off += snprintf(resp + off, 40960 - off, "  \"heartbeat\": \"%s\"\n", ebuf);
+
+    off += snprintf(resp + off, 40960 - off, "}");
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, off);
+    free(fbuf); free(ebuf); free(resp);
+    return ESP_OK;
+}
+
+/* Extract a JSON string value, converting \n back to real newlines */
+static int extract_json_string(const char *json, const char *key, char *out, size_t out_size)
+{
+    char search[32];
+    snprintf(search, sizeof(search), "\"%s\"", key);
+    const char *start = strstr(json, search);
+    if (!start) return 0;
+
+    const char *colon = strchr(start + strlen(search), ':');
+    if (!colon) return 0;
+    const char *q1 = strchr(colon + 1, '"');
+    if (!q1) return 0;
+    q1++;
+
+    int pos = 0;
+    for (const char *p = q1; *p && pos < (int)out_size - 1; p++) {
+        if (*p == '\\' && *(p+1)) {
+            p++;
+            if (*p == 'n') out[pos++] = '\n';
+            else if (*p == 't') out[pos++] = '\t';
+            else if (*p == '"') out[pos++] = '"';
+            else if (*p == '\\') out[pos++] = '\\';
+            else { out[pos++] = '\\'; if (pos < (int)out_size - 1) out[pos++] = *p; }
+        } else if (*p == '"') {
+            break;
+        } else {
+            out[pos++] = *p;
+        }
+    }
+    out[pos] = '\0';
+    return pos;
+}
+
+static esp_err_t agent_post_handler(httpd_req_t *req)
+{
+    int total = req->content_len;
+    if (total <= 0 || total > 32768) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Body too large");
+        return ESP_FAIL;
+    }
+
+    char *buf = heap_caps_malloc(total + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    char *val = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf || !val) {
+        free(buf); free(val);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+
+    int received = 0;
+    while (received < total) {
+        int n = httpd_req_recv(req, buf + received, total - received);
+        if (n <= 0) { free(buf); free(val); return ESP_FAIL; }
+        received += n;
+    }
+    buf[received] = '\0';
+
+    int len;
+    len = extract_json_string(buf, "soul", val, 8192);
+    if (len > 0) write_spiffs_file(MIMI_SOUL_FILE, val, len);
+
+    len = extract_json_string(buf, "user", val, 8192);
+    if (len > 0) write_spiffs_file(MIMI_USER_FILE, val, len);
+
+    len = extract_json_string(buf, "memory", val, 8192);
+    if (len > 0) write_spiffs_file(MIMI_MEMORY_FILE, val, len);
+
+    len = extract_json_string(buf, "heartbeat", val, 8192);
+    if (len > 0) write_spiffs_file(MIMI_HEARTBEAT_FILE, val, len);
+
+    free(buf); free(val);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"success\":true}", 16);
+    return ESP_OK;
+}
 /* ── Server Init ───────────────────────────────────────────────── */
 
 esp_err_t web_ui_init(void)
@@ -608,6 +824,7 @@ esp_err_t web_ui_init(void)
     config.server_port = 80;
     config.ctrl_port = 32768;
     config.max_open_sockets = 3;  /* keep low — only serves HTML/JSON */
+    config.max_uri_handlers = 10;
 
     httpd_handle_t server = NULL;
     esp_err_t ret = httpd_start(&server, &config);
@@ -657,6 +874,20 @@ esp_err_t web_ui_init(void)
         .handler = reboot_handler,
     };
     httpd_register_uri_handler(server, &api_reboot_uri);
+
+    httpd_uri_t api_agent_get_uri = {
+        .uri = "/api/agent",
+        .method = HTTP_GET,
+        .handler = agent_get_handler,
+    };
+    httpd_register_uri_handler(server, &api_agent_get_uri);
+
+    httpd_uri_t api_agent_post_uri = {
+        .uri = "/api/agent",
+        .method = HTTP_POST,
+        .handler = agent_post_handler,
+    };
+    httpd_register_uri_handler(server, &api_agent_post_uri);
 
     ESP_LOGI(TAG, "Web UI started on port 80");
     return ESP_OK;
