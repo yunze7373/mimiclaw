@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "mimi.c"
+        "audio/audio.c"
         "display/display.c"
         "display/Vernon_ST7789T/Vernon_ST7789T.c"
         "rgb/rgb.c"
