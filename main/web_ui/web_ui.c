@@ -47,6 +47,7 @@ static const char *HTML_PAGE =
 "<body>"
 "  <div class='container'>"
 "    <h1>MimiClaw 管理</h1>"
+"    <p><a href='/chat'>进入聊天</a></p>"
 
 "    <div class='card'>"
 "      <h2>状态</h2>"
@@ -157,12 +158,160 @@ static const char *HTML_PAGE =
 "</body>"
 "</html>";
 
+/* ── Chat Page ──────────────────────────────────────────────────── */
+
+static const char *CHAT_PAGE =
+"<!DOCTYPE html>"
+"<html>"
+"<head>"
+"  <meta charset='utf-8'>"
+"  <meta name='viewport' content='width=device-width, initial-scale=1'>"
+"  <title>MimiClaw 聊天</title>"
+"  <style>"
+"    * { box-sizing: border-box; margin: 0; padding: 0; }"
+"    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; height: 100vh; display: flex; flex-direction: column; }"
+"    .header { background: #fff; padding: 12px 20px; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; }"
+"    .header h1 { font-size: 18px; color: #333; }"
+"    .header a { color: #007bff; text-decoration: none; font-size: 14px; }"
+"    .chat-container { flex: 1; overflow-y: auto; padding: 20px; max-width: 800px; margin: 0 auto; width: 100%; }"
+"    .message { margin-bottom: 16px; padding: 12px 16px; border-radius: 12px; max-width: 80%; }"
+"    .message.user { background: #007bff; color: white; margin-left: auto; }"
+"    .message.assistant { background: white; color: #333; }"
+"    .message.error { background: #ffe7e7; color: #dc3545; }"
+"    .message .time { font-size: 11px; opacity: 0.7; margin-top: 4px; }"
+"    .input-area { background: white; padding: 16px; border-top: 1px solid #ddd; }"
+"    .input-row { display: flex; gap: 10px; align-items: flex-end; max-width: 800px; margin: 0 auto; }"
+"    .input-row select { padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; min-width: 150px; }"
+"    .input-row input { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 24px; font-size: 14px; }"
+"    .input-row input:focus { outline: none; border-color: #007bff; }"
+"    .input-row button { padding: 12px 24px; background: #007bff; color: white; border: none; border-radius: 24px; cursor: pointer; font-size: 14px; }"
+"    .input-row button:hover { background: #0056b3; }"
+"    .input-row button:disabled { background: #ccc; cursor: not-allowed; }"
+"    .model-select { padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; min-width: 180px; background: white; }"
+"    .connecting { text-align: center; padding: 20px; color: #666; }"
+"  </style>"
+"</head>"
+"<body>"
+"  <div class='header'>"
+"    <h1>MimiClaw 聊天</h1>"
+"    <a href='/'>管理</a>"
+"  </div>"
+"  <div class='chat-container' id='chat'></div>"
+"  <div class='input-area'>"
+"    <div class='input-row'>"
+"      <select class='model-select' id='modelSelect'>"
+"        <option value=''>默认模型</option>"
+"        <option value='claude-opus-4-5'>Claude Opus 4.5</option>"
+"        <option value='claude-sonnet-4-5'>Claude Sonnet 4.5</option>"
+"        <option value='claude-haiku-3-5'>Claude Haiku 3.5</option>"
+"        <option value='gpt-4o'>GPT-4o</option>"
+"        <option value='gpt-4o-mini'>GPT-4o Mini</option>"
+"        <option value='gpt-4-turbo'>GPT-4 Turbo</option>"
+"        <option value='miniMax-Realtime'>MiniMax Realtime</option>"
+"        <option value='miniMax-M2.5'>MiniMax M2.5</option>"
+"        <option value='ollama:llama3'>Ollama Llama3</option>"
+"        <option value='ollama:qwen2.5'>Ollama Qwen2.5</option>"
+"        <option value='ollama:mistral'>Ollama Mistral</option>"
+"      </select>"
+"      <input type='text' id='input' placeholder='发送消息...' onkeypress='handleKey(event)'>"
+"      <button onclick='send()' id='sendBtn'>发送</button>"
+"    </div>"
+"  </div>"
+"  <script>"
+"    let ws = null;"
+"    const chat = document.getElementById('chat');"
+"    const input = document.getElementById('input');"
+"    const sendBtn = document.getElementById('sendBtn');"
+"    const modelSelect = document.getElementById('modelSelect');"
+"    let myChatId = 'web_' + Math.random().toString(36).substr(2, 9);"
+"    let connected = false;"
+"    let waiting = false;"
+"    "
+"    function connect() {"
+"      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';"
+"      const wsUrl = protocol + '//' + location.hostname + ':18789';"
+"      ws = new WebSocket(wsUrl);"
+"      "
+"      ws.onopen = function() {"
+"        connected = true;"
+"        addMessage('system', '已连接到设备');"
+"      };"
+"      "
+"      ws.onmessage = function(event) {"
+"        try {"
+"          const data = JSON.parse(event.data);"
+"          if (data.type === 'response' && data.chat_id === myChatId) {"
+"            addMessage('assistant', data.content);"
+"            waiting = false;"
+"            sendBtn.disabled = false;"
+"            sendBtn.textContent = '发送';"
+"          }"
+"        } catch(e) {}"
+"      };"
+"      "
+"      ws.onclose = function() {"
+"        connected = false;"
+"        addMessage('error', '连接断开，3秒后重连...');"
+"        setTimeout(connect, 3000);"
+"      };"
+"      "
+"      ws.onerror = function() {"
+"        addMessage('error', '连接错误');"
+"      };"
+"    }"
+"    "
+"    function addMessage(role, content) {"
+"      const div = document.createElement('div');"
+"      div.className = 'message ' + role;"
+"      div.innerHTML = content.replace(/\\n/g, '<br>');"
+"      chat.appendChild(div);"
+"      chat.scrollTop = chat.scrollHeight;"
+"    }"
+"    "
+"    function send() {"
+"      if (!connected) { addMessage('error', '未连接到设备'); return; }"
+"      const msg = input.value.trim();"
+"      if (!msg || waiting) return;"
+"      "
+"      addMessage('user', msg);"
+"      input.value = '';"
+"      waiting = true;"
+"      sendBtn.disabled = true;"
+"      sendBtn.textContent = '思考中...';"
+"      "
+"      const model = modelSelect.value;"
+"      let payload = {type: 'message', content: msg, chat_id: myChatId};"
+"      if (model) {"
+"        payload.model = model;"
+"      }"
+"      ws.send(JSON.stringify(payload));"
+"    }"
+"    "
+"    function handleKey(e) {"
+"      if (e.key === 'Enter' && !e.shiftKey) {"
+"        e.preventDefault();"
+"        send();"
+"      }"
+"    }"
+"    "
+"    connect();"
+"  </script>"
+"</body>"
+"</html>";
+
 /* ── HTTP Handlers ─────────────────────────────────────────────── */
 
 static esp_err_t index_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_send(req, HTML_PAGE, strlen(HTML_PAGE));
+    return ESP_OK;
+}
+
+static esp_err_t chat_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_send(req, CHAT_PAGE, strlen(CHAT_PAGE));
     return ESP_OK;
 }
 
@@ -309,6 +458,13 @@ esp_err_t web_ui_init(void)
         .handler = index_handler,
     };
     httpd_register_uri_handler(server, &index_uri);
+
+    httpd_uri_t chat_uri = {
+        .uri = "/chat",
+        .method = HTTP_GET,
+        .handler = chat_handler,
+    };
+    httpd_register_uri_handler(server, &chat_uri);
 
     httpd_uri_t favicon_uri = {
         .uri = "/favicon.ico",

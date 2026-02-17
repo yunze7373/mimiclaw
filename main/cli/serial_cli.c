@@ -430,16 +430,6 @@ static int cmd_scan_audio(int argc, char **argv)
 
 esp_err_t serial_cli_init(void)
 {
-#define REGISTER_SCAN_AUDIO \
-    esp_console_cmd_t scan_audio_cmd = { \
-        .command = "scan_audio", \
-        .help = "Scan GPIOs to find speaker pin (plays tone)", \
-        .func = &cmd_scan_audio, \
-    }; \
-    esp_console_cmd_register(&scan_audio_cmd);
-
-    // ... (existing init code) ...
-
     esp_console_repl_t *repl = NULL;
     esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     repl_config.prompt = "mimi> ";
@@ -664,6 +654,14 @@ esp_err_t serial_cli_init(void)
         .func = &cmd_tool_exec,
     };
     esp_console_cmd_register(&tool_exec_cmd);
+
+    /* scan_audio */
+    esp_console_cmd_t scan_audio_cmd = {
+        .command = "scan_audio",
+        .help = "Scan GPIOs to find speaker pin (plays tone)",
+        .func = &cmd_scan_audio,
+    };
+    esp_console_cmd_register(&scan_audio_cmd);
 
     /* restart */
     esp_console_cmd_t restart_cmd = {
