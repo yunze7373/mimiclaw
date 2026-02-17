@@ -46,3 +46,4 @@ nanobot/
 .DS_Store
 Thumbs.db
 references/
+.claude/settings.local.json
