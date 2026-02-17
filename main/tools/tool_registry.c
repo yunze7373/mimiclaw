@@ -2,7 +2,8 @@
 #include "tools/tool_web_search.h"
 #include "tools/tool_get_time.h"
 #include "tools/tool_files.h"
-#include "tools/tool_cron.h"\n#include "tools/tool_hardware.h"
+#include "tools/tool_cron.h"
+#include "tools/tool_hardware.h"
 
 #include <string.h>
 #include "esp_log.h"
