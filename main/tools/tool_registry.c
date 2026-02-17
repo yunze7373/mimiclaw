@@ -2,7 +2,7 @@
 #include "tools/tool_web_search.h"
 #include "tools/tool_get_time.h"
 #include "tools/tool_files.h"
-#include "tools/tool_cron.h"
+#include "tools/tool_cron.h"\n#include "tools/tool_hardware.h"
 
 #include <string.h>
 #include "esp_log.h"
@@ -154,26 +154,54 @@ esp_err_t tool_registry_init(void)
     /* Register cron_list */
     mimi_tool_t cl = {
         .name = "cron_list",
-        .description = "List all scheduled cron jobs with their status, schedule, and IDs.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{},"
-            "\"required\":[]}",
+        .description = "List all active cron jobs.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
         .execute = tool_cron_list_execute,
     };
     register_tool(&cl);
 
-    /* Register cron_remove */
+     /* Register cron_remove */
     mimi_tool_t cr = {
         .name = "cron_remove",
-        .description = "Remove a scheduled cron job by its ID.",
+        .description = "Remove a cron job by ID.",
         .input_schema_json =
             "{\"type\":\"object\","
-            "\"properties\":{\"job_id\":{\"type\":\"string\",\"description\":\"The 8-character job ID to remove\"}},"
-            "\"required\":[\"job_id\"]}",
+            "\"properties\":{\"id\":{\"type\":\"string\",\"description\":\"Job ID\"}},"
+            "\"required\":[\"id\"]}",
         .execute = tool_cron_remove_execute,
     };
     register_tool(&cr);
+
+    /* --- Power / Hardware --- */
+    /* Register system_status */
+    mimi_tool_t ss = {
+        .name = "system_status",
+        .description = "Get current system status (CPU, Memory, Temp, Uptime).",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
+        .execute = tool_system_status,
+    };
+    register_tool(&ss);
+
+    /* Register gpio_control */
+    mimi_tool_t gc = {
+        .name = "gpio_control",
+        .description = "Control a GPIO pin (High/Low). Returns error if pin is restricted.",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{\"pin\":{\"type\":\"integer\"},\"state\":{\"type\":\"boolean\"}},"
+            "\"required\":[\"pin\",\"state\"]}",
+        .execute = tool_gpio_control,
+    };
+    register_tool(&gc);
+
+    /* Register i2c_scan */
+    mimi_tool_t is = {
+        .name = "i2c_scan",
+        .description = "Scan for connected I2C devices.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
+        .execute = tool_i2c_scan,
+    };
+    register_tool(&is);
 
     build_tools_json();
 
