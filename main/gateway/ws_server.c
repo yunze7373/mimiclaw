@@ -178,14 +178,22 @@ esp_err_t ws_server_send(const char *chat_id, const char *text)
         return ESP_ERR_NOT_FOUND;
     }
 
-    /* Build response JSON */
-    cJSON *resp = cJSON_CreateObject();
-    cJSON_AddStringToObject(resp, "type", "response");
-    cJSON_AddStringToObject(resp, "content", text);
-    cJSON_AddStringToObject(resp, "chat_id", chat_id);
-
-    char *json_str = cJSON_PrintUnformatted(resp);
-    cJSON_Delete(resp);
+    char *json_str = NULL;
+    
+    /* Check for raw JSON marker */
+    if (text[0] == '\x1F') {
+        /* Raw JSON mode: skip marker and use as-is (assuming chat_id is inside) */
+        json_str = strdup(text + 1);
+    } else {
+        /* Build response JSON wrapper */
+        cJSON *resp = cJSON_CreateObject();
+        cJSON_AddStringToObject(resp, "type", "response");
+        cJSON_AddStringToObject(resp, "content", text);
+        cJSON_AddStringToObject(resp, "chat_id", chat_id);
+    
+        json_str = cJSON_PrintUnformatted(resp);
+        cJSON_Delete(resp);
+    }
 
     if (!json_str) return ESP_ERR_NO_MEM;
 

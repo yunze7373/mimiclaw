@@ -95,6 +95,7 @@ static void stream_flush(agent_stream_ctx_t *ctx)
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", "token");
     cJSON_AddStringToObject(root, "token", ctx->buf);
+    cJSON_AddStringToObject(root, "chat_id", ctx->chat_id);
     
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -103,8 +104,17 @@ static void stream_flush(agent_stream_ctx_t *ctx)
         mimi_msg_t out = {0};
         strncpy(out.channel, ctx->channel, sizeof(out.channel) - 1);
         strncpy(out.chat_id, ctx->chat_id, sizeof(out.chat_id) - 1);
-        out.content = json;
-        message_bus_push_outbound(&out);
+        
+        /* Prepend \x1F to indicate raw JSON mode for ws_server */
+        size_t jlen = strlen(json);
+        out.content = malloc(jlen + 2);
+        if (out.content) {
+            out.content[0] = '\x1F';
+            memcpy(out.content + 1, json, jlen);
+            out.content[jlen + 1] = '\0';
+            message_bus_push_outbound(&out);
+        }
+        free(json); /* json was alloc'd by cJSON_Print */
     }
     
     ctx->len = 0;
@@ -116,23 +126,27 @@ static void stream_token_cb(const char *token, void *arg)
     agent_stream_ctx_t *ctx = (agent_stream_ctx_t *)arg;
     
     size_t tlen = strlen(token);
-    /* Flush if buffer full */
-    if (ctx->len + tlen >= sizeof(ctx->buf) - 1) {
+    /* Flush if buffer full or large enough to send */
+    /* Lower threshold to 20 bytes for better responsiveness, 
+       or flush immediately if token contains newline */
+    if (ctx->len + tlen >= sizeof(ctx->buf) - 1 || ctx->len > 32 || strchr(token, '\n')) {
         stream_flush(ctx);
     }
 
-    /* Append to buffer (handle overflow by flushing iteratively if needed, 
-       but tokens are small generally) */
+    /* Append to buffer */
     if (tlen < sizeof(ctx->buf)) {
         strcat(ctx->buf, token);
         ctx->len += tlen;
     } else {
-        /* Giant token? Should not happen with delta logic. Flush it directly. */
-        /* TODO: Handle giant tokens more gracefully if needed */
+        /* Giant token */
         if (ctx->len > 0) stream_flush(ctx);
-        /* Just push raw huge token? */
         strncpy(ctx->buf, token, sizeof(ctx->buf)-1);
         ctx->len = strlen(ctx->buf);
+        stream_flush(ctx);
+    }
+    
+    /* Also flush if buffer has accumulated significant data even if not full */
+    if (ctx->len > 20) {
         stream_flush(ctx);
     }
 }
@@ -268,12 +282,26 @@ void agent_loop_task(void *pvParameters)
             /* Push response to outbound */
             /* Push response to outbound */
             if (use_stream) {
-                /* Send done marker for WS */
+                /* Send done marker for WS (raw JSON) */
                  mimi_msg_t out = {0};
                 strncpy(out.channel, msg.channel, sizeof(out.channel) - 1);
                 strncpy(out.chat_id, msg.chat_id, sizeof(out.chat_id) - 1);
-                out.content = strdup("{\"type\":\"done\"}");
-                if (out.content) message_bus_push_outbound(&out);
+                
+                /* Construct JSON manually since it's simple */
+                /* {"type":"done","chat_id":"..."} */
+                char *json = NULL;
+                asprintf(&json, "{\"type\":\"done\",\"chat_id\":\"%s\"}", msg.chat_id);
+                if (json) {
+                    size_t jlen = strlen(json);
+                    out.content = malloc(jlen + 2);
+                    if (out.content) {
+                        out.content[0] = '\x1F';
+                        memcpy(out.content + 1, json, jlen);
+                        out.content[jlen + 1] = '\0';
+                        message_bus_push_outbound(&out);
+                    }
+                    free(json);
+                }
             } else {
                 /* Send full text for others */
                 mimi_msg_t out = {0};
