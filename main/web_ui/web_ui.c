@@ -723,7 +723,7 @@ static const char *HTML_PAGE =
 "      ];\n"
 "\n"
 "      const renderPin = (item) => {\n"
-"          if (!item.p) return `<div class=\"pin-row label-only\"><span>${item.l}</span></div>`;\n"
+"          if (item.p === undefined) return `<div class=\"pin-row label-only\"><span>${item.l}</span></div>`;\n"
 "          const isSafe = safe.includes(item.p);\n"
 "          let h = `<div class=\"pin-row ${!isSafe?'restricted':''}\" data-pin=\"${item.p}\">`;\n"
 "          h += `<span class=\"pin-lbl\">GPIO ${item.p}</span>`;\n"
