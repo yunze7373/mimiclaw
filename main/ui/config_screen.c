@@ -97,8 +97,8 @@ static void render_config_screen(void)
 
     char qr_text[64] = {0};
     char ip_text[64] = {0};
-    snprintf(qr_text, sizeof(qr_text), "%s:8888", ip);
-    snprintf(ip_text, sizeof(ip_text), "%s:8888", ip);
+    snprintf(qr_text, sizeof(qr_text), "http://%s", ip);
+    snprintf(ip_text, sizeof(ip_text), "%s", ip);
 
     display_show_config_screen(qr_text, ip_text, s_line_ptrs, s_line_count, s_scroll, s_selected, s_sel_offset_px);
 }
