@@ -28,6 +28,7 @@
 #include "rgb/rgb.h"
 #include "cron/cron_service.h"
 #include "heartbeat/heartbeat.h"
+#include "web_ui/web_ui.h"
 
 static const char *TAG = "mimi";
 
@@ -150,6 +151,7 @@ void app_main(void)
             cron_service_start();
             heartbeat_start();
             ESP_ERROR_CHECK(ws_server_start());
+            ESP_ERROR_CHECK(web_ui_init());
 
             /* Outbound dispatch task */
             xTaskCreatePinnedToCore(

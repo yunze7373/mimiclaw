@@ -20,6 +20,8 @@ static const char *TAG = "llm";
 static char s_api_key[LLM_API_KEY_MAX_LEN] = {0};
 static char s_model[LLM_MODEL_MAX_LEN] = MIMI_LLM_DEFAULT_MODEL;
 static char s_provider[LLM_PROVIDER_MAX_LEN] = MIMI_LLM_PROVIDER_DEFAULT;
+static char s_ollama_host[64] = MIMI_SECRET_OLLAMA_HOST;
+static char s_ollama_port[8] = MIMI_SECRET_OLLAMA_PORT;
 
 static void safe_copy(char *dst, size_t dst_size, const char *src)
 {
@@ -89,19 +91,60 @@ static bool provider_is_openai(void)
     return strcmp(s_provider, "openai") == 0;
 }
 
+static bool provider_is_minimax(void)
+{
+    return strcmp(s_provider, "minimax") == 0;
+}
+
+static bool provider_is_minimax_coding(void)
+{
+    return strcmp(s_provider, "minimax_coding") == 0;
+}
+
+static bool provider_is_ollama(void)
+{
+    return strcmp(s_provider, "ollama") == 0;
+}
+
+/* MiniMax uses the same request/response format as OpenAI */
+static bool provider_uses_openai_format(void)
+{
+    return provider_is_openai() || provider_is_minimax() || provider_is_ollama();
+}
+
 static const char *llm_api_url(void)
 {
-    return provider_is_openai() ? MIMI_OPENAI_API_URL : MIMI_LLM_API_URL;
+    if (provider_is_openai()) return MIMI_OPENAI_API_URL;
+    if (provider_is_minimax()) return MIMI_MINIMAX_API_URL;
+    if (provider_is_minimax_coding()) return MIMI_MINIMAX_CODING_URL;
+    if (provider_is_ollama()) {
+        static char url[128];
+        snprintf(url, sizeof(url), "http://%s:%s/v1/chat/completions",
+                 s_ollama_host[0] ? s_ollama_host : "localhost",
+                 s_ollama_port[0] ? s_ollama_port : "11434");
+        return url;
+    }
+    return MIMI_LLM_API_URL;  /* anthropic */
 }
 
 static const char *llm_api_host(void)
 {
-    return provider_is_openai() ? "api.openai.com" : "api.anthropic.com";
+    if (provider_is_openai()) return "api.openai.com";
+    if (provider_is_minimax()) return "api.minimax.io";
+    if (provider_is_minimax_coding()) return "api.minimaxi.com";
+    if (provider_is_ollama()) {
+        return s_ollama_host[0] ? s_ollama_host : "localhost";
+    }
+    return "api.anthropic.com";
 }
 
 static const char *llm_api_path(void)
 {
-    return provider_is_openai() ? "/v1/chat/completions" : "/v1/messages";
+    if (provider_is_openai()) return "/v1/chat/completions";
+    if (provider_is_minimax()) return "/v1/text/chatcompletion_v2";
+    if (provider_is_minimax_coding()) return "/v1/messages";
+    if (provider_is_ollama()) return "/v1/chat/completions";
+    return "/v1/messages";  /* anthropic */
 }
 
 /* ── Init ─────────────────────────────────────────────────────── */
@@ -118,6 +161,12 @@ esp_err_t llm_proxy_init(void)
     if (MIMI_SECRET_MODEL_PROVIDER[0] != '\0') {
         safe_copy(s_provider, sizeof(s_provider), MIMI_SECRET_MODEL_PROVIDER);
     }
+    if (MIMI_SECRET_OLLAMA_HOST[0] != '\0') {
+        safe_copy(s_ollama_host, sizeof(s_ollama_host), MIMI_SECRET_OLLAMA_HOST);
+    }
+    if (MIMI_SECRET_OLLAMA_PORT[0] != '\0') {
+        safe_copy(s_ollama_port, sizeof(s_ollama_port), MIMI_SECRET_OLLAMA_PORT);
+    }
 
     /* NVS overrides take highest priority (set via CLI) */
     nvs_handle_t nvs;
@@ -126,7 +175,6 @@ esp_err_t llm_proxy_init(void)
         size_t len = sizeof(tmp);
         if (nvs_get_str(nvs, MIMI_NVS_KEY_API_KEY, tmp, &len) == ESP_OK && tmp[0]) {
             safe_copy(s_api_key, sizeof(s_api_key), tmp);
-        }
         }
 
         char model_tmp[LLM_MODEL_MAX_LEN] = {0};
@@ -140,10 +188,20 @@ esp_err_t llm_proxy_init(void)
         if (nvs_get_str(nvs, MIMI_NVS_KEY_PROVIDER, provider_tmp, &len) == ESP_OK && provider_tmp[0]) {
             safe_copy(s_provider, sizeof(s_provider), provider_tmp);
         }
+        len = sizeof(tmp);
+        memset(tmp, 0, sizeof(tmp));
+        if (nvs_get_str(nvs, MIMI_NVS_KEY_OLLAMA_HOST, tmp, &len) == ESP_OK && tmp[0]) {
+            safe_copy(s_ollama_host, sizeof(s_ollama_host), tmp);
+        }
+        len = sizeof(tmp);
+        memset(tmp, 0, sizeof(tmp));
+        if (nvs_get_str(nvs, MIMI_NVS_KEY_OLLAMA_PORT, tmp, &len) == ESP_OK && tmp[0]) {
+            safe_copy(s_ollama_port, sizeof(s_ollama_port), tmp);
+        }
         nvs_close(nvs);
     }
 
-    if (s_api_key[0]) {
+    if (s_api_key[0] || provider_is_ollama()) {
         ESP_LOGI(TAG, "LLM proxy initialized (provider: %s, model: %s)", s_provider, s_model);
     } else {
         ESP_LOGW(TAG, "No API key. Use CLI: set_api_key <KEY>");
@@ -170,9 +228,9 @@ static esp_err_t llm_http_direct(const char *post_data, resp_buf_t *rb, int *out
 
     esp_http_client_set_method(client, HTTP_METHOD_POST);
     esp_http_client_set_header(client, "Content-Type", "application/json");
-    if (provider_is_openai()) {
+    if (provider_uses_openai_format()) {
         if (s_api_key[0]) {
-            char auth[192];
+            char auth[320];
             snprintf(auth, sizeof(auth), "Bearer %s", s_api_key);
             esp_http_client_set_header(client, "Authorization", auth);
         }
@@ -198,7 +256,7 @@ static esp_err_t llm_http_via_proxy(const char *post_data, resp_buf_t *rb, int *
     int body_len = strlen(post_data);
     char header[512];
     int hlen = 0;
-    if (provider_is_openai()) {
+    if (provider_uses_openai_format()) {
         hlen = snprintf(header, sizeof(header),
             "POST %s HTTP/1.1\r\n"
             "Host: %s\r\n"
@@ -487,7 +545,7 @@ esp_err_t llm_chat(const char *system_prompt, const char *messages_json,
     cJSON_AddStringToObject(body, "model", s_model);
     cJSON_AddNumberToObject(body, "max_tokens", MIMI_LLM_MAX_TOKENS);
 
-    if (provider_is_openai()) {
+    if (provider_uses_openai_format()) {
         cJSON *messages = cJSON_Parse(messages_json);
         if (!messages) {
             messages = cJSON_CreateArray();
@@ -560,7 +618,7 @@ esp_err_t llm_chat(const char *system_prompt, const char *messages_json,
         return ESP_FAIL;
     }
 
-    if (provider_is_openai()) {
+    if (provider_uses_openai_format()) {
         extract_text_openai(root, response_buf, buf_size);
     } else {
         extract_text_anthropic(root, response_buf, buf_size);
@@ -605,7 +663,7 @@ esp_err_t llm_chat_tools(const char *system_prompt,
     cJSON_AddStringToObject(body, "model", s_model);
     cJSON_AddNumberToObject(body, "max_tokens", MIMI_LLM_MAX_TOKENS);
 
-    if (provider_is_openai()) {
+    if (provider_uses_openai_format()) {
         cJSON *openai_msgs = convert_messages_openai(system_prompt, messages);
         cJSON_AddItemToObject(body, "messages", openai_msgs);
 
@@ -671,7 +729,7 @@ esp_err_t llm_chat_tools(const char *system_prompt,
         return ESP_FAIL;
     }
 
-    if (provider_is_openai()) {
+    if (provider_uses_openai_format()) {
         cJSON *choices = cJSON_GetObjectItem(root, "choices");
         cJSON *choice0 = choices && cJSON_IsArray(choices) ? cJSON_GetArrayItem(choices, 0) : NULL;
         if (choice0) {
@@ -844,4 +902,40 @@ esp_err_t llm_set_provider(const char *provider)
     safe_copy(s_provider, sizeof(s_provider), provider);
     ESP_LOGI(TAG, "Provider set to: %s", s_provider);
     return ESP_OK;
+}
+
+esp_err_t llm_set_ollama_host(const char *host)
+{
+    nvs_handle_t nvs;
+    ESP_ERROR_CHECK(nvs_open(MIMI_NVS_LLM, NVS_READWRITE, &nvs));
+    ESP_ERROR_CHECK(nvs_set_str(nvs, MIMI_NVS_KEY_OLLAMA_HOST, host));
+    ESP_ERROR_CHECK(nvs_commit(nvs));
+    nvs_close(nvs);
+
+    safe_copy(s_ollama_host, sizeof(s_ollama_host), host);
+    ESP_LOGI(TAG, "Ollama host set to: %s", s_ollama_host);
+    return ESP_OK;
+}
+
+esp_err_t llm_set_ollama_port(const char *port)
+{
+    nvs_handle_t nvs;
+    ESP_ERROR_CHECK(nvs_open(MIMI_NVS_LLM, NVS_READWRITE, &nvs));
+    ESP_ERROR_CHECK(nvs_set_str(nvs, MIMI_NVS_KEY_OLLAMA_PORT, port));
+    ESP_ERROR_CHECK(nvs_commit(nvs));
+    nvs_close(nvs);
+
+    safe_copy(s_ollama_port, sizeof(s_ollama_port), port);
+    ESP_LOGI(TAG, "Ollama port set to: %s", s_ollama_port);
+    return ESP_OK;
+}
+
+const char *llm_get_provider(void)
+{
+    return s_provider;
+}
+
+const char *llm_get_model(void)
+{
+    return s_model;
 }

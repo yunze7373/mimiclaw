@@ -108,7 +108,7 @@ idf.py -p PORT flash monitor
 可以在 `mimi_secrets.h` 中编译时设置，也可以通过串口 CLI 随时修改：
 
 ```
-mimi> set_proxy 192.168.1.83 7897   # 设置代理
+mimi> set_proxy 192.168.1.1 7897   # 设置代理
 mimi> clear_proxy                    # 清除代理
 ```
 
@@ -126,7 +126,7 @@ mimi> set_tg_token 123456:ABC...   # 换 Telegram Bot Token
 mimi> set_api_key sk-ant-api03-... # 换 API Key（Anthropic 或 OpenAI）
 mimi> set_model_provider openai    # 切换提供商（anthropic|openai）
 mimi> set_model gpt-4o             # 换模型
-mimi> set_proxy 192.168.1.83 7897  # 设置代理
+mimi> set_proxy 192.168.1.1 7897  # 设置代理
 mimi> clear_proxy                  # 清除代理
 mimi> set_search_key BSA...        # 设置 Brave Search API Key
 mimi> config_show                  # 查看所有配置（脱敏显示）

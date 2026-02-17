@@ -29,6 +29,7 @@ idf_component_register(
         "tools/tool_cron.c"
         "cron/cron_service.c"
         "heartbeat/heartbeat.c"
+        "web_ui/web_ui.c"
     INCLUDE_DIRS
         "."
     EMBED_FILES

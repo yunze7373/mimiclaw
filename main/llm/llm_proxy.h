@@ -28,6 +28,26 @@ esp_err_t llm_set_provider(const char *provider);
 esp_err_t llm_set_model(const char *model);
 
 /**
+ * Save the Ollama host to NVS.
+ */
+esp_err_t llm_set_ollama_host(const char *host);
+
+/**
+ * Save the Ollama port to NVS.
+ */
+esp_err_t llm_set_ollama_port(const char *port);
+
+/**
+ * Get the current LLM provider.
+ */
+const char *llm_get_provider(void);
+
+/**
+ * Get the current LLM model.
+ */
+const char *llm_get_model(void);
+
+/**
  * Send a chat completion request to the configured LLM API (non-streaming).
  *
  * @param system_prompt  System prompt string

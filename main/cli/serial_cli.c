@@ -123,6 +123,42 @@ static int cmd_set_model_provider(int argc, char **argv)
     return 0;
 }
 
+/* --- set_ollama_host command --- */
+static struct {
+    struct arg_str *host;
+    struct arg_end *end;
+} ollama_host_args;
+
+static int cmd_set_ollama_host(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&ollama_host_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, ollama_host_args.end, argv[0]);
+        return 1;
+    }
+    llm_set_ollama_host(ollama_host_args.host->sval[0]);
+    printf("Ollama host set.\n");
+    return 0;
+}
+
+/* --- set_ollama_port command --- */
+static struct {
+    struct arg_str *port;
+    struct arg_end *end;
+} ollama_port_args;
+
+static int cmd_set_ollama_port(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&ollama_port_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, ollama_port_args.end, argv[0]);
+        return 1;
+    }
+    llm_set_ollama_port(ollama_port_args.port->sval[0]);
+    printf("Ollama port set.\n");
+    return 0;
+}
+
 /* --- memory_read command --- */
 static int cmd_memory_read(int argc, char **argv)
 {
@@ -453,7 +489,7 @@ esp_err_t serial_cli_init(void)
     esp_console_cmd_register(&model_cmd);
 
     /* set_model_provider */
-    provider_args.provider = arg_str1(NULL, NULL, "<provider>", "Model provider (anthropic|openai)");
+    provider_args.provider = arg_str1(NULL, NULL, "<provider>", "Model provider (anthropic|openai|minimax|minimax_coding|ollama)");
     provider_args.end = arg_end(1);
     esp_console_cmd_t provider_cmd = {
         .command = "set_model_provider",
@@ -462,6 +498,28 @@ esp_err_t serial_cli_init(void)
         .argtable = &provider_args,
     };
     esp_console_cmd_register(&provider_cmd);
+
+    /* set_ollama_host */
+    ollama_host_args.host = arg_str1(NULL, NULL, "<host>", "Ollama server IP or hostname");
+    ollama_host_args.end = arg_end(1);
+    esp_console_cmd_t ollama_host_cmd = {
+        .command = "set_ollama_host",
+        .help = "Set Ollama server host (e.g. 192.168.1.100)",
+        .func = &cmd_set_ollama_host,
+        .argtable = &ollama_host_args,
+    };
+    esp_console_cmd_register(&ollama_host_cmd);
+
+    /* set_ollama_port */
+    ollama_port_args.port = arg_str1(NULL, NULL, "<port>", "Ollama server port (default: 11434)");
+    ollama_port_args.end = arg_end(1);
+    esp_console_cmd_t ollama_port_cmd = {
+        .command = "set_ollama_port",
+        .help = "Set Ollama server port",
+        .func = &cmd_set_ollama_port,
+        .argtable = &ollama_port_args,
+    };
+    esp_console_cmd_register(&ollama_port_cmd);
 
     /* memory_read */
     esp_console_cmd_t mem_read_cmd = {
@@ -526,7 +584,7 @@ esp_err_t serial_cli_init(void)
     proxy_args.end = arg_end(2);
     esp_console_cmd_t proxy_cmd = {
         .command = "set_proxy",
-        .help = "Set HTTP proxy (e.g. set_proxy 192.168.1.83 7897)",
+        .help = "Set HTTP proxy (e.g. set_proxy 192.168.1.1 7897)",
         .func = &cmd_set_proxy,
         .argtable = &proxy_args,
     };

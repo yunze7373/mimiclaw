@@ -31,6 +31,12 @@
 #ifndef MIMI_SECRET_PROXY_PORT
 #define MIMI_SECRET_PROXY_PORT      ""
 #endif
+#ifndef MIMI_SECRET_OLLAMA_HOST
+#define MIMI_SECRET_OLLAMA_HOST     ""
+#endif
+#ifndef MIMI_SECRET_OLLAMA_PORT
+#define MIMI_SECRET_OLLAMA_PORT     "11434"
+#endif
 #ifndef MIMI_SECRET_SEARCH_KEY
 #define MIMI_SECRET_SEARCH_KEY      ""
 #endif
@@ -64,6 +70,9 @@
 #define MIMI_LLM_MAX_TOKENS          4096
 #define MIMI_LLM_API_URL             "https://api.anthropic.com/v1/messages"
 #define MIMI_OPENAI_API_URL          "https://api.openai.com/v1/chat/completions"
+#define MIMI_MINIMAX_API_URL         "https://api.minimax.io/v1/text/chatcompletion_v2"
+#define MIMI_MINIMAX_CODING_URL      "https://api.minimaxi.com/v1/messages"
+#define MIMI_OLLAMA_API_URL          "http://localhost:11434/v1/chat/completions"
 #define MIMI_LLM_API_VERSION         "2023-06-01"
 #define MIMI_LLM_STREAM_BUF_SIZE     (32 * 1024)
 
@@ -118,3 +127,5 @@
 #define MIMI_NVS_KEY_PROVIDER        "provider"
 #define MIMI_NVS_KEY_PROXY_HOST      "host"
 #define MIMI_NVS_KEY_PROXY_PORT      "port"
+#define MIMI_NVS_KEY_OLLAMA_HOST     "ollama_host"
+#define MIMI_NVS_KEY_OLLAMA_PORT     "ollama_port"
