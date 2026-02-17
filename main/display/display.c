@@ -227,7 +227,7 @@ esp_err_t display_init(void)
         .lcd_cmd_bits = LCD_CMD_BITS,
         .lcd_param_bits = LCD_PARAM_BITS,
         .spi_mode = 0,
-        .trans_queue_depth = 10,
+        .trans_queue_depth = 40,
         .on_color_trans_done = NULL,
         .user_ctx = NULL,
     };

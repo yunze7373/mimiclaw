@@ -144,7 +144,7 @@ void config_screen_init(void)
         .arg = NULL,
     };
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &s_scroll_timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(s_scroll_timer, 150000));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(s_scroll_timer, 250000));
 }
 
 void config_screen_toggle(void)
