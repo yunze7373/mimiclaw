@@ -2,6 +2,9 @@
 #include "../mimi_config.h"
 #include "../llm/llm_proxy.h"
 #include "../wifi/wifi_manager.h"
+#include "../tools/tool_web_search.h"
+#include "../cron/cron_service.h"
+#include "nvs.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -287,17 +290,37 @@ static const char *HTML_PAGE =
 "    <!-- Tools View -->"
 "    <div class='view' id='view-tools'>"
 "      <div class='content'>"
+""
 "        <div class='card'>"
 "          <div class='card-header'>"
-"            <span class='card-title'>可用工具</span>"
+"            <span class='card-title'>🔍 网络搜索 (Brave)</span>"
+"            <button class='btn btn-sm btn-primary' onclick='saveSearchKey()'>保存</button>"
 "          </div>"
-"          <div id='toolsList'>"
-"            <div class='nav-item'>🔍 <span>网络搜索</span></div>"
-"            <div class='nav-item'>📅 <span>获取时间</span></div>"
-"            <div class='nav-item'>📁 <span>文件管理</span></div>"
-"            <div class='nav-item'>⏰ <span>定时任务</span></div>"
+"          <div class='form-group'>"
+"            <label>Brave Search API Key</label>"
+"            <input type='password' id='searchKey' placeholder='BSA-xxxx...'>"
+"          </div>"
+"          <div style='font-size:12px;color:#888;margin-top:4px'>从 <a href='https://brave.com/search/api/' style='color:#6C9BD2' target='_blank'>brave.com/search/api</a> 获取免费 API Key</div>"
+"        </div>"
+""
+"        <div class='card'>"
+"          <div class='card-header'>"
+"            <span class='card-title'>⏰ 定时任务</span>"
+"            <button class='btn btn-sm btn-primary' onclick='loadCronJobs()'>刷新</button>"
+"          </div>"
+"          <div id='cronList' style='font-size:13px;color:#ccc'>加载中...</div>"
+"        </div>"
+""
+"        <div class='card'>"
+"          <div class='card-header'>"
+"            <span class='card-title'>工具状态</span>"
+"          </div>"
+"          <div style='font-size:13px;color:#ccc;line-height:2'>"
+"            <div>📅 <b>获取时间</b>：通过 SNTP 自动同步，无需配置</div>"
+"            <div>📁 <b>文件管理</b>：读 / 写 / 编辑 / 列出 SPIFFS 文件</div>"
 "          </div>"
 "        </div>"
+""
 "      </div>"
 "    </div>"
 "  </div>"
@@ -524,10 +547,66 @@ static const char *HTML_PAGE =
 "      } catch(e) { showToast('保存失败: ' + e, 'error'); }"
 "    }"
 ""
+"    /* Tools - Search Key */"
+"    async function loadSearchKey() {"
+"      try {"
+"        const resp = await fetch('/api/tools/search_key');"
+"        const data = await resp.json();"
+"        document.getElementById('searchKey').value = data.key || '';"
+"      } catch(e) { console.error(e); }"
+"    }"
+""
+"    async function saveSearchKey() {"
+"      const key = document.getElementById('searchKey').value.trim();"
+"      if (!key) { showToast('请输入 API Key', 'error'); return; }"
+"      try {"
+"        const resp = await fetch('/api/tools/search_key', {"
+"          method: 'POST',"
+"          headers: {'Content-Type': 'application/json'},"
+"          body: JSON.stringify({key: key})"
+"        });"
+"        if (resp.ok) { showToast('搜索 Key 已保存', 'success'); }"
+"        else { showToast('保存失败', 'error'); }"
+"      } catch(e) { showToast('保存失败: ' + e, 'error'); }"
+"    }"
+""
+"    /* Tools - Cron Jobs */"
+"    async function loadCronJobs() {"
+"      try {"
+"        const resp = await fetch('/api/tools/cron');"
+"        const data = await resp.json();"
+"        const el = document.getElementById('cronList');"
+"        if (!data.jobs || data.jobs.length === 0) {"
+"          el.innerHTML = '<div style=\"color:#888\">没有活动的定时任务</div>';"
+"          return;"
+"        }"
+"        let html = '';"
+"        data.jobs.forEach(function(j) {"
+"          var sched = j.kind === 'every' ? '每 ' + j.interval_s + ' 秒' : '在 ' + new Date(j.at_epoch * 1000).toLocaleString();"
+"          html += '<div style=\"display:flex;align-items:center;justify-content:space-between;padding:8px;margin:4px 0;background:#1a1a2e;border-radius:6px\">';"
+"          html += '<div><b>' + j.name + '</b><br><span style=\"font-size:11px;color:#888\">' + sched + ' | ' + (j.enabled ? '✅ 启用' : '❌ 禁用') + ' | ID: ' + j.id + '</span></div>';"
+"          html += '<button class=\"btn btn-sm btn-danger\" onclick=\"deleteCronJob(\x27' + j.id + '\x27)\">删除</button>';"
+"          html += '</div>';"
+"        });"
+"        el.innerHTML = html;"
+"      } catch(e) { document.getElementById('cronList').innerHTML = '加载失败'; }"
+"    }"
+""
+"    async function deleteCronJob(id) {"
+"      if (!confirm('确定删除任务 ' + id + ' 吗？')) return;"
+"      try {"
+"        const resp = await fetch('/api/tools/cron?id=' + id, { method: 'DELETE' });"
+"        if (resp.ok) { showToast('已删除', 'success'); loadCronJobs(); }"
+"        else { showToast('删除失败', 'error'); }"
+"      } catch(e) { showToast('删除失败: ' + e, 'error'); }"
+"    }"
+""
 "    /* Init */"
 "    refreshStatus();"
 "    loadSettings();"
 "    loadAgent();"
+"    loadSearchKey();"
+"    loadCronJobs();"
 "    connectWS();"
 "  </script>"
 "</body>"
@@ -816,6 +895,124 @@ static esp_err_t agent_post_handler(httpd_req_t *req)
     httpd_resp_send(req, "{\"success\":true}", 16);
     return ESP_OK;
 }
+
+/* ── Tools API handlers ─────────────────────────────────────── */
+
+static esp_err_t search_key_get_handler(httpd_req_t *req)
+{
+    char key[128] = {0};
+    nvs_handle_t nvs;
+    if (nvs_open(MIMI_NVS_SEARCH, NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = sizeof(key);
+        nvs_get_str(nvs, MIMI_NVS_KEY_API_KEY, key, &len);
+        nvs_close(nvs);
+    }
+
+    /* Mask the key for display: show first 4 + last 4 chars */
+    char masked[128] = {0};
+    size_t klen = strlen(key);
+    if (klen > 8) {
+        snprintf(masked, sizeof(masked), "%.4s****%s", key, key + klen - 4);
+    } else if (klen > 0) {
+        snprintf(masked, sizeof(masked), "****");
+    }
+
+    char resp[256];
+    snprintf(resp, sizeof(resp), "{\"key\":\"%s\",\"configured\":%s}",
+             masked, klen > 0 ? "true" : "false");
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, strlen(resp));
+    return ESP_OK;
+}
+
+static esp_err_t search_key_post_handler(httpd_req_t *req)
+{
+    char buf[256];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) return ESP_FAIL;
+    buf[ret] = '\0';
+
+    /* Extract key */
+    char key[128] = {0};
+    extract_json_string(buf, "key", key, sizeof(key));
+
+    if (key[0] == '\0') {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing key");
+        return ESP_FAIL;
+    }
+
+    tool_web_search_set_key(key);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"success\":true}", 16);
+    return ESP_OK;
+}
+
+static esp_err_t cron_get_handler(httpd_req_t *req)
+{
+    const cron_job_t *jobs;
+    int count;
+    cron_list_jobs(&jobs, &count);
+
+    char *resp = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!resp) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+
+    int off = 0;
+    off += snprintf(resp + off, 8192 - off, "{\"jobs\":[");
+
+    for (int i = 0; i < count; i++) {
+        const cron_job_t *j = &jobs[i];
+        if (i > 0) off += snprintf(resp + off, 8192 - off, ",");
+        off += snprintf(resp + off, 8192 - off,
+            "{\"id\":\"%s\",\"name\":\"%s\",\"enabled\":%s,\"kind\":\"%s\","
+            "\"interval_s\":%lu,\"at_epoch\":%lld,\"next_run\":%lld,\"last_run\":%lld}",
+            j->id, j->name,
+            j->enabled ? "true" : "false",
+            j->kind == CRON_KIND_EVERY ? "every" : "at",
+            (unsigned long)j->interval_s,
+            (long long)j->at_epoch,
+            (long long)j->next_run,
+            (long long)j->last_run);
+    }
+
+    off += snprintf(resp + off, 8192 - off, "]}");
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, off);
+    free(resp);
+    return ESP_OK;
+}
+
+static esp_err_t cron_delete_handler(httpd_req_t *req)
+{
+    /* Get job ID from query string */
+    char query[64] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing query");
+        return ESP_FAIL;
+    }
+
+    char job_id[16] = {0};
+    if (httpd_query_key_value(query, "id", job_id, sizeof(job_id)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing id");
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = cron_remove_job(job_id);
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Job not found");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"success\":true}", 16);
+    return ESP_OK;
+}
+
 /* ── Server Init ───────────────────────────────────────────────── */
 
 esp_err_t web_ui_init(void)
@@ -824,7 +1021,7 @@ esp_err_t web_ui_init(void)
     config.server_port = 80;
     config.ctrl_port = 32768;
     config.max_open_sockets = 3;  /* keep low — only serves HTML/JSON */
-    config.max_uri_handlers = 10;
+    config.max_uri_handlers = 16;
 
     httpd_handle_t server = NULL;
     esp_err_t ret = httpd_start(&server, &config);
@@ -888,6 +1085,34 @@ esp_err_t web_ui_init(void)
         .handler = agent_post_handler,
     };
     httpd_register_uri_handler(server, &api_agent_post_uri);
+
+    httpd_uri_t api_search_key_get = {
+        .uri = "/api/tools/search_key",
+        .method = HTTP_GET,
+        .handler = search_key_get_handler,
+    };
+    httpd_register_uri_handler(server, &api_search_key_get);
+
+    httpd_uri_t api_search_key_post = {
+        .uri = "/api/tools/search_key",
+        .method = HTTP_POST,
+        .handler = search_key_post_handler,
+    };
+    httpd_register_uri_handler(server, &api_search_key_post);
+
+    httpd_uri_t api_cron_get = {
+        .uri = "/api/tools/cron",
+        .method = HTTP_GET,
+        .handler = cron_get_handler,
+    };
+    httpd_register_uri_handler(server, &api_cron_get);
+
+    httpd_uri_t api_cron_del = {
+        .uri = "/api/tools/cron",
+        .method = HTTP_DELETE,
+        .handler = cron_delete_handler,
+    };
+    httpd_register_uri_handler(server, &api_cron_del);
 
     ESP_LOGI(TAG, "Web UI started on port 80");
     return ESP_OK;

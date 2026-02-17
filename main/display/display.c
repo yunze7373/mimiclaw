@@ -60,6 +60,7 @@ typedef struct {
 } qr_draw_ctx_t;
 
 static qr_draw_ctx_t s_qr_ctx;
+static char s_last_qr_text[64] = {0};
 
 extern const uint8_t _binary_banner_320x172_rgb565_start[];
 extern const uint8_t _binary_banner_320x172_rgb565_end[];
@@ -332,12 +333,28 @@ void display_show_config_screen(const char *qr_text, const char *ip_text,
     s_qr_ctx.box = qr_box;
     s_qr_ctx.fg = color_qr_fg;
 
-    esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
-    cfg.display_func = qr_draw_cb;
-    cfg.max_qrcode_version = 6;
-    cfg.qrcode_ecc_level = ESP_QRCODE_ECC_MED;
-
-    esp_qrcode_generate(&cfg, qr_text);
+    /* Only regenerate QR code if text changed */
+    if (strcmp(qr_text, s_last_qr_text) != 0) {
+        esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
+        cfg.display_func = qr_draw_cb;
+        cfg.max_qrcode_version = 6;
+        cfg.qrcode_ecc_level = ESP_QRCODE_ECC_MED;
+        esp_qrcode_generate(&cfg, qr_text);
+        strncpy(s_last_qr_text, qr_text, sizeof(s_last_qr_text) - 1);
+        s_last_qr_text[sizeof(s_last_qr_text) - 1] = '\0';
+    } else {
+        /* Redraw cached QR from previous render's framebuffer data */
+        /* QR area is already drawn since fb_fill_rect(qr_x...) cleared it, */
+        /* so we must regenerate anyway but silently */
+        esp_qrcode_config_t cfg = {
+            .display_func = qr_draw_cb,
+            .max_qrcode_version = 6,
+            .qrcode_ecc_level = ESP_QRCODE_ECC_MED,
+        };
+        esp_log_level_set("QRCODE", ESP_LOG_WARN);
+        esp_qrcode_generate(&cfg, qr_text);
+        esp_log_level_set("QRCODE", ESP_LOG_INFO);
+    }
 
     // IP text under QR
     fb_draw_text_clipped(qr_x, qr_y + qr_box + 4, ip_text, color_fg, 10, 1, 0, BANNER_W);
