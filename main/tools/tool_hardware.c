@@ -112,6 +112,8 @@ esp_err_t tool_gpio_control(const char *input, char *output, size_t out_len) {
     gpio_set_direction(pin, GPIO_MODE_OUTPUT);
     gpio_set_level(pin, state);
 
+
+    ESP_LOGI(TAG, "Setting GPIO %d to %d", pin, state);
     snprintf(output, out_len, "OK: GPIO %d set to %s", pin, state ? "HIGH (1)" : "LOW (0)");
     return ESP_OK;
 }
@@ -150,6 +152,7 @@ esp_err_t tool_i2c_scan(const char *input, char *output, size_t out_len) {
     char *out = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     /* Prefix with message for LLM context */
+    ESP_LOGI(TAG, "I2C scan found %d devices", count);
     snprintf(output, out_len, "Detected %d devices: %s", count, out);
     free(out);
     return ESP_OK;
