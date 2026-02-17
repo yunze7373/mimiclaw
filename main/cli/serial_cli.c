@@ -411,8 +411,35 @@ static int cmd_restart(int argc, char **argv)
     return 0;  /* unreachable */
 }
 
+/* --- scan_audio command --- */
+#include "../audio/audio.h"
+
+static int cmd_scan_audio(int argc, char **argv)
+{
+    int pins[] = {4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 17, 18, 19, 20, 21, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48};
+    printf("Scanning audio pins... Listen for 400Hz tone. (Total: %d pins)\n", (int)(sizeof(pins)/sizeof(pins[0])));
+    
+    for (int i = 0; i < sizeof(pins)/sizeof(pins[0]); i++) {
+        printf("Testing GPIO %d...\n", pins[i]);
+        audio_test_pin(pins[i]);
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    printf("Scan complete. If you heard a beep, note the GPIO number and tell the developer.\n");
+    return 0;
+}
+
 esp_err_t serial_cli_init(void)
 {
+#define REGISTER_SCAN_AUDIO \
+    esp_console_cmd_t scan_audio_cmd = { \
+        .command = "scan_audio", \
+        .help = "Scan GPIOs to find speaker pin (plays tone)", \
+        .func = &cmd_scan_audio, \
+    }; \
+    esp_console_cmd_register(&scan_audio_cmd);
+
+    // ... (existing init code) ...
+
     esp_console_repl_t *repl = NULL;
     esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     repl_config.prompt = "mimi> ";
