@@ -8,7 +8,7 @@ releases/
 sdkconfig
 sdkconfig.old
 dependencies.lock
-components/
+components/lua/src/
 managed_components/
 
 # Generated headers

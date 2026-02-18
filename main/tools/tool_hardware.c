@@ -162,10 +162,35 @@ esp_err_t tool_gpio_control(const char *input, char *output, size_t out_len) {
 }
 
 /* I2C Scan */
+static bool s_i2c_scan_initialized = false;
+
 esp_err_t tool_i2c_scan(const char *input, char *output, size_t out_len) {
     (void)input; /* Assuming bus 0 for now */
-    
-    /* Port 0 should be initialized by IMU manager. We just scan. */
+
+    /* Lazy-init I2C driver if not already done (e.g. IMU disabled) */
+    if (!s_i2c_scan_initialized) {
+        i2c_config_t conf = {
+            .mode = I2C_MODE_MASTER,
+            .sda_io_num = 48,  /* Same as IMU: I2C_Touch_SDA_IO */
+            .scl_io_num = 47,  /* Same as IMU: I2C_Touch_SCL_IO */
+            .sda_pullup_en = GPIO_PULLUP_ENABLE,
+            .scl_pullup_en = GPIO_PULLUP_ENABLE,
+            .master.clk_speed = 400000,
+        };
+        esp_err_t ret = i2c_param_config(0, &conf);
+        if (ret == ESP_OK) {
+            ret = i2c_driver_install(0, I2C_MODE_MASTER, 0, 0, 0);
+            /* ESP_ERR_INVALID_STATE means driver already installed (by IMU) */
+            if (ret == ESP_OK || ret == ESP_ERR_INVALID_STATE) {
+                s_i2c_scan_initialized = true;
+            }
+        }
+        if (!s_i2c_scan_initialized) {
+            snprintf(output, out_len, "Error: I2C driver init failed");
+            return ESP_OK;
+        }
+    }
+
     cJSON *root = cJSON_CreateArray();
     int count = 0;
 
