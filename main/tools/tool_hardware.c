@@ -634,23 +634,38 @@ static esp_err_t hw_gpio_handler(httpd_req_t *req) {
 
 /* POST /api/hardware/scan */
 static esp_err_t hw_scan_handler(httpd_req_t *req) {
+    /* Initialize I2C driver if not already done */
+    static bool i2c_inited = false;
+    if (!i2c_inited) {
+        i2c_config_t conf = {
+            .mode = I2C_MODE_MASTER,
+            .sda_io_num = MIMI_PIN_I2C0_SDA,
+            .scl_io_num = MIMI_PIN_I2C0_SCL,
+            .sda_pullup_en = GPIO_PULLUP_ENABLE,
+            .scl_pullup_en = GPIO_PULLUP_ENABLE,
+            .master.clk_speed = MIMI_I2C0_FREQ_HZ,
+        };
+        i2c_driver_install(I2C_NUM_0, &conf, 0, NULL, 0);
+        i2c_inited = true;
+    }
+
     cJSON *root = cJSON_CreateObject();
     cJSON *devs = cJSON_CreateArray();
     cJSON_AddItemToObject(root, "devices", devs);
-    
+
     for (int i = 1; i < 127; i++) {
         i2c_cmd_handle_t cmd = i2c_cmd_link_create();
         i2c_master_start(cmd);
         i2c_master_write_byte(cmd, (i << 1) | I2C_MASTER_WRITE, true);
         i2c_master_stop(cmd);
-        esp_err_t ret = i2c_master_cmd_begin(0, cmd, 10 / portTICK_PERIOD_MS);
+        esp_err_t ret = i2c_master_cmd_begin(I2C_NUM_0, cmd, 10 / portTICK_PERIOD_MS);
         i2c_cmd_link_delete(cmd);
 
         if (ret == ESP_OK) {
             cJSON_AddItemToArray(devs, cJSON_CreateNumber(i));
         }
     }
-    
+
     char *out = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, out, strlen(out));
