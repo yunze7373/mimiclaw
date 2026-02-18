@@ -30,7 +30,7 @@ static const struct {
     const char *key;
     int default_val;
 } s_default_pins[] = {
-    {"rgb_pin", 38},
+    {"rgb_pin", 48},
     {"i2c0_sda", 41},
     {"i2c0_scl", 42},
     {"i2s0_ws", 4},
@@ -150,6 +150,7 @@ static bool is_safe_pin(int pin) {
         case 18:
         case 21:
         case 38:
+        case 48:
             return true;
         default:
             return false; // All other pins are considered unsafe for general control

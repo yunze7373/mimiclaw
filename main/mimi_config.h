@@ -140,7 +140,7 @@
  * See HARD_WRITING.md for wiring details
  * ======================================== */
 /* On-board RGB LED */
-#define MIMI_PIN_RGB_LED             38   /* WS2812 Data */
+#define MIMI_PIN_RGB_LED             48   /* WS2812 Data */
 
 /* Volume Buttons */
 #define MIMI_PIN_VOL_DOWN           39   /* Volume down / mute button */
