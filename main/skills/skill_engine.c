@@ -94,6 +94,16 @@ static exec_guard_t s_guard = {0};
 static SemaphoreHandle_t s_lua_lock = NULL;
 static SemaphoreHandle_t s_install_lock = NULL;
 static uint32_t s_install_seq = 0;
+typedef struct {
+    bool in_progress;
+    uint32_t seq;
+    int64_t started_us;
+    int64_t finished_us;
+    char stage[32];
+    char url[256];
+    char last_error[64];
+} install_status_t;
+static install_status_t s_install_status = {0};
 
 typedef struct {
     bool used;
@@ -135,6 +145,36 @@ static bool slot_has_declared_event(int slot_idx, const char *event_name)
         if (strcmp(slot->event_names[i], event_name) == 0) return true;
     }
     return false;
+}
+
+static void install_status_begin(const char *url)
+{
+    s_install_status.in_progress = true;
+    s_install_status.seq++;
+    s_install_status.started_us = esp_timer_get_time();
+    s_install_status.finished_us = 0;
+    snprintf(s_install_status.stage, sizeof(s_install_status.stage), "%s", "prepare");
+    snprintf(s_install_status.url, sizeof(s_install_status.url), "%s", url ? url : "");
+    s_install_status.last_error[0] = '\0';
+}
+
+static void install_status_step(const char *stage)
+{
+    if (!stage || !stage[0]) return;
+    snprintf(s_install_status.stage, sizeof(s_install_status.stage), "%s", stage);
+}
+
+static void install_status_finish(esp_err_t err)
+{
+    s_install_status.in_progress = false;
+    s_install_status.finished_us = esp_timer_get_time();
+    if (err == ESP_OK) {
+        snprintf(s_install_status.stage, sizeof(s_install_status.stage), "%s", "done");
+        s_install_status.last_error[0] = '\0';
+    } else {
+        snprintf(s_install_status.stage, sizeof(s_install_status.stage), "%s", "failed");
+        snprintf(s_install_status.last_error, sizeof(s_install_status.last_error), "%s", esp_err_to_name(err));
+    }
 }
 
 static cJSON *lua_value_to_cjson(lua_State *L, int idx);
@@ -1820,6 +1860,7 @@ static void bytes_to_hex_lower(const uint8_t *bytes, size_t n, char *out, size_t
 static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const char *checksum_hex)
 {
     if (!url || !url[0]) return ESP_ERR_INVALID_ARG;
+    install_status_step("validate");
     int free_slot_idx = find_free_slot_idx();
 
     char expected_sha256[65] = {0};
@@ -1885,6 +1926,7 @@ static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const 
     FILE *f = fopen(staging_path, "wb");
     if (!f) return ESP_FAIL;
 
+    install_status_step("download");
     esp_http_client_config_t cfg = {.url = url, .timeout_ms = 10000};
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     esp_err_t ret = esp_http_client_open(client, 0);
@@ -1929,6 +1971,7 @@ static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const 
         return ESP_FAIL;
     }
     if (verify_checksum) {
+        install_status_step("verify_checksum");
         mbedtls_sha256_finish(&sha_ctx, sha_bin);
         mbedtls_sha256_free(&sha_ctx);
         bytes_to_hex_lower(sha_bin, sizeof(sha_bin), sha_hex, sizeof(sha_hex));
@@ -1941,6 +1984,7 @@ static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const 
         }
     }
     if (has_suffix(fname, ".lua")) {
+        install_status_step("activate_lua");
         bool had_old = file_exists_regular(out_path);
         remove(backup_path);
         if (had_old && rename(out_path, backup_path) != 0) {
@@ -1998,6 +2042,7 @@ static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const 
     }
 
     if (has_suffix(fname, ".tar")) {
+        install_status_step("extract_tar");
         char extract_dir[512];
         if (!build_staging_file_path(extract_dir, sizeof(extract_dir), staging_dir, "extract", install_tag, ".dir")) {
             remove(staging_path);
@@ -2027,6 +2072,7 @@ static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const 
             return ESP_ERR_INVALID_ARG;
         }
 
+        install_status_step("activate_bundle");
         char final_dir[512];
         if (snprintf(final_dir, sizeof(final_dir), "%s/%s", SKILL_DIR, meta.name) <= 0 ||
             strlen(final_dir) >= sizeof(final_dir)) {
@@ -2111,7 +2157,9 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
     if (xSemaphoreTake(s_install_lock, pdMS_TO_TICKS(15000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
+    install_status_begin(url);
     esp_err_t ret = skill_engine_install_with_checksum_impl(url, checksum_hex);
+    install_status_finish(ret);
     xSemaphoreGive(s_install_lock);
     return ret;
 }
@@ -2175,4 +2223,28 @@ char *skill_engine_list_json(void)
 int skill_engine_get_count(void)
 {
     return count_used_slots();
+}
+
+char *skill_engine_install_status_json(void)
+{
+    cJSON *obj = cJSON_CreateObject();
+    if (!obj) return NULL;
+
+    cJSON_AddBoolToObject(obj, "in_progress", s_install_status.in_progress);
+    cJSON_AddNumberToObject(obj, "seq", (double)s_install_status.seq);
+    cJSON_AddStringToObject(obj, "stage", s_install_status.stage);
+    cJSON_AddStringToObject(obj, "url", s_install_status.url);
+    cJSON_AddStringToObject(obj, "last_error", s_install_status.last_error);
+    cJSON_AddNumberToObject(obj, "started_us", (double)s_install_status.started_us);
+    cJSON_AddNumberToObject(obj, "finished_us", (double)s_install_status.finished_us);
+    int64_t end_us = s_install_status.in_progress ? esp_timer_get_time() : s_install_status.finished_us;
+    int64_t elapsed_ms = 0;
+    if (s_install_status.started_us > 0 && end_us >= s_install_status.started_us) {
+        elapsed_ms = (end_us - s_install_status.started_us) / 1000;
+    }
+    cJSON_AddNumberToObject(obj, "elapsed_ms", (double)elapsed_ms);
+
+    char *json = cJSON_PrintUnformatted(obj);
+    cJSON_Delete(obj);
+    return json;
 }

@@ -1241,6 +1241,19 @@ static esp_err_t skills_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t skills_install_status_handler(httpd_req_t *req)
+{
+    char *json = skill_engine_install_status_json();
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+    free(json);
+    return ESP_OK;
+}
+
 static esp_err_t skills_install_handler(httpd_req_t *req)
 {
     if (req->content_len <= 0 || req->content_len > 1024) {
@@ -1426,6 +1439,13 @@ esp_err_t web_ui_init(void)
         .handler = skills_get_handler,
     };
     httpd_register_uri_handler(server, &api_skills_get);
+
+    httpd_uri_t api_skills_install_status = {
+        .uri = "/api/skills/install_status",
+        .method = HTTP_GET,
+        .handler = skills_install_status_handler,
+    };
+    httpd_register_uri_handler(server, &api_skills_install_status);
 
     httpd_uri_t api_skills_install = {
         .uri = "/api/skills/install",
