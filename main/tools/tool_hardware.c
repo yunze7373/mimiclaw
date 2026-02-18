@@ -206,8 +206,8 @@ esp_err_t tool_system_status(const char *input, char *output, size_t out_len) {
     multi_heap_info_t info;
     heap_caps_get_info(&info, MALLOC_CAP_INTERNAL);
     cJSON_AddNumberToObject(root, "largest_free_block", info.largest_free_block);
-    cJSON_AddNumberToObject(root, "allocated_blocks", info.allocated_bytes);
-    cJSON_AddNumberToObject(root, "free_blocks", info.free_bytes);
+    cJSON_AddNumberToObject(root, "allocated_blocks", info.allocated_blocks);
+    cJSON_AddNumberToObject(root, "free_blocks", info.free_blocks);
 
     /* Temp */
     cJSON_AddNumberToObject(root, "cpu_temp_c", get_cpu_temp());
