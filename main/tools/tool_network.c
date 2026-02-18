@@ -237,13 +237,28 @@ static void ble_on_sync(void) {
     ESP_LOGI(TAG, "NimBLE host synced");
 }
 
-/* BLE Scan tool */
+/* BLE Scan tool — lazy-initializes NimBLE on first call */
 esp_err_t tool_ble_scan(const char *input, char *output, size_t out_len) {
     (void)input;
 
+    /* Lazy init: start NimBLE only when BLE scan is first requested.
+     * This avoids consuming ~80KB internal RAM at boot. */
     if (!s_ble_initialized) {
-        snprintf(output, out_len, "Error: BLE not initialized. Check sdkconfig BT settings.");
-        return ESP_OK;
+        ESP_LOGI(TAG, "Initializing NimBLE (lazy, first ble_scan call)...");
+        esp_err_t ret = nimble_port_init();
+        if (ret != ESP_OK) {
+            snprintf(output, out_len,
+                     "Error: NimBLE init failed: %s", esp_err_to_name(ret));
+            return ESP_OK;
+        }
+
+        ble_hs_cfg.sync_cb = ble_on_sync;
+        nimble_port_freertos_init(ble_host_task);
+        s_ble_initialized = true;
+
+        /* Give NimBLE host a moment to sync */
+        vTaskDelay(pdMS_TO_TICKS(500));
+        ESP_LOGI(TAG, "NimBLE initialized for BLE scanning");
     }
 
     /* Reset results */
@@ -316,23 +331,9 @@ esp_err_t tool_ble_scan(const char *input, char *output, size_t out_len) {
     return ESP_OK;
 }
 
-/* Initialize BLE (NimBLE) */
+/* Network init — NimBLE is lazy-initialized on first ble_scan call */
 esp_err_t tool_network_init(void) {
-    /* Initialize NimBLE */
-    esp_err_t ret = nimble_port_init();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "NimBLE init failed: %s. BLE scan will be unavailable.",
-                 esp_err_to_name(ret));
-        return ESP_OK; /* Non-fatal: WiFi tools still work */
-    }
-
-    /* Set sync callback */
-    ble_hs_cfg.sync_cb = ble_on_sync;
-
-    /* Start NimBLE host task */
-    nimble_port_freertos_init(ble_host_task);
-
-    s_ble_initialized = true;
-    ESP_LOGI(TAG, "NimBLE initialized for BLE scanning");
+    ESP_LOGI(TAG, "Network tools ready (BLE will init on first scan)");
     return ESP_OK;
 }
+
