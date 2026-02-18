@@ -20,6 +20,8 @@
 #include "soc/rtc.h"
 #include "rgb/rgb.h"
 #include "mimi_config.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #define HW_NVS_NAMESPACE "hw_config"
 
@@ -182,22 +184,39 @@ static float get_cpu_temp(void) {
 /* Get System Status */
 esp_err_t tool_system_status(const char *input, char *output, size_t out_len) {
     cJSON *root = cJSON_CreateObject();
-    
+
     /* CPU Freq */
     rtc_cpu_freq_config_t conf;
     rtc_clk_cpu_freq_get_config(&conf);
     cJSON_AddNumberToObject(root, "cpu_freq_mhz", conf.freq_mhz);
 
-    /* Heap */
-    cJSON_AddNumberToObject(root, "free_heap_internal", heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-    cJSON_AddNumberToObject(root, "free_heap_psram", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    /* Detailed Heap Info */
+    size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    size_t internal_total = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
+    size_t psram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+
+    cJSON_AddNumberToObject(root, "free_heap_internal", internal_free);
+    cJSON_AddNumberToObject(root, "total_heap_internal", internal_total);
+    cJSON_AddNumberToObject(root, "free_heap_psram", psram_free);
+    cJSON_AddNumberToObject(root, "total_heap_psram", psram_total);
     cJSON_AddNumberToObject(root, "min_free_heap", esp_get_minimum_free_heap_size());
+
+    /* Largest free block */
+    multi_heap_info_t info;
+    heap_caps_get_info(&info, MALLOC_CAP_INTERNAL);
+    cJSON_AddNumberToObject(root, "largest_free_block", info.largest_free_block);
+    cJSON_AddNumberToObject(root, "allocated_blocks", info.allocated_bytes);
+    cJSON_AddNumberToObject(root, "free_blocks", info.free_bytes);
 
     /* Temp */
     cJSON_AddNumberToObject(root, "cpu_temp_c", get_cpu_temp());
 
     /* Uptime */
     cJSON_AddNumberToObject(root, "uptime_s", esp_timer_get_time() / 1000000);
+
+    /* Task count */
+    cJSON_AddNumberToObject(root, "task_count", uxTaskGetNumberOfTasks());
 
     /* GPIO States */
     cJSON *gpio_obj = cJSON_CreateObject();

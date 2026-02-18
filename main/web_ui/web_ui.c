@@ -833,12 +833,19 @@ static const char *HTML_PAGE =
 "      try {\n"
 "        const resp = await fetch('/api/hardware/status');\n"
 "        const data = await resp.json();\n"
-"        let html = '<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:8px;color:#1e293b;font-weight:600\">';\n"
-"        html += '<div>CPU: ' + data.cpu_freq_mhz + ' MHz</div>';\n"
-"        html += '<div>Temp: ' + data.cpu_temp_c.toFixed(1) + ' °C</div>';\n"
-"        html += '<div>Heap (Int): ' + (data.free_heap_internal/1024).toFixed(1) + ' KB</div>';\n"
-"        html += '<div>Heap (PSRAM): ' + (data.free_heap_psram/1024).toFixed(1) + ' KB</div>';\n"
-"        html += '<div>Uptime: ' + data.uptime_s + ' s</div></div>';\n"
+"        let html = '<div style=\"display:grid;grid-template-columns:repeat(2,1fr);gap:8px;font-size:13px;\">';\n"
+"        html += '<div><span style=\"color:#666\">CPU:</span> ' + data.cpu_freq_mhz + ' MHz</div>';\n"
+"        html += '<div><span style=\"color:#666\">Temp:</span> ' + data.cpu_temp_c.toFixed(1) + ' °C</div>';\n"
+"        html += '<div><span style=\"color:#666\">Tasks:</span> ' + data.task_count + '</div>';\n"
+"        html += '<div><span style=\"color:#666\">Uptime:</span> ' + formatUptime(data.uptime_s) + '</div>';\n"
+"        html += '<div style=\"grid-column:span 2;margin-top:8px;padding-top:8px;border-top:1px solid #eee;\"><strong>内存:</strong></div>';\n"
+"        const intPct = data.total_heap_internal ? (data.total_heap_internal - data.free_heap_internal) / data.total_heap_internal * 100 : 0;\n"
+"        const psramPct = data.total_heap_psram ? (data.total_heap_psram - data.free_heap_psram) / data.total_heap_psram * 100 : 0;\n"
+"        html += '<div><span style=\"color:#666\">内部:</span> ' + (data.free_heap_internal/1024).toFixed(1) + ' KB / ' + (data.total_heap_internal/1024).toFixed(0) + ' KB (' + intPct.toFixed(0) + '% used)</div>';\n"
+"        html += '<div><span style=\"color:#666\">PSRAM:</span> ' + (data.free_heap_psram/1024).toFixed(0) + ' KB / ' + (data.total_heap_psram/1024).toFixed(0) + ' KB (' + psramPct.toFixed(0) + '% used)</div>';\n"
+"        html += '<div><span style=\"color:#666\">最大块:</span> ' + (data.largest_free_block/1024).toFixed(1) + ' KB</div>';\n"
+"        html += '<div><span style=\"color:#666\">最小空闲:</span> ' + (data.min_free_heap/1024).toFixed(1) + ' KB</div>';\n"
+"        html += '</div>';\n"
 "        document.getElementById('hw-status').innerHTML = html;\n"
 "        if(data.gpio) {\n"
 "           for (const [p, lvl] of Object.entries(data.gpio)) {\n"
@@ -851,6 +858,13 @@ static const char *HTML_PAGE =
 "           }\n"
 "        }\n"
 "      } catch(e) { document.getElementById('hw-status').textContent = 'Error loading status'; }\n"
+"    }\n"
+"\n"
+"    function formatUptime(s) {\n"
+"      if (s < 60) return s + 's';\n"
+"      if (s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';\n"
+"      if (s < 86400) return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';\n"
+"      return Math.floor(s/86400) + 'd ' + Math.floor((s%86400)/3600) + 'h';\n"
 "    }\n"
 "\n"
 "    async function scanI2C() {\n"
@@ -1782,7 +1796,7 @@ esp_err_t web_ui_init(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.ctrl_port = 32768;
-    config.max_open_sockets = 3;  /* keep low — only serves HTML/JSON */
+    config.max_open_sockets = 2;  /* keep low — only serves HTML/JSON */
     config.max_uri_handlers = 32;
 
     httpd_handle_t server = NULL;
