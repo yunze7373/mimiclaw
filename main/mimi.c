@@ -8,6 +8,7 @@
 #include "esp_heap_caps.h"
 #include "esp_spiffs.h"
 #include "nvs_flash.h"
+#include "cJSON.h"
 
 #include "mimi_config.h"
 #include "bus/message_bus.h"
@@ -22,6 +23,7 @@
 #include "proxy/http_proxy.h"
 #include "tools/tool_registry.h"
 #include "display/display.h"
+#include "display/ssd1306.h"
 #include "buttons/button_driver.h"
 #include "ui/config_screen.h"
 #include "imu/imu_manager.h"
@@ -32,6 +34,16 @@
 #include "skills/skill_engine.h"
 
 static const char *TAG = "mimi";
+
+/* PSRAM malloc wrapper for cJSON hooks */
+static void *psram_malloc(size_t sz) {
+    void *p = heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!p) {
+        /* Fallback to internal if PSRAM fails (should be rare) */
+        p = malloc(sz);
+    }
+    return p;
+}
 
 static esp_err_t init_nvs(void)
 {
@@ -93,6 +105,16 @@ static void outbound_dispatch_task(void *arg)
 
 void app_main(void)
 {
+    /* ── Redirect cJSON to PSRAM ──────────────────────────────── */
+    /* This is critical: cJSON uses malloc() internally for ALL JSON
+     * operations. Without this, every JSON parse/build/serialize eats
+     * internal SRAM, leaving nothing for TLS/AES DMA buffers. */
+    cJSON_Hooks hooks = {
+        .malloc_fn = psram_malloc,
+        .free_fn = free
+    };
+    cJSON_InitHooks(&hooks);
+
     /* Silence noisy components */
     esp_log_level_set("esp-x509-crt-bundle", ESP_LOG_WARN);
 
@@ -136,6 +158,14 @@ void app_main(void)
 
     /* Initialize RGB LED (lazy init in tool, but try here for early boot feedback) */
     rgb_init();
+
+    /* Initialize SSD1306 OLED if connected */
+    if (ssd1306_is_connected()) {
+        ssd1306_init();
+        ssd1306_clear();
+        ssd1306_draw_string(0, 0, "MimiClaw Ready!");
+        ssd1306_update();
+    }
 
     /* Load Lua hardware skills (must be after SPIFFS + tool_registry) */
     ESP_ERROR_CHECK(skill_engine_init());

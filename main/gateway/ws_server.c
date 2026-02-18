@@ -4,6 +4,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "cJSON.h"
@@ -137,7 +138,9 @@ static esp_err_t ws_handler(httpd_req_t *req)
         mimi_msg_t msg = {0};
         strncpy(msg.channel, MIMI_CHAN_WEBSOCKET, sizeof(msg.channel) - 1);
         strncpy(msg.chat_id, chat_id, sizeof(msg.chat_id) - 1);
-        msg.content = strdup(content->valuestring);
+        size_t clen = strlen(content->valuestring);
+        msg.content = heap_caps_malloc(clen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (msg.content) memcpy(msg.content, content->valuestring, clen + 1);
         if (msg.content) {
             message_bus_push_inbound(&msg);
         }
@@ -190,7 +193,9 @@ esp_err_t ws_server_send(const char *chat_id, const char *text)
     /* Check for raw JSON marker */
     if (text[0] == '\x1F') {
         /* Raw JSON mode: skip marker and use as-is (assuming chat_id is inside) */
-        json_str = strdup(text + 1);
+        size_t slen = strlen(text + 1);
+        json_str = heap_caps_malloc(slen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (json_str) memcpy(json_str, text + 1, slen + 1);
     } else {
         /* Build response JSON wrapper */
         cJSON *resp = cJSON_CreateObject();

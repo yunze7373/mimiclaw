@@ -75,7 +75,7 @@ static void send_status_msg(const char *channel, const char *chat_id, const char
         
         /* Prepend \x1F for raw JSON mode */
         size_t jlen = strlen(json);
-        out.content = malloc(jlen + 2);
+        out.content = heap_caps_malloc(jlen + 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (out.content) {
             out.content[0] = '\x1F';
             memcpy(out.content + 1, json, jlen);
@@ -146,7 +146,7 @@ static void stream_flush(agent_stream_ctx_t *ctx)
         
         /* Prepend \x1F to indicate raw JSON mode for ws_server */
         size_t jlen = strlen(json);
-        out.content = malloc(jlen + 2);
+        out.content = heap_caps_malloc(jlen + 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (out.content) {
             out.content[0] = '\x1F';
             memcpy(out.content + 1, json, jlen);
@@ -209,7 +209,7 @@ static void status_sender_cb(const char *status_text, void *arg)
         strncpy(out.chat_id, ctx->chat_id, sizeof(out.chat_id) - 1);
 
         size_t jlen = strlen(json);
-        out.content = malloc(jlen + 2);
+        out.content = heap_caps_malloc(jlen + 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (out.content) {
             out.content[0] = '\x1F';
             memcpy(out.content + 1, json, jlen);
@@ -295,7 +295,10 @@ void agent_loop_task(void *pvParameters)
                     mimi_msg_t status = {0};
                     strncpy(status.channel, msg.channel, sizeof(status.channel) - 1);
                     strncpy(status.chat_id, msg.chat_id, sizeof(status.chat_id) - 1);
-                    status.content = strdup(working_phrases[esp_random() % phrase_count]);
+                    const char *phrase = working_phrases[esp_random() % phrase_count];
+                    size_t plen = strlen(phrase);
+                    status.content = heap_caps_malloc(plen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                    if (status.content) memcpy(status.content, phrase, plen + 1);
                     if (status.content) message_bus_push_outbound(&status);
                 }
             }
@@ -332,7 +335,9 @@ void agent_loop_task(void *pvParameters)
             if (!resp.tool_use) {
                 /* Normal completion — save final text and break */
                 if (resp.text && resp.text_len > 0) {
-                    final_text = strdup(resp.text);
+                    size_t tlen = resp.text_len;
+                    final_text = heap_caps_malloc(tlen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                    if (final_text) { memcpy(final_text, resp.text, tlen); final_text[tlen] = '\0'; }
                 }
                 llm_response_free(&resp);
                 break;
@@ -380,7 +385,7 @@ void agent_loop_task(void *pvParameters)
                         strncpy(out.channel, msg.channel, sizeof(out.channel) - 1);
                         strncpy(out.chat_id, msg.chat_id, sizeof(out.chat_id) - 1);
                         size_t rlen = strlen(rstr);
-                        out.content = malloc(rlen + 2);
+                        out.content = heap_caps_malloc(rlen + 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                         if (out.content) {
                             out.content[0] = '\x1F';
                             memcpy(out.content + 1, rstr, rlen);
@@ -394,26 +399,30 @@ void agent_loop_task(void *pvParameters)
                 mimi_msg_t done = {0};
                 strncpy(done.channel, msg.channel, sizeof(done.channel) - 1);
                 strncpy(done.chat_id, msg.chat_id, sizeof(done.chat_id) - 1);
-                char *json = NULL;
-                asprintf(&json, "{\"type\":\"done\",\"chat_id\":\"%s\"}", msg.chat_id);
-                if (json) {
-                    size_t jlen = strlen(json);
-                    done.content = malloc(jlen + 2);
+                /* Build done marker directly in PSRAM */
+                char json_buf[128];
+                int jlen = snprintf(json_buf, sizeof(json_buf),
+                    "{\"type\":\"done\",\"chat_id\":\"%s\"}", msg.chat_id);
+                if (jlen > 0) {
+                    done.content = heap_caps_malloc(jlen + 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                     if (done.content) {
                         done.content[0] = '\x1F';
-                        memcpy(done.content + 1, json, jlen);
+                        memcpy(done.content + 1, json_buf, jlen);
                         done.content[jlen + 1] = '\0';
                         message_bus_push_outbound(&done);
                     }
-                    free(json);
                 }
             } else {
                 /* Non-WebSocket channels: send full text */
                 mimi_msg_t out = {0};
                 strncpy(out.channel, msg.channel, sizeof(out.channel) - 1);
                 strncpy(out.chat_id, msg.chat_id, sizeof(out.chat_id) - 1);
-                out.content = strdup(final_text);
-                if (out.content) message_bus_push_outbound(&out);
+                size_t ftlen = strlen(final_text);
+                out.content = heap_caps_malloc(ftlen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                if (out.content) {
+                    memcpy(out.content, final_text, ftlen + 1);
+                    message_bus_push_outbound(&out);
+                }
             }
             free(final_text);
         } else {
@@ -422,7 +431,9 @@ void agent_loop_task(void *pvParameters)
             mimi_msg_t out = {0};
             strncpy(out.channel, msg.channel, sizeof(out.channel) - 1);
             strncpy(out.chat_id, msg.chat_id, sizeof(out.chat_id) - 1);
-            out.content = strdup("Sorry, I encountered an error.");
+            const char *errmsg = "Sorry, I encountered an error.";
+            out.content = heap_caps_malloc(strlen(errmsg) + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (out.content) memcpy(out.content, errmsg, strlen(errmsg) + 1);
             if (out.content) {
                 message_bus_push_outbound(&out);
             }
@@ -432,7 +443,8 @@ void agent_loop_task(void *pvParameters)
         free(msg.content);
 
         /* Log memory status */
-        ESP_LOGI(TAG, "Free PSRAM: %d bytes",
+        ESP_LOGI(TAG, "Free internal: %d, PSRAM: %d bytes",
+                 (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                  (int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     }
 }

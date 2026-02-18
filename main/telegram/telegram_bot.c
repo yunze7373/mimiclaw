@@ -6,6 +6,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
@@ -33,7 +34,7 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
             if (new_cap < resp->len + evt->data_len + 1) {
                 new_cap = resp->len + evt->data_len + 1;
             }
-            char *tmp = realloc(resp->buf, new_cap);
+            char *tmp = heap_caps_realloc(resp->buf, new_cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (!tmp) return ESP_ERR_NO_MEM;
             resp->buf = tmp;
             resp->cap = new_cap;
@@ -90,14 +91,14 @@ static char *tg_api_call_via_proxy(const char *path, const char *post_data)
 
     /* Read response — accumulate until connection close */
     size_t cap = 4096, len = 0;
-    char *buf = calloc(1, cap);
+    char *buf = heap_caps_calloc(1, cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buf) { proxy_conn_close(conn); return NULL; }
 
     int timeout = (MIMI_TG_POLL_TIMEOUT_S + 5) * 1000;
     while (1) {
         if (len + 1024 >= cap) {
             cap *= 2;
-            char *tmp = realloc(buf, cap);
+            char *tmp = heap_caps_realloc(buf, cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (!tmp) break;
             buf = tmp;
         }
@@ -114,7 +115,9 @@ static char *tg_api_call_via_proxy(const char *path, const char *post_data)
     body += 4;
 
     /* Return just the body */
-    char *result = strdup(body);
+    size_t body_len = strlen(body);
+    char *result = heap_caps_malloc(body_len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (result) memcpy(result, body, body_len + 1);
     free(buf);
     return result;
 }
@@ -127,7 +130,7 @@ static char *tg_api_call_direct(const char *method, const char *post_data)
     snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/%s", s_bot_token, method);
     for (int attempt = 1; attempt <= 3; attempt++) {
         http_resp_t resp = {
-            .buf = calloc(1, 4096),
+            .buf = heap_caps_calloc(1, 4096, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
             .len = 0,
             .cap = 4096,
         };
@@ -243,7 +246,9 @@ static void process_updates(const char *json_str)
         mimi_msg_t msg = {0};
         strncpy(msg.channel, MIMI_CHAN_TELEGRAM, sizeof(msg.channel) - 1);
         strncpy(msg.chat_id, chat_id_str, sizeof(msg.chat_id) - 1);
-        msg.content = strdup(text->valuestring);
+        size_t tlen = strlen(text->valuestring);
+        msg.content = heap_caps_malloc(tlen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (msg.content) memcpy(msg.content, text->valuestring, tlen + 1);
         if (msg.content) {
             message_bus_push_inbound(&msg);
         }
@@ -364,7 +369,7 @@ esp_err_t telegram_send_message(const char *chat_id, const char *text)
         cJSON_AddStringToObject(body, "chat_id", chat_id);
 
         /* Create null-terminated chunk */
-        char *segment = malloc(chunk + 1);
+        char *segment = heap_caps_malloc(chunk + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!segment) {
             cJSON_Delete(body);
             return ESP_ERR_NO_MEM;
@@ -395,7 +400,7 @@ esp_err_t telegram_send_message(const char *chat_id, const char *text)
                         /* Retry without parse_mode */
                         cJSON *body2 = cJSON_CreateObject();
                         cJSON_AddStringToObject(body2, "chat_id", chat_id);
-                        char *seg2 = malloc(chunk + 1);
+                        char *seg2 = heap_caps_malloc(chunk + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                         if (seg2) {
                             memcpy(seg2, text + offset, chunk);
                             seg2[chunk] = '\0';

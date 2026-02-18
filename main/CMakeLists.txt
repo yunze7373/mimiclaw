@@ -4,6 +4,7 @@ idf_component_register(
         "audio/audio.c"
         "display/display.c"
         "display/Vernon_ST7789T/Vernon_ST7789T.c"
+        "display/ssd1306.c"
         "rgb/rgb.c"
         "buttons/multi_button.c"
         "buttons/button_driver.c"

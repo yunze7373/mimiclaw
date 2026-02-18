@@ -614,7 +614,7 @@ static cJSON *convert_messages_openai(const char *system_prompt, cJSON *messages
                     cJSON *text = cJSON_GetObjectItem(block, "text");
                     if (text && cJSON_IsString(text)) {
                         size_t tlen = strlen(text->valuestring);
-                        char *tmp = realloc(text_buf, off + tlen + 1);
+                        char *tmp = heap_caps_realloc(text_buf, off + tlen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                         if (tmp) {
                             text_buf = tmp;
                             memcpy(text_buf + off, text->valuestring, tlen);
@@ -682,7 +682,7 @@ static cJSON *convert_messages_openai(const char *system_prompt, cJSON *messages
                     cJSON *text = cJSON_GetObjectItem(block, "text");
                     if (text && cJSON_IsString(text)) {
                         size_t tlen = strlen(text->valuestring);
-                        char *tmp = realloc(text_buf, off + tlen + 1);
+                        char *tmp = heap_caps_realloc(text_buf, off + tlen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                         if (tmp) {
                             text_buf = tmp;
                             memcpy(text_buf + off, text->valuestring, tlen);
@@ -921,7 +921,7 @@ esp_err_t llm_chat_tools(const char *system_prompt,
                 cJSON *content = cJSON_GetObjectItem(message, "content");
                 if (content && cJSON_IsString(content)) {
                     size_t tlen = strlen(content->valuestring);
-                    resp->text = calloc(1, tlen + 1);
+                    resp->text = heap_caps_calloc(1, tlen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                     if (resp->text) {
                         memcpy(resp->text, content->valuestring, tlen);
                         resp->text_len = tlen;
@@ -946,7 +946,9 @@ esp_err_t llm_chat_tools(const char *system_prompt,
                                 strncpy(call->name, name->valuestring, sizeof(call->name) - 1);
                             }
                             if (args && cJSON_IsString(args)) {
-                                call->input = strdup(args->valuestring);
+                                size_t slen = strlen(args->valuestring);
+                                call->input = heap_caps_malloc(slen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                                if (call->input) memcpy(call->input, args->valuestring, slen + 1);
                                 if (call->input) {
                                     call->input_len = strlen(call->input);
                                 }
@@ -985,7 +987,7 @@ esp_err_t llm_chat_tools(const char *system_prompt,
 
             /* Allocate and copy text */
             if (total_text > 0) {
-                resp->text = calloc(1, total_text + 1);
+                resp->text = heap_caps_calloc(1, total_text + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                 if (resp->text) {
                     cJSON_ArrayForEach(block, content) {
                         cJSON *btype = cJSON_GetObjectItem(block, "type");
@@ -1081,7 +1083,7 @@ static void parse_sse_response(const char *sse_data, llm_response_t *resp)
                     if (content && cJSON_IsString(content)) {
                         /* Accumulate text */
                         size_t new_len = strlen(content->valuestring);
-                        char *new_text = realloc(resp->text, resp->text_len + new_len + 1);
+                        char *new_text = heap_caps_realloc(resp->text, resp->text_len + new_len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                         if (new_text) {
                             resp->text = new_text;
                             memcpy(resp->text + resp->text_len, content->valuestring, new_len);
@@ -1120,7 +1122,7 @@ static void parse_sse_response(const char *sse_data, llm_response_t *resp)
                                     /* Append arguments */
                                     size_t args_len = strlen(args->valuestring);
                                     size_t existing_len = call->input ? call->input_len : 0;
-                                    char *new_input = realloc(call->input, existing_len + args_len + 1);
+                                    char *new_input = heap_caps_realloc(call->input, existing_len + args_len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                                     if (new_input) {
                                         call->input = new_input;
                                         memcpy(call->input + existing_len, args->valuestring, args_len);
@@ -1156,7 +1158,7 @@ static void parse_sse_response(const char *sse_data, llm_response_t *resp)
                     cJSON *text = cJSON_GetObjectItem(delta, "text");
                     if (text && cJSON_IsString(text)) {
                         size_t new_len = strlen(text->valuestring);
-                        char *new_text = realloc(resp->text, resp->text_len + new_len + 1);
+                        char *new_text = heap_caps_realloc(resp->text, resp->text_len + new_len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                         if (new_text) {
                             resp->text = new_text;
                             memcpy(resp->text + resp->text_len, text->valuestring, new_len);
@@ -1170,7 +1172,7 @@ static void parse_sse_response(const char *sse_data, llm_response_t *resp)
                         llm_tool_call_t *call = &resp->calls[resp->call_count - 1];
                         size_t plen = strlen(partial->valuestring);
                         size_t existing = call->input ? call->input_len : 0;
-                        char *new_input = realloc(call->input, existing + plen + 1);
+                        char *new_input = heap_caps_realloc(call->input, existing + plen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                         if (new_input) {
                             call->input = new_input;
                             memcpy(call->input + existing, partial->valuestring, plen);

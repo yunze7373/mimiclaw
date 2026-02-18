@@ -8,6 +8,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "cJSON.h"
 #include <stdbool.h>
 
@@ -157,8 +158,8 @@ esp_err_t tool_edit_file_execute(const char *input_json, char *output, size_t ou
     size_t old_len = strlen(old_str);
     size_t new_len = strlen(new_str);
     size_t max_result = file_size + (new_len > old_len ? new_len - old_len : 0) + 1;
-    char *buf = malloc(file_size + 1);
-    char *result = malloc(max_result);
+    char *buf = heap_caps_malloc(file_size + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    char *result = heap_caps_malloc(max_result, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buf || !result) {
         free(buf);
         free(result);

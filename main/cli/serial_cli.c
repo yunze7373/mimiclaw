@@ -162,7 +162,7 @@ static int cmd_set_ollama_port(int argc, char **argv)
 /* --- memory_read command --- */
 static int cmd_memory_read(int argc, char **argv)
 {
-    char *buf = malloc(4096);
+    char *buf = heap_caps_malloc(4096, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!buf) {
         printf("Out of memory.\n");
         return 1;
@@ -390,7 +390,7 @@ static int cmd_tool_exec(int argc, char **argv)
     const char *tool_name = argv[1];
     const char *input_json = (argc >= 3) ? argv[2] : "{}";
 
-    char *output = calloc(1, 4096);
+    char *output = heap_caps_calloc(1, 4096, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!output) {
         printf("Out of memory.\n");
         return 1;
