@@ -443,10 +443,22 @@ esp_err_t agent_loop_init(void)
 
 esp_err_t agent_loop_start(void)
 {
-    BaseType_t ret = xTaskCreatePinnedToCore(
+    /* Allocate task stack from PSRAM to avoid internal RAM pressure
+     * (NimBLE consumes ~80KB internal RAM) */
+    StaticTask_t *task_tcb = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL);
+    StackType_t  *task_stack = heap_caps_calloc(1, MIMI_AGENT_STACK, MALLOC_CAP_SPIRAM);
+
+    if (!task_tcb || !task_stack) {
+        ESP_LOGE(TAG, "Failed to allocate agent task memory");
+        free(task_tcb);
+        free(task_stack);
+        return ESP_FAIL;
+    }
+
+    TaskHandle_t handle = xTaskCreateStaticPinnedToCore(
         agent_loop_task, "agent_loop",
         MIMI_AGENT_STACK, NULL,
-        MIMI_AGENT_PRIO, NULL, MIMI_AGENT_CORE);
+        MIMI_AGENT_PRIO, task_stack, task_tcb, MIMI_AGENT_CORE);
 
-    return (ret == pdPASS) ? ESP_OK : ESP_FAIL;
+    return (handle != NULL) ? ESP_OK : ESP_FAIL;
 }
