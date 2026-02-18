@@ -536,7 +536,7 @@ static const char *HTML_PAGE =
 "                container.scrollTop = container.scrollHeight;"
 "            }"
 "          } else if (data.type === 'status') {"
-"             /* Update thinking bubble with status text */"
+"             /* Update thinking bubble with tool status text */"
 "             if (currentStreamDiv) {"
 "                 const indicator = currentStreamDiv.querySelector('.typing-indicator');"
 "                 if (indicator) {"

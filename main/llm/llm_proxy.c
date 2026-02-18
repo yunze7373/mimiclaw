@@ -212,15 +212,15 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
     switch(evt->event_id) {
         case HTTP_EVENT_ERROR:
             ESP_LOGI(TAG, "HTTP_EVENT_ERROR");
-            if (s_status_cb) s_status_cb("\xe2\x9a\xa0 \xe8\xbf\x9e\xe6\x8e\xa5\xe9\x94\x99\xe8\xaf\xaf", s_status_ctx);
+            if (s_status_cb) s_status_cb("Connection error", s_status_ctx);
             break;
         case HTTP_EVENT_ON_CONNECTED:
             ESP_LOGI(TAG, "HTTP_EVENT_ON_CONNECTED");
-            if (s_status_cb) s_status_cb("\xf0\x9f\x94\x97 \xe5\xb7\xb2\xe8\xbf\x9e\xe6\x8e\xa5", s_status_ctx);
+            if (s_status_cb) s_status_cb("Connected", s_status_ctx);
             break;
         case HTTP_EVENT_HEADER_SENT:
             ESP_LOGI(TAG, "HTTP_EVENT_HEADER_SENT");
-            if (s_status_cb) s_status_cb("\xf0\x9f\x93\xa4 \xe5\x8f\x91\xe9\x80\x81\xe4\xb8\xad...", s_status_ctx);
+            if (s_status_cb) s_status_cb("Sending...", s_status_ctx);
             break;
         case HTTP_EVENT_ON_HEADER:
             break;
@@ -230,7 +230,7 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
             }
             if (req_ctx->stream) {
                 if (!s_first_data_received && s_status_cb) {
-                    s_status_cb("\xf0\x9f\x92\xac \xe6\x8e\xa5\xe6\x94\xb6\xe4\xb8\xad...", s_status_ctx);
+                    s_status_cb("Receiving...", s_status_ctx);
                     s_first_data_received = true;
                 }
                 process_stream_chunk(req_ctx->stream, (const char *)evt->data, evt->data_len);

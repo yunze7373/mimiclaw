@@ -302,7 +302,7 @@ void agent_loop_task(void *pvParameters)
             if (is_ws) {
                 llm_set_status_cb(status_sender_cb, &stream_ctx);
                 /* Send initial connecting status */
-                status_sender_cb("\xf0\x9f\x94\x84 \xe6\xad\xa3\xe5\x9c\xa8\xe8\xbf\x9e\xe6\x8e\xa5...", &stream_ctx);
+                status_sender_cb("Connecting...", &stream_ctx);
             }
 
             llm_response_t resp;
