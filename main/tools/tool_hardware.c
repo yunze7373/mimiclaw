@@ -403,9 +403,12 @@ esp_err_t tool_rgb_control(const char *input, char *output, size_t out_len) {
     cJSON_Delete(in_json);
 
     /* Clamp to 0-255 */
-    if (r < 0) r = 0; if (r > 255) r = 255;
-    if (g < 0) g = 0; if (g > 255) g = 255;
-    if (b < 0) b = 0; if (b > 255) b = 255;
+    if (r < 0) r = 0;
+    if (r > 255) r = 255;
+    if (g < 0) g = 0;
+    if (g > 255) g = 255;
+    if (b < 0) b = 0;
+    if (b > 255) b = 255;
 
     rgb_set((uint8_t)r, (uint8_t)g, (uint8_t)b);
 
