@@ -1453,6 +1453,11 @@ esp_err_t skill_engine_install(const char *url)
 
     const char *fname = strrchr(url, '/');
     fname = fname ? fname + 1 : url;
+    size_t fname_len = strlen(fname);
+    if (fname_len == 0 || fname_len > 255) {
+        ESP_LOGE(TAG, "Invalid skill filename in URL");
+        return ESP_ERR_INVALID_ARG;
+    }
     char staging_dir[512];
     snprintf(staging_dir, sizeof(staging_dir), "%s/.staging", SKILL_DIR);
     struct stat st = {0};
@@ -1461,9 +1466,31 @@ esp_err_t skill_engine_install(const char *url)
     }
 
     char staging_path[512];
-    snprintf(staging_path, sizeof(staging_path), "%s/%s.part", staging_dir, fname);
     char out_path[512];
-    snprintf(out_path, sizeof(out_path), "%s/%s", SKILL_DIR, fname);
+    size_t skill_dir_len = strlen(SKILL_DIR);
+    size_t staging_dir_len = strlen(staging_dir);
+    size_t out_need = skill_dir_len + 1 + fname_len + 1;
+    size_t staging_need = staging_dir_len + 1 + fname_len + 5 + 1; /* "/"+fname+".part"+NUL */
+
+    if (out_need > sizeof(out_path)) {
+        ESP_LOGE(TAG, "Output path too long");
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (staging_need > sizeof(staging_path)) {
+        ESP_LOGE(TAG, "Staging path too long");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memcpy(out_path, SKILL_DIR, skill_dir_len);
+    out_path[skill_dir_len] = '/';
+    memcpy(out_path + skill_dir_len + 1, fname, fname_len);
+    out_path[skill_dir_len + 1 + fname_len] = '\0';
+
+    memcpy(staging_path, staging_dir, staging_dir_len);
+    staging_path[staging_dir_len] = '/';
+    memcpy(staging_path + staging_dir_len + 1, fname, fname_len);
+    memcpy(staging_path + staging_dir_len + 1 + fname_len, ".part", 5);
+    staging_path[staging_dir_len + 1 + fname_len + 5] = '\0';
 
     FILE *f = fopen(staging_path, "wb");
     if (!f) return ESP_FAIL;
