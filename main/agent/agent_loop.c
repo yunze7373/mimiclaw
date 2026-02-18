@@ -241,12 +241,6 @@ void agent_loop_task(void *pvParameters)
 
         ESP_LOGI(TAG, "Processing message from %s:%s", msg.channel, msg.chat_id);
 
-        bool use_stream = (strcmp(msg.channel, "websocket") == 0);
-        agent_stream_ctx_t stream_ctx = {0};
-        if (use_stream) {
-            strncpy(stream_ctx.channel, msg.channel, sizeof(stream_ctx.channel)-1);
-            strncpy(stream_ctx.chat_id, msg.chat_id, sizeof(stream_ctx.chat_id)-1);
-        }
 
         /* 1. Build system prompt */
         context_build_system_prompt(system_prompt, MIMI_CONTEXT_BUF_SIZE);
