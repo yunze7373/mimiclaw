@@ -280,6 +280,8 @@ void agent_loop_task(void *pvParameters)
                 if (strcmp(msg.channel, MIMI_CHAN_TELEGRAM) == 0) {
                     /* Telegram: use native typing indicator */
                     telegram_send_chat_action(msg.chat_id, "typing");
+                } else if (strcmp(msg.channel, MIMI_CHAN_SYSTEM) == 0) {
+                    /* System channel: suppress verbose status spam in logs */
                 } else {
                     /* Other non-streaming channels: send working text */
                     static const char *working_phrases[] = {
