@@ -8,6 +8,7 @@
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "nvs.h"
 #include "cJSON.h"
 

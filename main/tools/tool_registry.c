@@ -70,6 +70,8 @@ esp_err_t tool_registry_init(void)
     register_tool(&ws);
 
     /* Register get_current_time */
+    tool_time_init();
+
     mimi_tool_t gt = {
         .name = "get_current_time",
         .description = "Get the current date and time. Also sets the system clock. Call this when you need to know what time or date it is.",
@@ -80,6 +82,18 @@ esp_err_t tool_registry_init(void)
         .execute = tool_get_time_execute,
     };
     register_tool(&gt);
+
+    /* Register set_timezone */
+    mimi_tool_t stz = {
+        .name = "set_timezone",
+        .description = "Set the system timezone. Use this when the user asks to change the timezone or location.",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{\"timezone\":{\"type\":\"string\",\"description\":\"Timezone string (e.g. 'CST-8', 'EST5EDT', 'UTC')\"}},"
+            "\"required\":[\"timezone\"]}",
+        .execute = tool_set_timezone_execute,
+    };
+    register_tool(&stz);
 
     /* Register read_file */
     mimi_tool_t rf = {
