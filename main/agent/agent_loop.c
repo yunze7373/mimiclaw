@@ -194,7 +194,7 @@ static void status_sender_cb(const char *status_text, void *arg)
 
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", "status");
-    cJSON_AddStringToObject(root, "tool", status_text);
+    cJSON_AddStringToObject(root, "content", status_text);
     cJSON_AddStringToObject(root, "chat_id", ctx->chat_id);
 
     char *json = cJSON_PrintUnformatted(root);
@@ -267,12 +267,11 @@ void agent_loop_task(void *pvParameters)
         /* 4. ReAct loop */
         char *final_text = NULL;
         int iteration = 0;
+        bool is_ws = (strcmp(msg.channel, "websocket") == 0);
+        bool use_stream = is_ws && llm_get_streaming();
 
         while (iteration < MIMI_AGENT_MAX_TOOL_ITER) {
             /* Send "working" indicator before each API call */
-            /* Determine if we can stream */
-            bool use_stream = (strcmp(msg.channel, "websocket") == 0) && llm_get_streaming();
-            bool is_ws = (strcmp(msg.channel, "websocket") == 0);
             agent_stream_ctx_t stream_ctx = {0};
             
             /* Always populate ctx for status messages on WebSocket */
@@ -310,9 +309,15 @@ void agent_loop_task(void *pvParameters)
             }
 
             llm_response_t resp;
-            err = llm_chat_stream(system_prompt, messages, tools_json, 
-                                  use_stream ? stream_token_cb : NULL, 
-                                  &stream_ctx, &resp);
+
+            if (use_stream) {
+                /* Streaming path: tokens arrive via callback */
+                err = llm_chat_stream(system_prompt, messages, tools_json, 
+                                      stream_token_cb, &stream_ctx, &resp);
+            } else {
+                /* Non-streaming path: full response at once */
+                err = llm_chat_tools(system_prompt, messages, tools_json, &resp);
+            }
 
             /* Clear status callback */
             if (is_ws) llm_set_status_cb(NULL, NULL);
@@ -362,46 +367,56 @@ void agent_loop_task(void *pvParameters)
             session_append(msg.chat_id, "assistant", final_text);
 
             /* Push response to outbound */
-            /* Push response to outbound */
-            if (use_stream) {
-                /* Send done marker for WS (raw JSON) */
-                 mimi_msg_t out = {0};
-                strncpy(out.channel, msg.channel, sizeof(out.channel) - 1);
-                strncpy(out.chat_id, msg.chat_id, sizeof(out.chat_id) - 1);
-                
-                /* Construct JSON manually since it's simple */
-                /* {"type":"done","chat_id":"..."} */
+            if (is_ws) {
+                if (!use_stream) {
+                    /* Non-streaming on WebSocket: send full text as JSON response */
+                    cJSON *rjson = cJSON_CreateObject();
+                    cJSON_AddStringToObject(rjson, "type", "response");
+                    cJSON_AddStringToObject(rjson, "content", final_text);
+                    cJSON_AddStringToObject(rjson, "chat_id", msg.chat_id);
+                    char *rstr = cJSON_PrintUnformatted(rjson);
+                    cJSON_Delete(rjson);
+                    if (rstr) {
+                        mimi_msg_t out = {0};
+                        strncpy(out.channel, msg.channel, sizeof(out.channel) - 1);
+                        strncpy(out.chat_id, msg.chat_id, sizeof(out.chat_id) - 1);
+                        size_t rlen = strlen(rstr);
+                        out.content = malloc(rlen + 2);
+                        if (out.content) {
+                            out.content[0] = '\x1F';
+                            memcpy(out.content + 1, rstr, rlen);
+                            out.content[rlen + 1] = '\0';
+                            message_bus_push_outbound(&out);
+                        }
+                        free(rstr);
+                    }
+                }
+                /* Send done marker for WS (needed for both modes to stop thinking animation) */
+                mimi_msg_t done = {0};
+                strncpy(done.channel, msg.channel, sizeof(done.channel) - 1);
+                strncpy(done.chat_id, msg.chat_id, sizeof(done.chat_id) - 1);
                 char *json = NULL;
                 asprintf(&json, "{\"type\":\"done\",\"chat_id\":\"%s\"}", msg.chat_id);
                 if (json) {
                     size_t jlen = strlen(json);
-                    out.content = malloc(jlen + 2);
-                    if (out.content) {
-                        out.content[0] = '\x1F';
-                        memcpy(out.content + 1, json, jlen);
-                        out.content[jlen + 1] = '\0';
-                        message_bus_push_outbound(&out);
+                    done.content = malloc(jlen + 2);
+                    if (done.content) {
+                        done.content[0] = '\x1F';
+                        memcpy(done.content + 1, json, jlen);
+                        done.content[jlen + 1] = '\0';
+                        message_bus_push_outbound(&done);
                     }
                     free(json);
                 }
             } else {
-                /* Send full text for others */
+                /* Non-WebSocket channels: send full text */
                 mimi_msg_t out = {0};
                 strncpy(out.channel, msg.channel, sizeof(out.channel) - 1);
                 strncpy(out.chat_id, msg.chat_id, sizeof(out.chat_id) - 1);
-                out.content = strdup(final_text);  /* Duplicate because final_text is freed below? No, transferred ownership previously? */
-                /* Wait, previous code: out.content = final_text; and NOT freed below if sent? 
-                   Previous logic: out.content = final_text; message_bus takes ownership. 
-                   So final_text pointer is gone.
-                   But if I use strdup here, I need to free final_text separately. 
-                   Let's stick to previous ownership transfer model but conditionally. */
-                if (out.content) message_bus_push_outbound(&out); 
+                out.content = strdup(final_text);
+                if (out.content) message_bus_push_outbound(&out);
             }
-            if (final_text) free(final_text); /* Free here because we transferred ownership via strdup or session_append copies it? 
-               session_append copies.
-               Previous code: out.content = final_text; message_bus owns it.
-               So if use_stream, we free it. If not, we strdup it? Or transfer?
-               Better: Free final_text always, and strdup for message_bus. */
+            free(final_text);
         } else {
             /* Error or empty response */
             free(final_text);
