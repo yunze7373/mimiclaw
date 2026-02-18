@@ -628,8 +628,35 @@ esp_err_t tool_system_restart(const char *input, char *output, size_t out_len) {
 
 /* GET /api/hardware/status */
 static esp_err_t hw_status_handler(httpd_req_t *req) {
-    char json[512] = {0};
+    char json[1024] = {0};
     tool_system_status(NULL, json, sizeof(json));
+
+    /* Append hardware info */
+    cJSON *root = cJSON_Parse(json);
+    if (root) {
+        /* Add configured hardware */
+        cJSON *hw = cJSON_CreateObject();
+        cJSON_AddNumberToObject(hw, "rgb_pin", MIMI_PIN_RGB_LED);
+        cJSON_AddNumberToObject(hw, "i2c0_sda", MIMI_PIN_I2C0_SDA);
+        cJSON_AddNumberToObject(hw, "i2c0_scl", MIMI_PIN_I2C0_SCL);
+        cJSON_AddNumberToObject(hw, "i2s0_ws", MIMI_PIN_I2S0_WS);
+        cJSON_AddNumberToObject(hw, "i2s0_sck", MIMI_PIN_I2S0_SCK);
+        cJSON_AddNumberToObject(hw, "i2s0_sd", MIMI_PIN_I2S0_SD);
+        cJSON_AddNumberToObject(hw, "i2s1_din", MIMI_PIN_I2S1_DIN);
+        cJSON_AddNumberToObject(hw, "i2s1_bclk", MIMI_PIN_I2S1_BCLK);
+        cJSON_AddNumberToObject(hw, "i2s1_lrc", MIMI_PIN_I2S1_LRC);
+        cJSON_AddNumberToObject(hw, "vol_down", MIMI_PIN_VOL_DOWN);
+        cJSON_AddNumberToObject(hw, "vol_up", MIMI_PIN_VOL_UP);
+        cJSON_AddItemToObject(root, "hardware_config", hw);
+
+        char *out = cJSON_PrintUnformatted(root);
+        if (out) {
+            strncpy(json, out, sizeof(json) - 1);
+            free(out);
+        }
+        cJSON_Delete(root);
+    }
+
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json, strlen(json));
     return ESP_OK;
