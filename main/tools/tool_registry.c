@@ -34,7 +34,7 @@ static mimi_tool_t s_tools[MAX_TOOLS];
 static int s_tool_count = 0;
 static char *s_tools_json = NULL;  /* cached JSON array string */
 
-static void register_tool(const mimi_tool_t *tool)
+void tool_registry_register(const mimi_tool_t *tool)
 {
     if (s_tool_count >= MAX_TOOLS) {
         ESP_LOGE(TAG, "Tool registry full");
@@ -44,7 +44,7 @@ static void register_tool(const mimi_tool_t *tool)
     ESP_LOGI(TAG, "Registered tool: %s", tool->name);
 }
 
-static void build_tools_json(void)
+void tool_registry_rebuild_json(void)
 {
     cJSON *arr = cJSON_CreateArray();
 
@@ -84,7 +84,7 @@ esp_err_t tool_registry_init(void)
             "\"required\":[\"query\"]}",
         .execute = tool_web_search_execute,
     };
-    register_tool(&ws);
+    tool_registry_register(&ws);
 
     /* Register get_current_time */
     tool_time_init();
@@ -98,7 +98,7 @@ esp_err_t tool_registry_init(void)
             "\"required\":[]}",
         .execute = tool_get_time_execute,
     };
-    register_tool(&gt);
+    tool_registry_register(&gt);
 
     /* Register set_timezone */
     mimi_tool_t stz = {
@@ -110,7 +110,7 @@ esp_err_t tool_registry_init(void)
             "\"required\":[\"timezone\"]}",
         .execute = tool_set_timezone_execute,
     };
-    register_tool(&stz);
+    tool_registry_register(&stz);
 
     /* Register set_streaming */
     mimi_tool_t stm = {
@@ -122,7 +122,7 @@ esp_err_t tool_registry_init(void)
             "\"required\":[\"enable\"]}",
         .execute = tool_set_streaming_execute,
     };
-    register_tool(&stm);
+    tool_registry_register(&stm);
 
     /* Register read_file */
     mimi_tool_t rf = {
@@ -134,7 +134,7 @@ esp_err_t tool_registry_init(void)
             "\"required\":[\"path\"]}",
         .execute = tool_read_file_execute,
     };
-    register_tool(&rf);
+    tool_registry_register(&rf);
 
     /* Register write_file */
     mimi_tool_t wf = {
@@ -147,7 +147,7 @@ esp_err_t tool_registry_init(void)
             "\"required\":[\"path\",\"content\"]}",
         .execute = tool_write_file_execute,
     };
-    register_tool(&wf);
+    tool_registry_register(&wf);
 
     /* Register edit_file */
     mimi_tool_t ef = {
@@ -161,7 +161,7 @@ esp_err_t tool_registry_init(void)
             "\"required\":[\"path\",\"old_string\",\"new_string\"]}",
         .execute = tool_edit_file_execute,
     };
-    register_tool(&ef);
+    tool_registry_register(&ef);
 
     /* Register list_dir */
     mimi_tool_t ld = {
@@ -173,7 +173,7 @@ esp_err_t tool_registry_init(void)
             "\"required\":[]}",
         .execute = tool_list_dir_execute,
     };
-    register_tool(&ld);
+    tool_registry_register(&ld);
 
     /* Register cron_add */
     mimi_tool_t ca = {
@@ -193,7 +193,7 @@ esp_err_t tool_registry_init(void)
             "\"required\":[\"name\",\"schedule_type\",\"message\"]}",
         .execute = tool_cron_add_execute,
     };
-    register_tool(&ca);
+    tool_registry_register(&ca);
 
     /* Register cron_list */
     mimi_tool_t cl = {
@@ -202,7 +202,7 @@ esp_err_t tool_registry_init(void)
         .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
         .execute = tool_cron_list_execute,
     };
-    register_tool(&cl);
+    tool_registry_register(&cl);
 
      /* Register cron_remove */
     mimi_tool_t cr = {
@@ -214,7 +214,7 @@ esp_err_t tool_registry_init(void)
             "\"required\":[\"id\"]}",
         .execute = tool_cron_remove_execute,
     };
-    register_tool(&cr);
+    tool_registry_register(&cr);
 
     /* --- Power / Hardware --- */
     /* Register system_status */
@@ -224,7 +224,7 @@ esp_err_t tool_registry_init(void)
         .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
         .execute = tool_system_status,
     };
-    register_tool(&ss);
+    tool_registry_register(&ss);
 
     /* Register gpio_control */
     mimi_tool_t gc = {
@@ -236,7 +236,7 @@ esp_err_t tool_registry_init(void)
             "\"required\":[\"pin\",\"state\"]}",
         .execute = tool_gpio_control,
     };
-    register_tool(&gc);
+    tool_registry_register(&gc);
 
     /* Register i2c_scan */
     mimi_tool_t is = {
@@ -245,7 +245,7 @@ esp_err_t tool_registry_init(void)
         .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
         .execute = tool_i2c_scan,
     };
-    register_tool(&is);
+    tool_registry_register(&is);
 
     /* --- Phase 1: New Hardware Tools --- */
 
@@ -259,7 +259,7 @@ esp_err_t tool_registry_init(void)
             "\"required\":[\"channel\"]}",
         .execute = tool_adc_read,
     };
-    register_tool(&ar);
+    tool_registry_register(&ar);
 
     /* Register pwm_control */
     mimi_tool_t pwm = {
@@ -276,7 +276,7 @@ esp_err_t tool_registry_init(void)
             "\"required\":[\"pin\"]}",
         .execute = tool_pwm_control,
     };
-    register_tool(&pwm);
+    tool_registry_register(&pwm);
 
     /* Register rgb_control */
     mimi_tool_t rgb = {
@@ -292,7 +292,7 @@ esp_err_t tool_registry_init(void)
             "\"required\":[\"r\",\"g\",\"b\"]}",
         .execute = tool_rgb_control,
     };
-    register_tool(&rgb);
+    tool_registry_register(&rgb);
 
     /* --- Phase 2: Network Tools --- */
     tool_network_init();
@@ -304,7 +304,7 @@ esp_err_t tool_registry_init(void)
         .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
         .execute = tool_wifi_scan,
     };
-    register_tool(&wscan);
+    tool_registry_register(&wscan);
 
     /* Register wifi_status */
     mimi_tool_t wstat = {
@@ -313,7 +313,7 @@ esp_err_t tool_registry_init(void)
         .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
         .execute = tool_wifi_status,
     };
-    register_tool(&wstat);
+    tool_registry_register(&wstat);
 
     /* Register ble_scan */
     mimi_tool_t bscan = {
@@ -322,7 +322,7 @@ esp_err_t tool_registry_init(void)
         .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
         .execute = tool_ble_scan,
     };
-    register_tool(&bscan);
+    tool_registry_register(&bscan);
 
     /* --- Phase 3: System Tools --- */
 
@@ -339,7 +339,7 @@ esp_err_t tool_registry_init(void)
             "\"required\":[\"data\"]}",
         .execute = tool_uart_send,
     };
-    register_tool(&us);
+    tool_registry_register(&us);
 
     /* Register system_restart */
     mimi_tool_t sr = {
@@ -348,9 +348,9 @@ esp_err_t tool_registry_init(void)
         .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
         .execute = tool_system_restart,
     };
-    register_tool(&sr);
+    tool_registry_register(&sr);
 
-    build_tools_json();
+    tool_registry_rebuild_json();
 
     ESP_LOGI(TAG, "Tool registry initialized");
     return ESP_OK;

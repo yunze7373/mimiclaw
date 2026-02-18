@@ -16,6 +16,18 @@ typedef struct {
 esp_err_t tool_registry_init(void);
 
 /**
+ * Register a single tool into the registry.
+ * Can be called after init (e.g., by skill engine for Lua tools).
+ */
+void tool_registry_register(const mimi_tool_t *tool);
+
+/**
+ * Rebuild the cached tools JSON array.
+ * Call after dynamically registering new tools.
+ */
+void tool_registry_rebuild_json(void);
+
+/**
  * Get the pre-built tools JSON array string for the API request.
  * Returns NULL if no tools are registered.
  */

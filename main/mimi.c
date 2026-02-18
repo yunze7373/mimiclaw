@@ -29,6 +29,7 @@
 #include "cron/cron_service.h"
 #include "heartbeat/heartbeat.h"
 #include "web_ui/web_ui.h"
+#include "skills/skill_engine.h"
 
 static const char *TAG = "mimi";
 
@@ -133,6 +134,10 @@ void app_main(void)
     ESP_ERROR_CHECK(telegram_bot_init());
     ESP_ERROR_CHECK(llm_proxy_init());
     ESP_ERROR_CHECK(tool_registry_init());
+
+    /* Load Lua hardware skills (must be after SPIFFS + tool_registry) */
+    ESP_ERROR_CHECK(skill_engine_init());
+
     ESP_ERROR_CHECK(cron_service_init());
     ESP_ERROR_CHECK(heartbeat_init());
     ESP_ERROR_CHECK(agent_loop_init());
