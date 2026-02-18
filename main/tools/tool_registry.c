@@ -337,6 +337,7 @@ esp_err_t tool_registry_init(void)
     };
     tool_registry_register(&wstat);
 
+#ifdef CONFIG_BT_ENABLED
     /* Register ble_scan */
     mimi_tool_t bscan = {
         .name = "ble_scan",
@@ -345,6 +346,7 @@ esp_err_t tool_registry_init(void)
         .execute = tool_ble_scan,
     };
     tool_registry_register(&bscan);
+#endif
 
     /* --- Phase 3: System Tools --- */
 

@@ -7,9 +7,8 @@
 #include "esp_netif.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#ifdef CONFIG_BT_ENABLED
 #include "esp_bt.h"
-#include "mimi_config.h"
-
 /* NimBLE includes */
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
@@ -17,6 +16,7 @@
 #include "host/ble_gap.h"
 #include "host/util/util.h"
 #include "freertos/semphr.h"
+#endif
 
 static const char *TAG = "tool_net";
 
@@ -165,6 +165,7 @@ esp_err_t tool_wifi_status(const char *input, char *output, size_t out_len) {
     return ESP_OK;
 }
 
+#ifdef CONFIG_BT_ENABLED
 /* ====================================================================
  * BLE Tools — NimBLE
  * ==================================================================== */
@@ -408,6 +409,7 @@ esp_err_t tool_ble_scan(const char *input, char *output, size_t out_len) {
     ESP_LOGI(TAG, "BLE scan found %d devices", s_ble_result_count);
     return ESP_OK;
 }
+#endif
 
 /* Network init — NimBLE is lazy-initialized on first ble_scan call */
 esp_err_t tool_network_init(void) {
