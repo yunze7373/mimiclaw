@@ -25,6 +25,11 @@ static char s_ollama_host[64] = MIMI_SECRET_OLLAMA_HOST;
 static char s_ollama_port[8] = MIMI_SECRET_OLLAMA_PORT;
 static bool s_streaming = true; /* streaming enabled by default */
 
+/* Global status callback for forwarding HTTP progress to UI */
+static llm_stream_cb_t s_status_cb = NULL;
+static void *s_status_ctx = NULL;
+static bool s_first_data_received = false;
+
 static void safe_copy(char *dst, size_t dst_size, const char *src)
 {
     if (!dst || dst_size == 0) return;
@@ -207,22 +212,27 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
     switch(evt->event_id) {
         case HTTP_EVENT_ERROR:
             ESP_LOGI(TAG, "HTTP_EVENT_ERROR");
+            if (s_status_cb) s_status_cb("\xe2\x9a\xa0 \xe8\xbf\x9e\xe6\x8e\xa5\xe9\x94\x99\xe8\xaf\xaf", s_status_ctx);
             break;
         case HTTP_EVENT_ON_CONNECTED:
             ESP_LOGI(TAG, "HTTP_EVENT_ON_CONNECTED");
+            if (s_status_cb) s_status_cb("\xf0\x9f\x94\x97 \xe5\xb7\xb2\xe8\xbf\x9e\xe6\x8e\xa5", s_status_ctx);
             break;
         case HTTP_EVENT_HEADER_SENT:
             ESP_LOGI(TAG, "HTTP_EVENT_HEADER_SENT");
+            if (s_status_cb) s_status_cb("\xf0\x9f\x93\xa4 \xe5\x8f\x91\xe9\x80\x81\xe4\xb8\xad...", s_status_ctx);
             break;
         case HTTP_EVENT_ON_HEADER:
-            // ESP_LOGI(TAG, "HTTP_EVENT_ON_HEADER, key=%s, value=%s", evt->header_key, evt->header_value);
             break;
         case HTTP_EVENT_ON_DATA:
-            // ESP_LOGI(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
             if (req_ctx->rb) {
                 resp_buf_append(req_ctx->rb, (const char *)evt->data, evt->data_len);
             }
             if (req_ctx->stream) {
+                if (!s_first_data_received && s_status_cb) {
+                    s_status_cb("\xf0\x9f\x92\xac \xe6\x8e\xa5\xe6\x94\xb6\xe4\xb8\xad...", s_status_ctx);
+                    s_first_data_received = true;
+                }
                 process_stream_chunk(req_ctx->stream, (const char *)evt->data, evt->data_len);
             }
             break;
@@ -1398,4 +1408,11 @@ esp_err_t llm_set_streaming(bool enable)
 bool llm_get_streaming(void)
 {
     return s_streaming;
+}
+
+void llm_set_status_cb(llm_stream_cb_t cb, void *ctx)
+{
+    s_status_cb = cb;
+    s_status_ctx = ctx;
+    s_first_data_received = false;
 }

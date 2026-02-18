@@ -58,6 +58,13 @@ esp_err_t llm_set_streaming(bool enable);
 bool llm_get_streaming(void);
 
 /**
+ * Set a progress status callback for HTTP event notifications.
+ * The callback receives status strings like "🔗 已连接", "📤 发送中...", etc.
+ * Set cb=NULL to clear.
+ */
+void llm_set_status_cb(llm_stream_cb_t cb, void *ctx);
+
+/**
  * Send a chat completion request to the configured LLM API (non-streaming).
  *
  * @param system_prompt  System prompt string

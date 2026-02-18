@@ -186,6 +186,36 @@ static void stream_token_cb(const char *token, void *arg)
     }
 }
 
+static void status_sender_cb(const char *status_text, void *arg)
+{
+    agent_stream_ctx_t *ctx = (agent_stream_ctx_t *)arg;
+    if (!ctx || ctx->channel[0] == '\0') return;
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", "status");
+    cJSON_AddStringToObject(root, "tool", status_text);
+    cJSON_AddStringToObject(root, "chat_id", ctx->chat_id);
+
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+
+    if (json) {
+        mimi_msg_t out = {0};
+        strncpy(out.channel, ctx->channel, sizeof(out.channel) - 1);
+        strncpy(out.chat_id, ctx->chat_id, sizeof(out.chat_id) - 1);
+
+        size_t jlen = strlen(json);
+        out.content = malloc(jlen + 2);
+        if (out.content) {
+            out.content[0] = '\x1F';
+            memcpy(out.content + 1, json, jlen);
+            out.content[jlen + 1] = '\0';
+            message_bus_push_outbound(&out);
+        }
+        free(json);
+    }
+}
+
 void agent_loop_task(void *pvParameters)
 {
     ESP_LOGI(TAG, "Agent loop started on core %d", xPortGetCoreID());
@@ -241,34 +271,45 @@ void agent_loop_task(void *pvParameters)
             /* Send "working" indicator before each API call */
             /* Determine if we can stream */
             bool use_stream = (strcmp(msg.channel, "websocket") == 0) && llm_get_streaming();
+            bool is_ws = (strcmp(msg.channel, "websocket") == 0);
             agent_stream_ctx_t stream_ctx = {0};
             
-            if (use_stream) {
+            /* Always populate ctx for status messages on WebSocket */
+            if (is_ws) {
                 strncpy(stream_ctx.channel, msg.channel, sizeof(stream_ctx.channel) - 1);
                 strncpy(stream_ctx.chat_id, msg.chat_id, sizeof(stream_ctx.chat_id) - 1);
-            } else {
+            }
+            if (!is_ws) {
                 /* Non-streaming channel: send "working..." indicator */
-                {
-                    static const char *working_phrases[] = {
-                        "mimi\xF0\x9F\x98\x97is working...",
-                        "mimi\xF0\x9F\x90\xBE is thinking...",
-                        "mimi\xF0\x9F\x92\xAD is pondering...",
-                        "mimi\xF0\x9F\x8C\x99 is on it...",
-                        "mimi\xE2\x9C\xA8 is cooking...",
-                    };
-                    const int phrase_count = sizeof(working_phrases) / sizeof(working_phrases[0]);
-                    mimi_msg_t status = {0};
-                    strncpy(status.channel, msg.channel, sizeof(status.channel) - 1);
-                    strncpy(status.chat_id, msg.chat_id, sizeof(status.chat_id) - 1);
-                    status.content = strdup(working_phrases[esp_random() % phrase_count]);
-                    if (status.content) message_bus_push_outbound(&status);
-                }
+                static const char *working_phrases[] = {
+                    "mimi\xF0\x9F\x98\x97is working...",
+                    "mimi\xF0\x9F\x90\xBE is thinking...",
+                    "mimi\xF0\x9F\x92\xAD is pondering...",
+                    "mimi\xF0\x9F\x8C\x99 is on it...",
+                    "mimi\xE2\x9C\xA8 is cooking...",
+                };
+                const int phrase_count = sizeof(working_phrases) / sizeof(working_phrases[0]);
+                mimi_msg_t status = {0};
+                strncpy(status.channel, msg.channel, sizeof(status.channel) - 1);
+                strncpy(status.chat_id, msg.chat_id, sizeof(status.chat_id) - 1);
+                status.content = strdup(working_phrases[esp_random() % phrase_count]);
+                if (status.content) message_bus_push_outbound(&status);
+            }
+
+            /* Set status callback for HTTP progress */
+            if (is_ws) {
+                llm_set_status_cb(status_sender_cb, &stream_ctx);
+                /* Send initial connecting status */
+                status_sender_cb("\xf0\x9f\x94\x84 \xe6\xad\xa3\xe5\x9c\xa8\xe8\xbf\x9e\xe6\x8e\xa5...", &stream_ctx);
             }
 
             llm_response_t resp;
             err = llm_chat_stream(system_prompt, messages, tools_json, 
                                   use_stream ? stream_token_cb : NULL, 
                                   &stream_ctx, &resp);
+
+            /* Clear status callback */
+            if (is_ws) llm_set_status_cb(NULL, NULL);
 
             /* Flush any remaining tokens */
             if (use_stream) stream_flush(&stream_ctx);
