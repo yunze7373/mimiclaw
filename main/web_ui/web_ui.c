@@ -1796,7 +1796,7 @@ esp_err_t web_ui_init(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.ctrl_port = 32768;
-    config.max_open_sockets = 2;  /* keep low — only serves HTML/JSON */
+    config.max_open_sockets = 3;  /* keep low — only serves HTML/JSON */
     config.max_uri_handlers = 32;
 
     httpd_handle_t server = NULL;

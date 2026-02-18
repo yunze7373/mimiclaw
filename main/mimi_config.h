@@ -57,7 +57,7 @@
 #define MIMI_AGENT_STACK             (12 * 1024)
 #define MIMI_AGENT_PRIO              6
 #define MIMI_AGENT_CORE              1
-#define MIMI_AGENT_MAX_HISTORY       10
+#define MIMI_AGENT_MAX_HISTORY       20
 #define MIMI_AGENT_MAX_TOOL_ITER     10
 #define MIMI_MAX_TOOL_CALLS          4
 
@@ -74,7 +74,7 @@
 #define MIMI_MINIMAX_CODING_URL      "https://api.minimaxi.com/anthropic/v1/messages"
 #define MIMI_OLLAMA_API_URL          "http://localhost:11434/v1/chat/completions"
 #define MIMI_LLM_API_VERSION         "2023-06-01"
-#define MIMI_LLM_STREAM_BUF_SIZE     (16 * 1024)
+#define MIMI_LLM_STREAM_BUF_SIZE     (32 * 1024)
 
 /* Message Bus */
 #define MIMI_BUS_QUEUE_LEN           8
@@ -91,7 +91,7 @@
 #define MIMI_SOUL_FILE               "/spiffs/config/SOUL.md"
 #define MIMI_USER_FILE               "/spiffs/config/USER.md"
 #define MIMI_CONTEXT_BUF_SIZE        (16 * 1024)
-#define MIMI_SESSION_MAX_MSGS        10
+#define MIMI_SESSION_MAX_MSGS        20
 
 /* Cron Service */
 #define MIMI_CRON_FILE               "/spiffs/config/cron.json"
@@ -104,7 +104,7 @@
 
 /* WebSocket Gateway */
 #define MIMI_WS_PORT                 18789
-#define MIMI_WS_MAX_CLIENTS          2
+#define MIMI_WS_MAX_CLIENTS          4
 
 /* Serial CLI */
 #define MIMI_CLI_STACK               (4 * 1024)

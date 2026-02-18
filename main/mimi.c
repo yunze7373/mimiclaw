@@ -157,12 +157,22 @@ void app_main(void)
             ESP_LOGI(TAG, "WiFi connected: %s", wifi_manager_get_ip());
 
             /* Start network-dependent services */
+            ESP_LOGI(TAG, "Memory before services: %d KB free",
+                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
             ESP_ERROR_CHECK(telegram_bot_start());
+            ESP_LOGI(TAG, "Memory after telegram: %d KB free",
+                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
             ESP_ERROR_CHECK(agent_loop_start());
+            ESP_LOGI(TAG, "Memory after agent: %d KB free",
+                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
             cron_service_start();
             heartbeat_start();
             ESP_ERROR_CHECK(ws_server_start());
+            ESP_LOGI(TAG, "Memory after ws: %d KB free",
+                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
             ESP_ERROR_CHECK(web_ui_init());
+            ESP_LOGI(TAG, "Memory after web_ui: %d KB free",
+                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
 
             /* Outbound dispatch task */
             xTaskCreatePinnedToCore(
