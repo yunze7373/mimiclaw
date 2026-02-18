@@ -3,12 +3,12 @@ cmake_minimum_required(VERSION 3.16)
 # Lua 5.4.7 component for ESP-IDF
 #
 # SETUP: Run the download script first:
-#   Linux/Mac: components/lua/download_lua.sh
-#   Windows:   components/lua/download_lua.ps1
+#   Linux/Mac: bash components/lua/download_lua.sh
+#   Windows:   powershell components/lua/download_lua.ps1
 #
 # This will place Lua source in components/lua/src/
 
-set(LUA_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
+set(LUA_SRC_DIR ${CMAKE_CURRENT_LIST_DIR}/src)
 
 # Check if Lua source exists
 if(NOT EXISTS ${LUA_SRC_DIR}/lua.h)
