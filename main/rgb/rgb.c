@@ -30,9 +30,13 @@ esp_err_t rgb_init(void)
 
 void rgb_set(uint8_t r, uint8_t g, uint8_t b)
 {
+    /* Lazy initialization: if not initialized, do it now */
     if (!s_strip) {
-        return;
+        if (rgb_init() != ESP_OK) {
+            return;
+        }
     }
+    
     /* Swap R/G for this board's LED ordering */
     led_strip_set_pixel(s_strip, 0, g, r, b);
     led_strip_refresh(s_strip);
