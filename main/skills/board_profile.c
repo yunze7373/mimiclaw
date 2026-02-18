@@ -41,13 +41,54 @@ static void set_defaults(void)
     memset(s_gpio_alias, 0, sizeof(s_gpio_alias));
     memset(s_reserved, 0, sizeof(s_reserved));
     s_reserved_count = 0;
-    snprintf(s_board_id, sizeof(s_board_id), "default");
+    snprintf(s_board_id, sizeof(s_board_id), "xiaozhi_s3_audio");
 
+    /* I2C0 for SSD1306 OLED - GPIO41=SDA, GPIO42=SCL */
     s_i2c[0].used = true;
     snprintf(s_i2c[0].name, sizeof(s_i2c[0].name), "i2c0");
-    s_i2c[0].sda = 8;
-    s_i2c[0].scl = 9;
-    s_i2c[0].freq_hz = 100000;
+    s_i2c[0].sda = 41;
+    s_i2c[0].scl = 42;
+    s_i2c[0].freq_hz = 400000;
+
+    /* GPIO Aliases */
+    int idx = 0;
+
+    /* RGB LED */
+    s_gpio_alias[idx].used = true;
+    snprintf(s_gpio_alias[idx].name, sizeof(s_gpio_alias[idx].name), "rgb");
+    s_gpio_alias[idx].pin = 38;
+    idx++;
+
+    /* Volume buttons */
+    s_gpio_alias[idx].used = true;
+    snprintf(s_gpio_alias[idx].name, sizeof(s_gpio_alias[idx].name), "vol_down");
+    s_gpio_alias[idx].pin = 39;
+    idx++;
+
+    s_gpio_alias[idx].used = true;
+    snprintf(s_gpio_alias[idx].name, sizeof(s_gpio_alias[idx].name), "vol_up");
+    s_gpio_alias[idx].pin = 40;
+    idx++;
+
+    /* Reserved pins for hardware peripherals (from HARD_WRITING.md) */
+    /* INMP441 Mic: GPIO4=WS, GPIO5=SCK, GPIO6=SD */
+    s_reserved[s_reserved_count++] = 4;
+    s_reserved[s_reserved_count++] = 5;
+    s_reserved[s_reserved_count++] = 6;
+
+    /* MAX98357A Amp: GPIO7=DIN, GPIO15=BCLK, GPIO16=LRC */
+    s_reserved[s_reserved_count++] = 7;
+    s_reserved[s_reserved_count++] = 15;
+    s_reserved[s_reserved_count++] = 16;
+
+    /* SSD1306 OLED: GPIO41=SDA, GPIO42=SCL */
+    s_reserved[s_reserved_count++] = 41;
+    s_reserved[s_reserved_count++] = 42;
+
+    /* Volume buttons and RGB LED */
+    s_reserved[s_reserved_count++] = 38;  /* RGB */
+    s_reserved[s_reserved_count++] = 39;  /* Vol- */
+    s_reserved[s_reserved_count++] = 40;  /* Vol+ */
 }
 
 static bool read_file_alloc(const char *path, char **out)

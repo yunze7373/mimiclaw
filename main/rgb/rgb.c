@@ -2,8 +2,9 @@
 
 #include "esp_check.h"
 #include "led_strip.h"
+#include "mimi_config.h"
 
-#define RGB_GPIO 38
+#define RGB_GPIO MIMI_PIN_RGB_LED
 
 static led_strip_handle_t s_strip = NULL;
 

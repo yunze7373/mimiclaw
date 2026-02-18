@@ -136,12 +136,36 @@
 #define MIMI_HAS_LCD                 0    /* 1 = board has SPI LCD (ST7789T) */
 
 /* ========================================
- * Hardware Pin Map — ESP32-S3-N16R8 Board
+ * Hardware Pin Map — ESP32-S3 Audio Dev Board
+ * See HARD_WRITING.md for wiring details
  * ======================================== */
+/* On-board RGB LED */
 #define MIMI_PIN_RGB_LED             38   /* WS2812 Data */
+
+/* Volume Buttons */
+#define MIMI_PIN_VOL_DOWN           39   /* Volume down / mute button */
+#define MIMI_PIN_VOL_UP             40   /* Volume up button */
+
+/* I2C0 - SSD1306 OLED Display */
+#define MIMI_PIN_I2C0_SDA          41
+#define MIMI_PIN_I2C0_SCL          42
+#define MIMI_I2C0_FREQ_HZ          400000
+
+/* I2S0 - INMP441 Microphone */
+#define MIMI_PIN_I2S0_WS            4    /* WS / LRCK */
+#define MIMI_PIN_I2S0_SCK          5    /* SCK / BCLK */
+#define MIMI_PIN_I2S0_SD           6    /* SD / DIN */
+
+/* I2S1 - MAX98357A Amplifier */
+#define MIMI_PIN_I2S1_DIN           7
+#define MIMI_PIN_I2S1_BCLK         15
+#define MIMI_PIN_I2S1_LRC          16
+
+/* Boot Button */
 #define MIMI_PIN_BOOT_KEY            0    /* Boot Button (active low) */
-#define MIMI_PIN_UART0_TX            43   /* USB-Serial CH343P TX */
-#define MIMI_PIN_UART0_RX            44   /* USB-Serial CH343P RX */
+/* UART0 - USB Serial */
+#define MIMI_PIN_UART0_TX           43   /* USB-Serial CH343P TX */
+#define MIMI_PIN_UART0_RX           44   /* USB-Serial CH343P RX */
 
 /* ADC Configuration */
 #define MIMI_ADC_UNIT                ADC_UNIT_1

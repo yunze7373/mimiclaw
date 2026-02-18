@@ -3,7 +3,8 @@
     "allow": [
       "Bash(gh pr view:*)",
       "Bash(git ls-tree:*)",
-      "Bash(xxd:*)"
+      "Bash(xxd:*)",
+      "WebFetch(domain:rcn4qyi58ici.feishu.cn)"
     ]
   }
 }

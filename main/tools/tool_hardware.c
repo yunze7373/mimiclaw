@@ -2,11 +2,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <stdlib.h>
 #include "cJSON.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "nvs.h"
 #include "driver/gpio.h"
 #include "driver/i2c.h"
 #include "driver/ledc.h"
@@ -18,6 +20,88 @@
 #include "soc/rtc.h"
 #include "rgb/rgb.h"
 #include "mimi_config.h"
+
+#define HW_NVS_NAMESPACE "hw_config"
+
+/* Default pin configuration */
+static const struct {
+    const char *key;
+    int default_val;
+} s_default_pins[] = {
+    {"rgb_pin", 38},
+    {"i2c0_sda", 41},
+    {"i2c0_scl", 42},
+    {"i2s0_ws", 4},
+    {"i2s0_sck", 5},
+    {"i2s0_sd", 6},
+    {"i2s1_din", 7},
+    {"i2s1_bclk", 15},
+    {"i2s1_lrc", 16},
+    {"vol_down", 39},
+    {"vol_up", 40},
+};
+
+static esp_err_t hw_pins_get_handler(httpd_req_t *req) {
+    cJSON *root = cJSON_CreateObject();
+    if (!root) return ESP_FAIL;
+
+    nvs_handle_t nvs;
+    if (nvs_open(HW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+        for (size_t i = 0; i < sizeof(s_default_pins)/sizeof(s_default_pins[0]); i++) {
+            int32_t val = s_default_pins[i].default_val;
+            nvs_get_i32(nvs, s_default_pins[i].key, &val);
+            cJSON_AddNumberToObject(root, s_default_pins[i].key, val);
+        }
+        nvs_close(nvs);
+    } else {
+        /* Use defaults */
+        for (size_t i = 0; i < sizeof(s_default_pins)/sizeof(s_default_pins[0]); i++) {
+            cJSON_AddNumberToObject(root, s_default_pins[i].key, s_default_pins[i].default_val);
+        }
+    }
+
+    char *out = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, out, strlen(out));
+    free(out);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t hw_pins_post_handler(httpd_req_t *req) {
+    char buf[512];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) return ESP_FAIL;
+    buf[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send(req, "{\"success\":false,\"error\":\"Invalid JSON\"}", -1);
+        return ESP_FAIL;
+    }
+
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(HW_NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        cJSON_Delete(root);
+        httpd_resp_send(req, "{\"success\":false,\"error\":\"NVS error\"}", -1);
+        return ESP_FAIL;
+    }
+
+    for (size_t i = 0; i < sizeof(s_default_pins)/sizeof(s_default_pins[0]); i++) {
+        cJSON *item = cJSON_GetObjectItem(root, s_default_pins[i].key);
+        if (item && cJSON_IsNumber(item)) {
+            nvs_set_i32(nvs, s_default_pins[i].key, item->valueint);
+        }
+    }
+
+    nvs_commit(nvs);
+    nvs_close(nvs);
+    cJSON_Delete(root);
+
+    httpd_resp_send(req, "{\"success\":true}", -1);
+    return ESP_OK;
+}
 
 esp_err_t tool_hardware_init(void);
 
@@ -71,7 +155,21 @@ static bool is_safe_pin(int pin) {
 }
 
 /* --- Helper: Get internal temperature (if supported) --- */
+/* --- Helper: Get internal temperature (if supported) --- */
 static float get_cpu_temp(void) {
+    /* Lazy initialization */
+    if (!temp_handle) {
+        temperature_sensor_config_t temp_sensor = {
+            .range_min = 20,
+            .range_max = 100,
+            .clk_src = 0,
+        };
+        if (temperature_sensor_install(&temp_sensor, &temp_handle) == ESP_OK) {
+            temperature_sensor_enable(temp_handle);
+            ESP_LOGI(TAG, "Temperature sensor initialized (lazy)");
+        }
+    }
+
     float tsens_out = 0.0f;
     if (temp_handle) {
         temperature_sensor_get_celsius(temp_handle, &tsens_out);
@@ -563,7 +661,7 @@ static esp_err_t hw_scan_handler(httpd_req_t *req) {
 
 void tool_hardware_register_handlers(httpd_handle_t server) {
     tool_hardware_init();
-    
+
     httpd_uri_t uri_status = {
         .uri = "/api/hardware/status",
         .method = HTTP_GET,
@@ -587,6 +685,23 @@ void tool_hardware_register_handlers(httpd_handle_t server) {
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &uri_scan);
+
+    /* Pin configuration API */
+    httpd_uri_t uri_pins = {
+        .uri = "/api/hardware/pins",
+        .method = HTTP_GET,
+        .handler = hw_pins_get_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &uri_pins);
+
+    httpd_uri_t uri_pins_post = {
+        .uri = "/api/hardware/pins",
+        .method = HTTP_POST,
+        .handler = hw_pins_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &uri_pins_post);
 }
 
 esp_err_t tool_hardware_init(void) {
