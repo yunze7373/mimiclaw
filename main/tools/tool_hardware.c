@@ -590,43 +590,9 @@ void tool_hardware_register_handlers(httpd_handle_t server) {
 }
 
 esp_err_t tool_hardware_init(void) {
-    /* Init Temperature Sensor */
-    /* Manual config to avoid missing TEMPERATURE_SENSOR_CLK_SRC_DEFAULT macro issue */
-    temperature_sensor_config_t temp_sensor = {
-        .range_min = 20,
-        .range_max = 100,
-        /* Leave clk_src to 0 (default) or attempt RC_FAST if needed */
-        .clk_src = 0, 
-    };
-    if (temperature_sensor_install(&temp_sensor, &temp_handle) == ESP_OK) {
-        temperature_sensor_enable(temp_handle);
-        ESP_LOGI(TAG, "Temperature sensor initialized");
-    } else {
-        ESP_LOGW(TAG, "Temperature sensor init failed");
-    }
+    ESP_LOGI(TAG, "Legacy Temp Sensor init disabled");
 
-    /* Init ADC1 oneshot */
-    adc_oneshot_unit_init_cfg_t adc_init_cfg = {
-        .unit_id = MIMI_ADC_UNIT,
-    };
-    if (adc_oneshot_new_unit(&adc_init_cfg, &s_adc_handle) == ESP_OK) {
-        ESP_LOGI(TAG, "ADC1 oneshot initialized");
-
-        /* Use Curve Fitting (standard for ESP32-S3) */
-        adc_cali_curve_fitting_config_t cali_cfg = {
-            .unit_id = MIMI_ADC_UNIT,
-            .atten = MIMI_ADC_DEFAULT_ATTEN,
-            .bitwidth = MIMI_ADC_DEFAULT_BITWIDTH,
-        };
-        if (adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_adc_cali) == ESP_OK) {
-            s_adc_calibrated = true;
-            ESP_LOGI(TAG, "ADC calibration (curve fitting) enabled");
-        } else {
-            ESP_LOGW(TAG, "ADC calibration not available, using raw estimation");
-        }
-    } else {
-        ESP_LOGW(TAG, "ADC1 init failed");
-    }
+    ESP_LOGI(TAG, "Legacy ADC init disabled");
 
     return ESP_OK;
 }

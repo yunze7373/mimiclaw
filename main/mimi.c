@@ -111,8 +111,7 @@ void app_main(void)
     ESP_ERROR_CHECK(display_init());
     display_show_banner();
 #endif
-    ESP_ERROR_CHECK(rgb_init());
-    rgb_set(255, 0, 0);
+
     button_Init();
 #if MIMI_HAS_LCD
     config_screen_init();
