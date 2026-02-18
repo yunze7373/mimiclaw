@@ -129,3 +129,26 @@
 #define MIMI_NVS_KEY_PROXY_PORT      "port"
 #define MIMI_NVS_KEY_OLLAMA_HOST     "ollama_host"
 #define MIMI_NVS_KEY_OLLAMA_PORT     "ollama_port"
+
+/* ========================================
+ * Hardware Pin Map — ESP32-S3-N16R8 Board
+ * ======================================== */
+#define MIMI_PIN_RGB_LED             38   /* WS2812 Data */
+#define MIMI_PIN_BOOT_KEY            0    /* Boot Button (active low) */
+#define MIMI_PIN_UART0_TX            43   /* USB-Serial CH343P TX */
+#define MIMI_PIN_UART0_RX            44   /* USB-Serial CH343P RX */
+
+/* ADC Configuration */
+#define MIMI_ADC_UNIT                ADC_UNIT_1
+#define MIMI_ADC_DEFAULT_ATTEN       ADC_ATTEN_DB_12  /* 0~3.1V range */
+#define MIMI_ADC_DEFAULT_BITWIDTH    ADC_BITWIDTH_12
+
+/* PWM (LEDC) Configuration */
+#define MIMI_PWM_TIMER               LEDC_TIMER_0
+#define MIMI_PWM_MODE                LEDC_LOW_SPEED_MODE
+#define MIMI_PWM_MAX_CHANNELS        4
+#define MIMI_PWM_DEFAULT_FREQ_HZ     5000
+#define MIMI_PWM_DUTY_RESOLUTION     LEDC_TIMER_13_BIT  /* 0~8191 */
+
+/* BLE Scan */
+#define MIMI_BLE_SCAN_DURATION_S     5

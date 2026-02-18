@@ -9,13 +9,35 @@
 #include "esp_timer.h"
 #include "driver/gpio.h"
 #include "driver/i2c.h"
+#include "driver/ledc.h"
+#include "driver/uart.h"
 #include "driver/temperature_sensor.h"
+#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"
+#include "esp_adc/adc_cali_scheme.h"
 #include "soc/rtc.h"
+#include "rgb/rgb.h"
+#include "mimi_config.h"
 
 esp_err_t tool_hardware_init(void);
 
 static const char *TAG = "tool_hw";
 static temperature_sensor_handle_t temp_handle = NULL;
+
+/* --- ADC handle (oneshot mode) --- */
+static adc_oneshot_unit_handle_t s_adc_handle = NULL;
+static adc_cali_handle_t s_adc_cali = NULL;
+static bool s_adc_calibrated = false;
+
+/* --- PWM channel tracking --- */
+typedef struct {
+    int pin;
+    ledc_channel_t channel;
+    bool in_use;
+} pwm_slot_t;
+
+static pwm_slot_t s_pwm_slots[MIMI_PWM_MAX_CHANNELS] = {0};
+static bool s_pwm_timer_init = false;
 
 /* --- Helper: Check Safe Pin --- */
 static bool is_safe_pin(int pin) {
@@ -49,7 +71,6 @@ static bool is_safe_pin(int pin) {
 }
 
 /* --- Helper: Get internal temperature (if supported) --- */
-/* --- Helper: Get internal temperature (if supported) --- */
 static float get_cpu_temp(void) {
     float tsens_out = 0.0f;
     if (temp_handle) {
@@ -60,7 +81,6 @@ static float get_cpu_temp(void) {
 
 /* --- Tool Implementation --- */
 
-/* Get System Status */
 /* Get System Status */
 esp_err_t tool_system_status(const char *input, char *output, size_t out_len) {
     cJSON *root = cJSON_CreateObject();
@@ -105,7 +125,6 @@ esp_err_t tool_system_status(const char *input, char *output, size_t out_len) {
 }
 
 /* GPIO Control */
-/* GPIO Control */
 esp_err_t tool_gpio_control(const char *input, char *output, size_t out_len) {
     cJSON *in_json = cJSON_Parse(input);
     if (!in_json) {
@@ -142,7 +161,6 @@ esp_err_t tool_gpio_control(const char *input, char *output, size_t out_len) {
     return ESP_OK;
 }
 
-/* I2C Scan */
 /* I2C Scan */
 esp_err_t tool_i2c_scan(const char *input, char *output, size_t out_len) {
     (void)input; /* Assuming bus 0 for now */
@@ -182,6 +200,276 @@ esp_err_t tool_i2c_scan(const char *input, char *output, size_t out_len) {
     return ESP_OK;
 }
 
+/* ====================================================================
+ * NEW TOOLS — Phase 1: ADC, PWM, RGB
+ * ==================================================================== */
+
+/* ADC Read — ESP-IDF 5.x oneshot API */
+esp_err_t tool_adc_read(const char *input, char *output, size_t out_len) {
+    cJSON *in_json = cJSON_Parse(input);
+    if (!in_json) {
+        snprintf(output, out_len, "Error: Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON *ch_item = cJSON_GetObjectItem(in_json, "channel");
+    if (!ch_item || !cJSON_IsNumber(ch_item)) {
+        cJSON_Delete(in_json);
+        snprintf(output, out_len, "Error: Missing 'channel' (int 0-9)");
+        return ESP_OK;
+    }
+    int channel = ch_item->valueint;
+    cJSON_Delete(in_json);
+
+    if (channel < 0 || channel > 9) {
+        snprintf(output, out_len, "Error: ADC channel must be 0-9 (ADC1)");
+        return ESP_OK;
+    }
+
+    if (!s_adc_handle) {
+        snprintf(output, out_len, "Error: ADC not initialized");
+        return ESP_OK;
+    }
+
+    /* Configure this channel */
+    adc_oneshot_chan_cfg_t chan_cfg = {
+        .atten = MIMI_ADC_DEFAULT_ATTEN,
+        .bitwidth = MIMI_ADC_DEFAULT_BITWIDTH,
+    };
+    esp_err_t ret = adc_oneshot_config_channel(s_adc_handle, channel, &chan_cfg);
+    if (ret != ESP_OK) {
+        snprintf(output, out_len, "Error: Failed to configure ADC channel %d: %s",
+                 channel, esp_err_to_name(ret));
+        return ESP_OK;
+    }
+
+    /* Read raw value */
+    int raw = 0;
+    ret = adc_oneshot_read(s_adc_handle, channel, &raw);
+    if (ret != ESP_OK) {
+        snprintf(output, out_len, "Error: ADC read failed: %s", esp_err_to_name(ret));
+        return ESP_OK;
+    }
+
+    /* Try calibrated voltage */
+    int voltage_mv = 0;
+    if (s_adc_calibrated && s_adc_cali) {
+        adc_cali_raw_to_voltage(s_adc_cali, raw, &voltage_mv);
+    } else {
+        /* Rough estimate: 3100mV / 4095 * raw */
+        voltage_mv = (int)((float)raw / 4095.0f * 3100.0f);
+    }
+
+    ESP_LOGI(TAG, "ADC ch%d: raw=%d, voltage=%dmV", channel, raw, voltage_mv);
+    snprintf(output, out_len,
+             "{\"channel\":%d,\"raw\":%d,\"voltage_mv\":%d,\"calibrated\":%s}",
+             channel, raw, voltage_mv, s_adc_calibrated ? "true" : "false");
+    return ESP_OK;
+}
+
+/* PWM Control — LEDC driver */
+esp_err_t tool_pwm_control(const char *input, char *output, size_t out_len) {
+    cJSON *in_json = cJSON_Parse(input);
+    if (!in_json) {
+        snprintf(output, out_len, "Error: Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON *pin_item = cJSON_GetObjectItem(in_json, "pin");
+    cJSON *freq_item = cJSON_GetObjectItem(in_json, "freq_hz");
+    cJSON *duty_item = cJSON_GetObjectItem(in_json, "duty_percent");
+    cJSON *stop_item = cJSON_GetObjectItem(in_json, "stop");
+
+    if (!pin_item || !cJSON_IsNumber(pin_item)) {
+        cJSON_Delete(in_json);
+        snprintf(output, out_len, "Error: Missing 'pin' (int)");
+        return ESP_OK;
+    }
+
+    int pin = pin_item->valueint;
+    bool stop = (stop_item && cJSON_IsTrue(stop_item));
+    int freq_hz = freq_item ? freq_item->valueint : MIMI_PWM_DEFAULT_FREQ_HZ;
+    float duty_pct = duty_item ? (float)duty_item->valuedouble : 50.0f;
+    cJSON_Delete(in_json);
+
+    if (!is_safe_pin(pin)) {
+        snprintf(output, out_len, "Error: Pin %d is restricted.", pin);
+        return ESP_OK;
+    }
+
+    /* Find existing slot for this pin, or allocate a new one */
+    int slot_idx = -1;
+    int free_idx = -1;
+    for (int i = 0; i < MIMI_PWM_MAX_CHANNELS; i++) {
+        if (s_pwm_slots[i].in_use && s_pwm_slots[i].pin == pin) {
+            slot_idx = i;
+            break;
+        }
+        if (!s_pwm_slots[i].in_use && free_idx < 0) {
+            free_idx = i;
+        }
+    }
+
+    /* Stop PWM on this pin */
+    if (stop) {
+        if (slot_idx >= 0) {
+            ledc_stop(MIMI_PWM_MODE, s_pwm_slots[slot_idx].channel, 0);
+            gpio_reset_pin(pin);
+            s_pwm_slots[slot_idx].in_use = false;
+            snprintf(output, out_len, "OK: PWM stopped on GPIO %d", pin);
+        } else {
+            snprintf(output, out_len, "OK: No PWM active on GPIO %d", pin);
+        }
+        return ESP_OK;
+    }
+
+    /* Init timer if first use */
+    if (!s_pwm_timer_init) {
+        ledc_timer_config_t timer_conf = {
+            .speed_mode = MIMI_PWM_MODE,
+            .timer_num = MIMI_PWM_TIMER,
+            .duty_resolution = MIMI_PWM_DUTY_RESOLUTION,
+            .freq_hz = freq_hz,
+            .clk_cfg = LEDC_AUTO_CLK,
+        };
+        esp_err_t ret = ledc_timer_config(&timer_conf);
+        if (ret != ESP_OK) {
+            snprintf(output, out_len, "Error: LEDC timer init failed: %s",
+                     esp_err_to_name(ret));
+            return ESP_OK;
+        }
+        s_pwm_timer_init = true;
+    }
+
+    /* Allocate channel */
+    if (slot_idx < 0) {
+        if (free_idx < 0) {
+            snprintf(output, out_len, "Error: All %d PWM channels in use. Stop one first.",
+                     MIMI_PWM_MAX_CHANNELS);
+            return ESP_OK;
+        }
+        slot_idx = free_idx;
+    }
+
+    /* Compute duty: 13-bit resolution → max 8191 */
+    uint32_t max_duty = (1 << 13) - 1; /* 8191 */
+    if (duty_pct < 0) duty_pct = 0;
+    if (duty_pct > 100) duty_pct = 100;
+    uint32_t duty_val = (uint32_t)(max_duty * duty_pct / 100.0f);
+
+    ledc_channel_config_t ch_conf = {
+        .speed_mode = MIMI_PWM_MODE,
+        .channel = (ledc_channel_t)slot_idx,
+        .timer_sel = MIMI_PWM_TIMER,
+        .intr_type = LEDC_INTR_DISABLE,
+        .gpio_num = pin,
+        .duty = duty_val,
+        .hpoint = 0,
+    };
+    esp_err_t ret = ledc_channel_config(&ch_conf);
+    if (ret != ESP_OK) {
+        snprintf(output, out_len, "Error: LEDC channel config failed: %s",
+                 esp_err_to_name(ret));
+        return ESP_OK;
+    }
+
+    s_pwm_slots[slot_idx].pin = pin;
+    s_pwm_slots[slot_idx].channel = (ledc_channel_t)slot_idx;
+    s_pwm_slots[slot_idx].in_use = true;
+
+    ESP_LOGI(TAG, "PWM GPIO %d: freq=%dHz, duty=%.1f%% (raw=%lu)",
+             pin, freq_hz, duty_pct, (unsigned long)duty_val);
+    snprintf(output, out_len,
+             "OK: PWM on GPIO %d — freq=%dHz, duty=%.1f%%, channel=%d",
+             pin, freq_hz, duty_pct, slot_idx);
+    return ESP_OK;
+}
+
+/* RGB LED Control — wraps existing rgb_set() */
+esp_err_t tool_rgb_control(const char *input, char *output, size_t out_len) {
+    cJSON *in_json = cJSON_Parse(input);
+    if (!in_json) {
+        snprintf(output, out_len, "Error: Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON *r_item = cJSON_GetObjectItem(in_json, "r");
+    cJSON *g_item = cJSON_GetObjectItem(in_json, "g");
+    cJSON *b_item = cJSON_GetObjectItem(in_json, "b");
+
+    int r = r_item ? r_item->valueint : 0;
+    int g = g_item ? g_item->valueint : 0;
+    int b = b_item ? b_item->valueint : 0;
+    cJSON_Delete(in_json);
+
+    /* Clamp to 0-255 */
+    if (r < 0) r = 0; if (r > 255) r = 255;
+    if (g < 0) g = 0; if (g > 255) g = 255;
+    if (b < 0) b = 0; if (b > 255) b = 255;
+
+    rgb_set((uint8_t)r, (uint8_t)g, (uint8_t)b);
+
+    ESP_LOGI(TAG, "RGB set to (%d, %d, %d)", r, g, b);
+    snprintf(output, out_len, "OK: RGB LED set to R=%d G=%d B=%d", r, g, b);
+    return ESP_OK;
+}
+
+/* UART Send — send data via UART1 */
+esp_err_t tool_uart_send(const char *input, char *output, size_t out_len) {
+    cJSON *in_json = cJSON_Parse(input);
+    if (!in_json) {
+        snprintf(output, out_len, "Error: Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON *data_item = cJSON_GetObjectItem(in_json, "data");
+    cJSON *port_item = cJSON_GetObjectItem(in_json, "port");
+
+    if (!data_item || !cJSON_IsString(data_item)) {
+        cJSON_Delete(in_json);
+        snprintf(output, out_len, "Error: Missing 'data' (string)");
+        return ESP_OK;
+    }
+
+    const char *data = data_item->valuestring;
+    int port = port_item ? port_item->valueint : UART_NUM_1;
+    cJSON_Delete(in_json);
+
+    if (port < 0 || port > UART_NUM_MAX - 1) {
+        snprintf(output, out_len, "Error: Invalid UART port %d", port);
+        return ESP_OK;
+    }
+
+    /* Check if UART is already installed; if not, install with defaults */
+    int tx_len = uart_write_bytes(port, data, strlen(data));
+    if (tx_len < 0) {
+        snprintf(output, out_len, "Error: UART%d write failed. Port may not be initialized.", port);
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "UART%d sent %d bytes", port, tx_len);
+    snprintf(output, out_len, "OK: Sent %d bytes via UART%d", tx_len, port);
+    return ESP_OK;
+}
+
+/* System Restart — controlled ESP restart */
+esp_err_t tool_system_restart(const char *input, char *output, size_t out_len) {
+    (void)input;
+    ESP_LOGW(TAG, "System restart requested by agent");
+    snprintf(output, out_len, "OK: Restarting in 500ms...");
+
+    /* Use a timer to delay restart so the response can be sent first */
+    esp_timer_handle_t restart_timer;
+    const esp_timer_create_args_t args = {
+        .callback = (esp_timer_cb_t)esp_restart,
+        .name = "restart_timer",
+    };
+    esp_timer_create(&args, &restart_timer);
+    esp_timer_start_once(restart_timer, 500 * 1000); /* 500ms */
+
+    return ESP_OK;
+}
+
 
 /* --- Web API Handlers --- */
 
@@ -212,19 +500,6 @@ static esp_err_t hw_gpio_handler(httpd_req_t *req) {
 
 /* POST /api/hardware/scan */
 static esp_err_t hw_scan_handler(httpd_req_t *req) {
-    // char *res = tool_i2c_scan(NULL);
-    httpd_resp_set_type(req, "text/plain"); /* Or JSON? scan returns text description for LLM */
-    /* For Web UI, we might prefer raw JSON array. But let's stick to tool output for consistency */
-    /* Wait, for Web UI list, JSON array is better. 
-       Let's create a separate helper or parse the string. 
-       Actually, `tool_i2c_scan` returns "Detected X devices: [...]".
-       I'll modify `tool_i2c_scan` to return raw JSON if input is "json"? 
-       Or just parse it in JS. 
-       Let's keep it simple: I will make `tool_i2c_scan` return JSON array directly if input is "raw".
-     */
-     /* Re-implementing scan logic for handler to be clean */
-    
-    /* ... actually, let's just run scan again and return JSON array */
     cJSON *root = cJSON_CreateObject();
     cJSON *devs = cJSON_CreateArray();
     cJSON_AddItemToObject(root, "devices", devs);
@@ -287,5 +562,30 @@ esp_err_t tool_hardware_init(void) {
     } else {
         ESP_LOGW(TAG, "Temperature sensor init failed");
     }
+
+    /* Init ADC1 oneshot */
+    adc_oneshot_unit_init_cfg_t adc_init_cfg = {
+        .unit_id = MIMI_ADC_UNIT,
+    };
+    if (adc_oneshot_new_unit(&adc_init_cfg, &s_adc_handle) == ESP_OK) {
+        ESP_LOGI(TAG, "ADC1 oneshot initialized");
+
+        /* Try to create calibration handle */
+        adc_cali_curve_fitting_config_t cali_cfg = {
+            .unit_id = MIMI_ADC_UNIT,
+            .atten = MIMI_ADC_DEFAULT_ATTEN,
+            .bitwidth = MIMI_ADC_DEFAULT_BITWIDTH,
+        };
+        if (adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_adc_cali) == ESP_OK) {
+            s_adc_calibrated = true;
+            ESP_LOGI(TAG, "ADC calibration (curve fitting) enabled");
+        } else {
+            ESP_LOGW(TAG, "ADC calibration not available, using raw estimation");
+        }
+    } else {
+        ESP_LOGW(TAG, "ADC1 init failed");
+    }
+
     return ESP_OK;
 }
+

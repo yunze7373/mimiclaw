@@ -4,6 +4,7 @@
 #include "tools/tool_files.h"
 #include "tools/tool_cron.h"
 #include "tools/tool_hardware.h"
+#include "tools/tool_network.h"
 #include "llm/llm_proxy.h"
 
 #include <string.h>
@@ -27,7 +28,7 @@ static esp_err_t tool_set_streaming_execute(const char *input_json, char *output
     return ESP_OK;
 }
 
-#define MAX_TOOLS 16
+#define MAX_TOOLS 32
 
 static mimi_tool_t s_tools[MAX_TOOLS];
 static int s_tool_count = 0;
@@ -245,6 +246,109 @@ esp_err_t tool_registry_init(void)
         .execute = tool_i2c_scan,
     };
     register_tool(&is);
+
+    /* --- Phase 1: New Hardware Tools --- */
+
+    /* Register adc_read */
+    mimi_tool_t ar = {
+        .name = "adc_read",
+        .description = "Read an ADC channel (0-9 on ADC1). Returns raw value and voltage in mV. Use to measure analog sensor values.",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{\"channel\":{\"type\":\"integer\",\"description\":\"ADC channel number (0-9)\"}},"
+            "\"required\":[\"channel\"]}",
+        .execute = tool_adc_read,
+    };
+    register_tool(&ar);
+
+    /* Register pwm_control */
+    mimi_tool_t pwm = {
+        .name = "pwm_control",
+        .description = "Control PWM output on a GPIO pin using LEDC. Set frequency and duty cycle, or stop PWM. Up to 4 simultaneous channels.",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{"
+            "\"pin\":{\"type\":\"integer\",\"description\":\"GPIO pin number\"},"
+            "\"freq_hz\":{\"type\":\"integer\",\"description\":\"PWM frequency in Hz (default 5000)\"},"
+            "\"duty_percent\":{\"type\":\"number\",\"description\":\"Duty cycle 0-100% (default 50)\"},"
+            "\"stop\":{\"type\":\"boolean\",\"description\":\"Set true to stop PWM on this pin\"}"
+            "},"
+            "\"required\":[\"pin\"]}",
+        .execute = tool_pwm_control,
+    };
+    register_tool(&pwm);
+
+    /* Register rgb_control */
+    mimi_tool_t rgb = {
+        .name = "rgb_control",
+        .description = "Set the on-board WS2812 RGB LED color. Each color channel is 0-255. Use {r:0,g:0,b:0} to turn off.",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{"
+            "\"r\":{\"type\":\"integer\",\"description\":\"Red (0-255)\"},"
+            "\"g\":{\"type\":\"integer\",\"description\":\"Green (0-255)\"},"
+            "\"b\":{\"type\":\"integer\",\"description\":\"Blue (0-255)\"}"
+            "},"
+            "\"required\":[\"r\",\"g\",\"b\"]}",
+        .execute = tool_rgb_control,
+    };
+    register_tool(&rgb);
+
+    /* --- Phase 2: Network Tools --- */
+    tool_network_init();
+
+    /* Register wifi_scan */
+    mimi_tool_t wscan = {
+        .name = "wifi_scan",
+        .description = "Scan for nearby WiFi access points. Returns SSID, RSSI, channel, and auth type for each AP found.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
+        .execute = tool_wifi_scan,
+    };
+    register_tool(&wscan);
+
+    /* Register wifi_status */
+    mimi_tool_t wstat = {
+        .name = "wifi_status",
+        .description = "Get current WiFi connection status including SSID, IP address, RSSI, MAC, and gateway.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
+        .execute = tool_wifi_status,
+    };
+    register_tool(&wstat);
+
+    /* Register ble_scan */
+    mimi_tool_t bscan = {
+        .name = "ble_scan",
+        .description = "Scan for nearby Bluetooth Low Energy (BLE) devices. Returns device name, MAC address, and RSSI. Scan takes ~5 seconds.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
+        .execute = tool_ble_scan,
+    };
+    register_tool(&bscan);
+
+    /* --- Phase 3: System Tools --- */
+
+    /* Register uart_send */
+    mimi_tool_t us = {
+        .name = "uart_send",
+        .description = "Send data string via UART port. Default port is UART1. Use for serial communication with external devices.",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{"
+            "\"data\":{\"type\":\"string\",\"description\":\"Data string to send\"},"
+            "\"port\":{\"type\":\"integer\",\"description\":\"UART port number (default 1)\"}"
+            "},"
+            "\"required\":[\"data\"]}",
+        .execute = tool_uart_send,
+    };
+    register_tool(&us);
+
+    /* Register system_restart */
+    mimi_tool_t sr = {
+        .name = "system_restart",
+        .description = "Restart the ESP32 system. Use only when necessary (e.g. after config changes). The device will reboot after a 500ms delay.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
+        .execute = tool_system_restart,
+    };
+    register_tool(&sr);
 
     build_tools_json();
 

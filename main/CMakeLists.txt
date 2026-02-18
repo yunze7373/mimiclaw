@@ -29,6 +29,7 @@ idf_component_register(
         "tools/tool_files.c"
         "tools/tool_cron.c"
         "tools/tool_hardware.c"
+        "tools/tool_network.c"
         "cron/cron_service.c"
         "heartbeat/heartbeat.c"
         "web_ui/web_ui.c"
@@ -39,5 +40,5 @@ idf_component_register(
     REQUIRES
         nvs_flash esp_wifi esp_netif esp_http_client esp_http_server
         esp_https_ota esp_event json spiffs console vfs app_update esp-tls
-        driver esp_lcd esp_timer led_strip qrcode
+        driver esp_lcd esp_timer led_strip qrcode esp_adc bt
 )
