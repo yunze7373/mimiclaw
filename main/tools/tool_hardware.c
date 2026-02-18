@@ -585,49 +585,124 @@ void tool_hardware_register_handlers(httpd_handle_t server) {
         .method = HTTP_POST, // POST to trigger scan
         .handler = hw_scan_handler,
         .user_ctx = NULL
+
+    /* Check if UART is already installed; if not, install with defaults */
+    int tx_len = uart_write_bytes(port, data, strlen(data));
+    if (tx_len < 0) {
+        snprintf(output, out_len, "Error: UART%d write failed. Port may not be initialized.", port);
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "UART%d sent %d bytes", port, tx_len);
+    snprintf(output, out_len, "OK: Sent %d bytes via UART%d", tx_len, port);
+    return ESP_OK;
+}
+
+/* System Restart — controlled ESP restart */
+esp_err_t tool_system_restart(const char *input, char *output, size_t out_len) {
+    (void)input;
+    ESP_LOGW(TAG, "System restart requested by agent");
+    snprintf(output, out_len, "OK: Restarting in 500ms...");
+
+    /* Use a timer to delay restart so the response can be sent first */
+    esp_timer_handle_t restart_timer;
+    const esp_timer_create_args_t args = {
+        .callback = (esp_timer_cb_t)esp_restart,
+        .name = "restart_timer",
+    };
+    esp_timer_create(&args, &restart_timer);
+    esp_timer_start_once(restart_timer, 500 * 1000); /* 500ms */
+
+    return ESP_OK;
+}
+
+
+/* --- Web API Handlers --- */
+
+/* GET /api/hardware/status */
+static esp_err_t hw_status_handler(httpd_req_t *req) {
+    char json[512] = {0};
+    tool_system_status(NULL, json, sizeof(json));
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json, strlen(json));
+    return ESP_OK;
+}
+
+/* POST /api/hardware/gpio */
+static esp_err_t hw_gpio_handler(httpd_req_t *req) {
+    char content[128];
+    int ret = httpd_req_recv(req, content, sizeof(content) - 1);
+    if (ret <= 0) return ESP_FAIL;
+    content[ret] = '\0';
+
+    char res[256] = {0};
+    tool_gpio_control(content, res, sizeof(res));
+    bool is_error = (strncmp(res, "Error", 5) == 0);
+    
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send(req, res, strlen(res));
+    return is_error ? ESP_FAIL : ESP_OK; /* Or strictly ESP_OK with error msg */
+}
+
+/* POST /api/hardware/scan */
+static esp_err_t hw_scan_handler(httpd_req_t *req) {
+    cJSON *root = cJSON_CreateObject();
+    cJSON *devs = cJSON_CreateArray();
+    cJSON_AddItemToObject(root, "devices", devs);
+    
+    for (int i = 1; i < 127; i++) {
+        i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+        i2c_master_start(cmd);
+        i2c_master_write_byte(cmd, (i << 1) | I2C_MASTER_WRITE, true);
+        i2c_master_stop(cmd);
+        esp_err_t ret = i2c_master_cmd_begin(0, cmd, 10 / portTICK_PERIOD_MS);
+        i2c_cmd_link_delete(cmd);
+
+        if (ret == ESP_OK) {
+            cJSON_AddItemToArray(devs, cJSON_CreateNumber(i));
+        }
+    }
+    
+    char *out = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, out, strlen(out));
+    free(out);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+void tool_hardware_register_handlers(httpd_handle_t server) {
+    tool_hardware_init();
+    
+    httpd_uri_t uri_status = {
+        .uri = "/api/hardware/status",
+        .method = HTTP_GET,
+        .handler = hw_status_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &uri_status);
+
+    httpd_uri_t uri_gpio = {
+        .uri = "/api/hardware/gpio",
+        .method = HTTP_POST,
+        .handler = hw_gpio_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &uri_gpio);
+
+    httpd_uri_t uri_scan = {
+        .uri = "/api/hardware/scan",
+        .method = HTTP_POST, // POST to trigger scan
+        .handler = hw_scan_handler,
+        .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &uri_scan);
 }
 
 esp_err_t tool_hardware_init(void) {
-    /* Init Temperature Sensor */
-    /* Manual config to avoid missing TEMPERATURE_SENSOR_CLK_SRC_DEFAULT macro issue */
-    temperature_sensor_config_t temp_sensor = {
-        .range_min = 20,
-        .range_max = 100,
-        /* Leave clk_src to 0 (default) or attempt RC_FAST if needed */
-        .clk_src = 0, 
-    };
-    if (temperature_sensor_install(&temp_sensor, &temp_handle) == ESP_OK) {
-        temperature_sensor_enable(temp_handle);
-        ESP_LOGI(TAG, "Temperature sensor initialized");
-    } else {
-        ESP_LOGW(TAG, "Temperature sensor init failed");
-    }
+    ESP_LOGI(TAG, "Legacy Temp Sensor init disabled");
 
-    /* Init ADC1 oneshot */
-    adc_oneshot_unit_init_cfg_t adc_init_cfg = {
-        .unit_id = MIMI_ADC_UNIT,
-    };
-    if (adc_oneshot_new_unit(&adc_init_cfg, &s_adc_handle) == ESP_OK) {
-        ESP_LOGI(TAG, "ADC1 oneshot initialized");
-
-        /* Use Curve Fitting (standard for ESP32-S3) */
-        adc_cali_curve_fitting_config_t cali_cfg = {
-            .unit_id = MIMI_ADC_UNIT,
-            .atten = MIMI_ADC_DEFAULT_ATTEN,
-            .bitwidth = MIMI_ADC_DEFAULT_BITWIDTH,
-        };
-        if (adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_adc_cali) == ESP_OK) {
-            s_adc_calibrated = true;
-            ESP_LOGI(TAG, "ADC calibration (curve fitting) enabled");
-        } else {
-            ESP_LOGW(TAG, "ADC calibration not available, using raw estimation");
-        }
-    } else {
-        ESP_LOGW(TAG, "ADC1 init failed");
-    }
+    ESP_LOGI(TAG, "Legacy ADC init disabled");
 
     return ESP_OK;
 }
-
