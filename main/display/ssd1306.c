@@ -35,40 +35,6 @@ static const char *TAG = "ssd1306";
 
 static uint8_t s_buffer[SSD1306_BUFFER_SIZE];
 static bool s_inited = false;
-static bool s_i2c_driver_ready = false;
-
-/* Try to install I2C driver only if not already done (avoids ESP-IDF error log) */
-static void ensure_i2c_driver(void)
-{
-    if (s_i2c_driver_ready) return;
-
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = MIMI_PIN_I2C0_SDA,
-        .scl_io_num = MIMI_PIN_I2C0_SCL,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = MIMI_I2C0_FREQ_HZ,
-    };
-    i2c_param_config(I2C_MASTER_NUM, &conf);
-
-    /* Probe: if i2c_master_cmd_begin works, driver is already installed */
-    i2c_cmd_handle_t probe = i2c_cmd_link_create();
-    i2c_master_start(probe);
-    i2c_master_stop(probe);
-    esp_err_t ret = i2c_master_cmd_begin(I2C_MASTER_NUM, probe, 10 / portTICK_PERIOD_MS);
-    i2c_cmd_link_delete(probe);
-
-    if (ret == ESP_OK || ret == ESP_ERR_TIMEOUT) {
-        /* Driver is already installed (by IMU or tool_hw) */
-        s_i2c_driver_ready = true;
-        return;
-    }
-
-    /* Driver not installed yet — install it */
-    i2c_driver_install(I2C_MASTER_NUM, I2C_MODE_MASTER, 0, 0, 0);
-    s_i2c_driver_ready = true;
-}
 
 static esp_err_t ssd1306_write_cmd(uint8_t cmd)
 {
@@ -98,7 +64,19 @@ static esp_err_t ssd1306_write_data(const uint8_t *data, size_t len)
 
 bool ssd1306_is_connected(void)
 {
-    ensure_i2c_driver();
+    /* Try to init I2C if not already done */
+    i2c_config_t conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = MIMI_PIN_I2C0_SDA,
+        .scl_io_num = MIMI_PIN_I2C0_SCL,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = MIMI_I2C0_FREQ_HZ,
+    };
+    i2c_param_config(I2C_MASTER_NUM, &conf);
+
+    /* Install driver if not already installed (ignore error if already installed) */
+    i2c_driver_install(I2C_MASTER_NUM, I2C_MODE_MASTER, 0, 0, 0);
 
     /* Try to read ID (simple check by sending display off command) */
     i2c_cmd_handle_t handle = i2c_cmd_link_create();
@@ -121,7 +99,25 @@ esp_err_t ssd1306_init(void)
     ESP_LOGI(TAG, "Initializing SSD1306 OLED on I2C0 (SDA=%d, SCL=%d)",
              MIMI_PIN_I2C0_SDA, MIMI_PIN_I2C0_SCL);
 
-    ensure_i2c_driver();
+    /* Initialize I2C */
+    i2c_config_t conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = MIMI_PIN_I2C0_SDA,
+        .scl_io_num = MIMI_PIN_I2C0_SCL,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = MIMI_I2C0_FREQ_HZ,
+    };
+
+    /* Configure I2C params (may fail if already configured, that's OK) */
+    i2c_param_config(I2C_MASTER_NUM, &conf);
+
+    /* Install driver if not already installed */
+    esp_err_t ret = i2c_driver_install(I2C_MASTER_NUM, I2C_MODE_MASTER, 0, 0, 0);
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "I2C driver install failed: %d", ret);
+        return ret;
+    }
 
     /* Reset display */
     ssd1306_write_cmd(0xAE);  /* Display off */
