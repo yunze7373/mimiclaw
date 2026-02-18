@@ -69,20 +69,21 @@ static void remove_client(int fd)
 
 static esp_err_t ws_handler(httpd_req_t *req)
 {
+    int fd = httpd_req_to_sockfd(req);
+
     if (req->method == HTTP_GET) {
-        /* WebSocket handshake — register client */
-        int fd = httpd_req_to_sockfd(req);
         add_client(fd);
         return ESP_OK;
     }
 
-    /* Receive WebSocket frame */
     httpd_ws_frame_t ws_pkt = {0};
     ws_pkt.type = HTTPD_WS_TYPE_TEXT;
 
-    /* Get frame length */
     esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
-    if (ret != ESP_OK) return ret;
+    if (ret != ESP_OK) {
+        remove_client(fd);
+        return ESP_OK;
+    }
 
     if (ws_pkt.len == 0) return ESP_OK;
 
@@ -92,13 +93,22 @@ static esp_err_t ws_handler(httpd_req_t *req)
     ret = httpd_ws_recv_frame(req, &ws_pkt, ws_pkt.len);
     if (ret != ESP_OK) {
         free(ws_pkt.payload);
-        return ret;
+        remove_client(fd);
+        return ESP_OK;
     }
 
-    int fd = httpd_req_to_sockfd(req);
+    if (ws_pkt.type == HTTPD_WS_TYPE_CLOSE) {
+        free(ws_pkt.payload);
+        remove_client(fd);
+        return ESP_OK;
+    }
+    if (ws_pkt.type != HTTPD_WS_TYPE_TEXT) {
+        free(ws_pkt.payload);
+        return ESP_OK;
+    }
+
     ws_client_t *client = find_client_by_fd(fd);
 
-    /* Parse JSON message */
     cJSON *root = cJSON_Parse((char *)ws_pkt.payload);
     free(ws_pkt.payload);
 
@@ -113,12 +123,10 @@ static esp_err_t ws_handler(httpd_req_t *req)
     if (type && cJSON_IsString(type) && strcmp(type->valuestring, "message") == 0
         && content && cJSON_IsString(content)) {
 
-        /* Determine chat_id */
         const char *chat_id = client ? client->chat_id : "ws_unknown";
         cJSON *cid = cJSON_GetObjectItem(root, "chat_id");
         if (cid && cJSON_IsString(cid)) {
             chat_id = cid->valuestring;
-            /* Update client's chat_id if provided */
             if (client) {
                 strncpy(client->chat_id, chat_id, sizeof(client->chat_id) - 1);
             }
@@ -126,7 +134,6 @@ static esp_err_t ws_handler(httpd_req_t *req)
 
         ESP_LOGI(TAG, "WS message from %s: %.40s...", chat_id, content->valuestring);
 
-        /* Push to inbound bus */
         mimi_msg_t msg = {0};
         strncpy(msg.channel, MIMI_CHAN_WEBSOCKET, sizeof(msg.channel) - 1);
         strncpy(msg.chat_id, chat_id, sizeof(msg.chat_id) - 1);
@@ -223,3 +230,4 @@ esp_err_t ws_server_stop(void)
     }
     return ESP_OK;
 }
+

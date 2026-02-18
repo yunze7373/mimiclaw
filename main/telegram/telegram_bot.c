@@ -2,6 +2,7 @@
 #include "mimi_config.h"
 #include "bus/message_bus.h"
 #include "proxy/http_proxy.h"
+#include "wifi/wifi_manager.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -42,6 +43,13 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
         resp->buf[resp->len] = '\0';
     }
     return ESP_OK;
+}
+
+static bool is_transient_http_err(esp_err_t err)
+{
+    return err == ESP_ERR_HTTP_EAGAIN ||
+           err == ESP_ERR_HTTP_CONNECT ||
+           err == ESP_ERR_TIMEOUT;
 }
 
 /* ── Proxy path: manual HTTP over CONNECT tunnel ────────────── */
@@ -117,46 +125,64 @@ static char *tg_api_call_direct(const char *method, const char *post_data)
 {
     char url[256];
     snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/%s", s_bot_token, method);
+    for (int attempt = 1; attempt <= 3; attempt++) {
+        http_resp_t resp = {
+            .buf = calloc(1, 4096),
+            .len = 0,
+            .cap = 4096,
+        };
+        if (!resp.buf) return NULL;
 
-    http_resp_t resp = {
-        .buf = calloc(1, 4096),
-        .len = 0,
-        .cap = 4096,
-    };
-    if (!resp.buf) return NULL;
+        esp_http_client_config_t config = {
+            .url = url,
+            .event_handler = http_event_handler,
+            .user_data = &resp,
+            .timeout_ms = (MIMI_TG_POLL_TIMEOUT_S + 15) * 1000,
+            .buffer_size = 2048,
+            .buffer_size_tx = 2048,
+            .crt_bundle_attach = esp_crt_bundle_attach,
+            .keep_alive_enable = false,
+        };
 
-    esp_http_client_config_t config = {
-        .url = url,
-        .event_handler = http_event_handler,
-        .user_data = &resp,
-        .timeout_ms = (MIMI_TG_POLL_TIMEOUT_S + 5) * 1000,
-        .buffer_size = 2048,
-        .buffer_size_tx = 2048,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-    };
+        esp_http_client_handle_t client = esp_http_client_init(&config);
+        if (!client) {
+            free(resp.buf);
+            return NULL;
+        }
 
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) {
+        esp_http_client_set_header(client, "Connection", "close");
+        if (post_data) {
+            esp_http_client_set_method(client, HTTP_METHOD_POST);
+            esp_http_client_set_header(client, "Content-Type", "application/json");
+            esp_http_client_set_post_field(client, post_data, strlen(post_data));
+        } else {
+            esp_http_client_set_method(client, HTTP_METHOD_GET);
+        }
+
+        esp_err_t err = esp_http_client_perform(client);
+        int status = esp_http_client_get_status_code(client);
+        esp_http_client_cleanup(client);
+
+        if (err == ESP_OK) {
+            if (status >= 200 && status < 500) {
+                return resp.buf;
+            }
+            ESP_LOGW(TAG, "HTTP status=%d for %s (attempt %d/3)", status, method, attempt);
+        } else {
+            ESP_LOGW(TAG, "HTTP request failed: %s (%s, attempt %d/3)",
+                     esp_err_to_name(err), method, attempt);
+        }
+
         free(resp.buf);
-        return NULL;
+
+        if (attempt < 3 && (is_transient_http_err(err) || status >= 500)) {
+            vTaskDelay(pdMS_TO_TICKS(500 * attempt));
+            continue;
+        }
+        break;
     }
 
-    if (post_data) {
-        esp_http_client_set_method(client, HTTP_METHOD_POST);
-        esp_http_client_set_header(client, "Content-Type", "application/json");
-        esp_http_client_set_post_field(client, post_data, strlen(post_data));
-    }
-
-    esp_err_t err = esp_http_client_perform(client);
-    esp_http_client_cleanup(client);
-
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "HTTP request failed: %s", esp_err_to_name(err));
-        free(resp.buf);
-        return NULL;
-    }
-
-    return resp.buf;
+    return NULL;
 }
 
 static char *tg_api_call(const char *method, const char *post_data)
@@ -236,6 +262,10 @@ static void telegram_poll_task(void *arg)
             vTaskDelay(pdMS_TO_TICKS(5000));
             continue;
         }
+        if (!wifi_manager_is_connected()) {
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            continue;
+        }
 
         char params[128];
         snprintf(params, sizeof(params),
@@ -291,6 +321,7 @@ esp_err_t telegram_bot_start(void)
 esp_err_t telegram_send_chat_action(const char *chat_id, const char *action)
 {
     if (s_bot_token[0] == '\0') return ESP_ERR_INVALID_STATE;
+    if (!wifi_manager_is_connected()) return ESP_ERR_INVALID_STATE;
 
     cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "chat_id", chat_id);
@@ -311,6 +342,10 @@ esp_err_t telegram_send_message(const char *chat_id, const char *text)
 {
     if (s_bot_token[0] == '\0') {
         ESP_LOGW(TAG, "Cannot send: no bot token");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!wifi_manager_is_connected()) {
+        ESP_LOGW(TAG, "Cannot send: WiFi not connected");
         return ESP_ERR_INVALID_STATE;
     }
 
