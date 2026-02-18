@@ -143,8 +143,8 @@ static char *tg_api_call_direct(const char *method, const char *post_data)
             .event_handler = http_event_handler,
             .user_data = &resp,
             .timeout_ms = (MIMI_TG_POLL_TIMEOUT_S + 15) * 1000,
-            .buffer_size = 512,   /* Reduced: save internal SRAM */
-            .buffer_size_tx = 1024,
+            .buffer_size = 1024,   /* Increased for TLS reliability */
+            .buffer_size_tx = 2048,
             .crt_bundle_attach = esp_crt_bundle_attach,
             .keep_alive_enable = false,
         };
