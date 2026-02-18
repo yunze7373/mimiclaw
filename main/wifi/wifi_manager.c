@@ -8,6 +8,7 @@
 #include "esp_netif.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "esp_sntp.h"
 
 static const char *TAG = "wifi";
 
@@ -87,7 +88,12 @@ esp_err_t wifi_manager_init(void)
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
 
-    ESP_LOGI(TAG, "WiFi manager initialized");
+    /* Init SNTP for time sync (crucial for TLS) */
+    sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    sntp_setservername(0, "pool.ntp.org");
+    sntp_init();
+
+    ESP_LOGI(TAG, "WiFi manager initialized (SNTP started)");
     return ESP_OK;
 }
 
