@@ -21,6 +21,13 @@ esp_err_t telegram_bot_start(void);
 esp_err_t telegram_send_message(const char *chat_id, const char *text);
 
 /**
+ * Send a chat action (e.g. "typing") to indicate bot activity.
+ * @param chat_id  Telegram chat ID
+ * @param action   Action string (e.g. "typing"), or NULL for default "typing"
+ */
+esp_err_t telegram_send_chat_action(const char *chat_id, const char *action);
+
+/**
  * Save the Telegram bot token to NVS.
  */
 esp_err_t telegram_set_token(const char *token);

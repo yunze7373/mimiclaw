@@ -5,6 +5,7 @@
 #include "llm/llm_proxy.h"
 #include "memory/session_mgr.h"
 #include "tools/tool_registry.h"
+#include "telegram/telegram_bot.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -280,20 +281,25 @@ void agent_loop_task(void *pvParameters)
                 strncpy(stream_ctx.chat_id, msg.chat_id, sizeof(stream_ctx.chat_id) - 1);
             }
             if (!is_ws) {
-                /* Non-streaming channel: send "working..." indicator */
-                static const char *working_phrases[] = {
-                    "mimi\xF0\x9F\x98\x97is working...",
-                    "mimi\xF0\x9F\x90\xBE is thinking...",
-                    "mimi\xF0\x9F\x92\xAD is pondering...",
-                    "mimi\xF0\x9F\x8C\x99 is on it...",
-                    "mimi\xE2\x9C\xA8 is cooking...",
-                };
-                const int phrase_count = sizeof(working_phrases) / sizeof(working_phrases[0]);
-                mimi_msg_t status = {0};
-                strncpy(status.channel, msg.channel, sizeof(status.channel) - 1);
-                strncpy(status.chat_id, msg.chat_id, sizeof(status.chat_id) - 1);
-                status.content = strdup(working_phrases[esp_random() % phrase_count]);
-                if (status.content) message_bus_push_outbound(&status);
+                if (strcmp(msg.channel, MIMI_CHAN_TELEGRAM) == 0) {
+                    /* Telegram: use native typing indicator */
+                    telegram_send_chat_action(msg.chat_id, "typing");
+                } else {
+                    /* Other non-streaming channels: send working text */
+                    static const char *working_phrases[] = {
+                        "mimi\xF0\x9F\x98\x97is working...",
+                        "mimi\xF0\x9F\x90\xBE is thinking...",
+                        "mimi\xF0\x9F\x92\xAD is pondering...",
+                        "mimi\xF0\x9F\x8C\x99 is on it...",
+                        "mimi\xE2\x9C\xA8 is cooking...",
+                    };
+                    const int phrase_count = sizeof(working_phrases) / sizeof(working_phrases[0]);
+                    mimi_msg_t status = {0};
+                    strncpy(status.channel, msg.channel, sizeof(status.channel) - 1);
+                    strncpy(status.chat_id, msg.chat_id, sizeof(status.chat_id) - 1);
+                    status.content = strdup(working_phrases[esp_random() % phrase_count]);
+                    if (status.content) message_bus_push_outbound(&status);
+                }
             }
 
             /* Set status callback for HTTP progress */
