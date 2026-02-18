@@ -331,7 +331,7 @@ static esp_err_t llm_http_direct(const char *post_data, http_req_ctx_t *ctx, int
         .url = llm_api_url(),
         .event_handler = http_event_handler,
         .user_data = ctx,
-        .timeout_ms = 300 * 1000,
+        .timeout_ms = 60000,   /* 60s timeout */
         .buffer_size = 4096,
         .buffer_size_tx = 4096,
         .crt_bundle_attach = esp_crt_bundle_attach,
@@ -364,7 +364,7 @@ static esp_err_t llm_http_direct(const char *post_data, http_req_ctx_t *ctx, int
 
 static esp_err_t llm_http_via_proxy(const char *post_data, http_req_ctx_t *ctx, int *out_status)
 {
-    proxy_conn_t *conn = proxy_conn_open(llm_api_host(), 443, 30000);
+    proxy_conn_t *conn = proxy_conn_open(llm_api_host(), 443, 60000);
     if (!conn) return ESP_ERR_HTTP_CONNECT;
 
     int body_len = strlen(post_data);
@@ -400,7 +400,7 @@ static esp_err_t llm_http_via_proxy(const char *post_data, http_req_ctx_t *ctx, 
     /* Read full response into buffer */
     char tmp[4096];
     while (1) {
-        int n = proxy_conn_read(conn, tmp, sizeof(tmp), 300000);
+        int n = proxy_conn_read(conn, tmp, sizeof(tmp), 60000);
         if (n <= 0) break;
         if (ctx->rb) {
             if (resp_buf_append(ctx->rb, tmp, n) != ESP_OK) break;
@@ -1156,7 +1156,13 @@ esp_err_t llm_chat_stream(const char *system_prompt,
     http_req_ctx_t req_ctx = { .rb = (resp ? &rb : NULL), .stream = &stream };
     
     ESP_LOGI(TAG, "Starting streaming request...");
+    /* Set a reasonable timeout for the entire operation if not handled by client config */
+    /* The client config timeout handles connection/socket, but we should log if it takes too long */
+    int64_t start_time = esp_timer_get_time();
     esp_err_t err = llm_http_call(post_data, &req_ctx, &status);
+    int64_t end_time = esp_timer_get_time();
+    ESP_LOGI(TAG, "Streaming request finished in %lld ms, status=%d, err=%d", (end_time - start_time) / 1000, status, err);
+    
     free(post_data);
     stream_ctx_free(&stream);
 

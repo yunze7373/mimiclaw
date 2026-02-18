@@ -96,12 +96,12 @@ static const char *HTML_PAGE =
 "    .chat-message.user { background: var(--primary); color: white; margin-left: auto; border-bottom-right-radius: 4px; }"
 "    .chat-message.assistant { background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; }"
 "    .chat-message.error { background: #fef2f2; color: var(--error); border: 1px solid #fecaca; }"
-"    .chat-message .time { font-size: 11px; opacity: 0.7; margin-top: 6px; }
-    .typing-indicator { display: flex; gap: 4px; padding: 6px 4px; }
-    .typing-dot { width: 6px; height: 6px; background: #94a3b8; border-radius: 50%; animation: typing 1.4s infinite ease-in-out both; }
-    .typing-dot:nth-child(1) { animation-delay: -0.32s; }
-    .typing-dot:nth-child(2) { animation-delay: -0.16s; }
-    @keyframes typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }"
+"    .chat-message .time { font-size: 11px; opacity: 0.7; margin-top: 6px; }\n"
+"    .typing-indicator { display: flex; gap: 4px; padding: 6px 4px; }\n"
+"    .typing-dot { width: 6px; height: 6px; background: #94a3b8; border-radius: 50%; animation: typing 1.4s infinite ease-in-out both; }\n"
+"    .typing-dot:nth-child(1) { animation-delay: -0.32s; }\n"
+"    .typing-dot:nth-child(2) { animation-delay: -0.16s; }\n"
+"    @keyframes typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }\n"
 "    .chat-input-row { display: flex; gap: 12px; align-items: center; }"
 "    .chat-input-row select { padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; min-width: 160px; }"
 "    .chat-input-row input { flex: 1; padding: 12px 16px; border: 1px solid var(--border); border-radius: 24px; font-size: 14px; }"
