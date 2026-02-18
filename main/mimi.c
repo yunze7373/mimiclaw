@@ -204,11 +204,21 @@ void app_main(void)
             ESP_LOGI(TAG, "Memory after web_ui: %d KB free",
                      heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
 
-            /* Outbound dispatch task */
-            xTaskCreatePinnedToCore(
-                outbound_dispatch_task, "outbound",
-                MIMI_OUTBOUND_STACK, NULL,
-                MIMI_OUTBOUND_PRIO, NULL, MIMI_OUTBOUND_CORE);
+            /* Outbound dispatch task — stack in PSRAM to save internal SRAM */
+            {
+                static StaticTask_t s_outbound_tcb;
+                StackType_t *ob_stack = heap_caps_malloc(MIMI_OUTBOUND_STACK,
+                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                if (ob_stack) {
+                    xTaskCreateStaticPinnedToCore(
+                        outbound_dispatch_task, "outbound",
+                        MIMI_OUTBOUND_STACK, NULL,
+                        MIMI_OUTBOUND_PRIO, ob_stack, &s_outbound_tcb,
+                        MIMI_OUTBOUND_CORE);
+                } else {
+                    ESP_LOGE(TAG, "Failed to allocate outbound stack from PSRAM");
+                }
+            }
 
             ESP_LOGI(TAG, "All services started!");
         } else {

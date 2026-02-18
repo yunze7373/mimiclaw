@@ -3,6 +3,8 @@
 #include "bus/message_bus.h"
 #include "proxy/http_proxy.h"
 #include "wifi/wifi_manager.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -141,8 +143,8 @@ static char *tg_api_call_direct(const char *method, const char *post_data)
             .event_handler = http_event_handler,
             .user_data = &resp,
             .timeout_ms = (MIMI_TG_POLL_TIMEOUT_S + 15) * 1000,
-            .buffer_size = 2048,
-            .buffer_size_tx = 2048,
+            .buffer_size = 512,   /* Reduced: save internal SRAM */
+            .buffer_size_tx = 1024,
             .crt_bundle_attach = esp_crt_bundle_attach,
             .keep_alive_enable = false,
         };
@@ -315,12 +317,20 @@ esp_err_t telegram_bot_init(void)
 
 esp_err_t telegram_bot_start(void)
 {
-    BaseType_t ret = xTaskCreatePinnedToCore(
+    /* Allocate task stack from PSRAM to save ~12KB of internal SRAM */
+    static StaticTask_t s_tg_tcb;
+    StackType_t *stack = heap_caps_malloc(MIMI_TG_POLL_STACK, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!stack) {
+        ESP_LOGE(TAG, "Failed to allocate telegram stack from PSRAM");
+        return ESP_ERR_NO_MEM;
+    }
+
+    TaskHandle_t handle = xTaskCreateStaticPinnedToCore(
         telegram_poll_task, "tg_poll",
         MIMI_TG_POLL_STACK, NULL,
-        MIMI_TG_POLL_PRIO, NULL, MIMI_TG_POLL_CORE);
+        MIMI_TG_POLL_PRIO, stack, &s_tg_tcb, MIMI_TG_POLL_CORE);
 
-    return (ret == pdPASS) ? ESP_OK : ESP_FAIL;
+    return handle ? ESP_OK : ESP_FAIL;
 }
 
 esp_err_t telegram_send_chat_action(const char *chat_id, const char *action)

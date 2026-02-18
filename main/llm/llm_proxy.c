@@ -386,8 +386,8 @@ static esp_err_t llm_http_direct(const char *post_data, http_req_ctx_t *ctx, int
         .event_handler = http_event_handler,
         .user_data = ctx,
         .timeout_ms = 120000,   /* 120s timeout for large prompts */
-        .buffer_size = 4096,
-        .buffer_size_tx = 4096,
+        .buffer_size = 512,     /* Reduced: save internal SRAM for TLS/AES */
+        .buffer_size_tx = 2048, /* Reduced: headers + chunked body writes */
         .crt_bundle_attach = esp_crt_bundle_attach,
         .keep_alive_enable = false,
     };
