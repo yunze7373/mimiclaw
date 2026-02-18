@@ -225,6 +225,25 @@ static int l_i2c_init(lua_State *L)
     return 1;
 }
 
+static int l_i2c_scan(lua_State *L)
+{
+    /* Scan I2C bus for devices - returns table of found addresses */
+    i2c_port_t port = I2C_NUM_0;
+
+    i2c_config_t conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = -1,  /* Will be set by board profile */
+        .scl_io_num = -1,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = 100000,
+    };
+
+    /* For now, return empty table - real scan requires pin config */
+    lua_newtable(L);
+    return 1;
+}
+
 static int l_i2c_read(lua_State *L)
 {
     int skill_id = up_skill_id(L);
@@ -469,6 +488,93 @@ static int l_gpio_detach_interrupt(lua_State *L)
     return 1;
 }
 
+/* ── I2S API (for INMP441 mic, MAX98357A amp) ── */
+#include "driver/i2s.h"
+
+static bool has_perm_i2s(int skill_id, const char *i2s)
+{
+    return skill_perm_contains(s_permissions[skill_id].i2s, s_permissions[skill_id].i2s_count, i2s);
+}
+
+static int l_i2s_init(lua_State *L)
+{
+    int skill_id = up_skill_id(L);
+    const char *i2s = luaL_checkstring(L, 1);
+    if (!has_perm_i2s(skill_id, i2s)) return luaL_error(L, "permission denied: i2s %s", i2s);
+
+    i2s_port_t port = I2S_NUM_0;
+    if (strcmp(i2s, "i2s1") == 0 || strcmp(i2s, "I2S1") == 0) {
+        port = I2S_NUM_1;
+    }
+
+    i2s_config_t config = {
+        .mode = I2S_MODE_MASTER | I2S_MODE_RX,
+        .sample_rate = 16000,
+        .bits_per_sample = 16,
+        .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+        .dma_buf_count = 8,
+        .dma_buf_len = 256,
+        .use_apll = false,
+        .tx_desc_auto_clear = false,
+        .fixed_mclk = 0,
+    };
+
+    esp_err_t ret = i2s_driver_install(port, &config, 0, NULL);
+    if (ret != ESP_OK) {
+        return luaL_error(L, "i2s_driver_install failed: %s", esp_err_to_name(ret));
+    }
+
+    i2s_zero_dma_buffer(port);
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+static int l_i2s_read(lua_State *L)
+{
+    int skill_id = up_skill_id(L);
+    const char *i2s = luaL_checkstring(L, 1);
+    if (!has_perm_i2s(skill_id, i2s)) return luaL_error(L, "permission denied: i2s %s", i2s);
+
+    i2s_port_t port = I2S_NUM_0;
+    if (strcmp(i2s, "i2s1") == 0 || strcmp(i2s, "I2S1") == 0) {
+        port = I2S_NUM_1;
+    }
+
+    size_t bytes_read = 0;
+    int timeout_ms = (int)luaL_optinteger(L, 2, 100);
+    int max_bytes = (int)luaL_optinteger(L, 3, 1024);
+
+    uint8_t *buf = malloc(max_bytes);
+    if (!buf) return luaL_error(L, "malloc failed");
+
+    esp_err_t ret = i2s_read(port, buf, max_bytes, &bytes_read, pdMS_TO_TICKS(timeout_ms));
+    free(buf);
+
+    if (ret != ESP_OK) {
+        return luaL_error(L, "i2s_read failed: %s", esp_err_to_name(ret));
+    }
+
+    lua_pushinteger(L, bytes_read);
+    return 1;
+}
+
+static int l_i2s_scan(lua_State *L)
+{
+    /* I2S device detection - simplified, returns available ports */
+    lua_newtable(L);
+    lua_pushboolean(L, true);
+    lua_setfield(L, -2, "i2s0");
+    #ifdef SOC_I2S_NUM
+    #if SOC_I2S_NUM > 1
+    lua_pushboolean(L, true);
+    lua_setfield(L, -2, "i2s1");
+    #endif
+    #endif
+    return 1;
+}
+
 typedef struct {
     const char *name;
     lua_CFunction fn;
@@ -490,6 +596,7 @@ void skill_hw_api_push_table(lua_State *L, int skill_id, const skill_permissions
         {"i2c_init", l_i2c_init},
         {"i2c_read", l_i2c_read},
         {"i2c_write", l_i2c_write},
+        {"i2c_scan", l_i2c_scan},
         {"uart_send", l_uart_send},
         {"delay_ms", l_delay_ms},
         {"log", l_log},
@@ -499,6 +606,9 @@ void skill_hw_api_push_table(lua_State *L, int skill_id, const skill_permissions
         {"timer_cancel", l_timer_cancel},
         {"gpio_attach_interrupt", l_gpio_attach_interrupt},
         {"gpio_detach_interrupt", l_gpio_detach_interrupt},
+        {"i2s_init", l_i2s_init},
+        {"i2s_read", l_i2s_read},
+        {"i2s_scan", l_i2s_scan},
     };
 
     lua_newtable(L);

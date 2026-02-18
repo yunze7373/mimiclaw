@@ -30,6 +30,10 @@ typedef struct {
     int pwm_count;
     char adc[SKILL_MAX_PERM_ITEMS][16];
     int adc_count;
+    char i2s[SKILL_MAX_PERM_ITEMS][16];
+    int i2s_count;
+    char rmt[SKILL_MAX_PERM_ITEMS][16];
+    int rmt_count;
 } skill_permissions_t;
 
 static inline bool skill_perm_contains(const char list[][16], int count, const char *value)
