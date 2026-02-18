@@ -853,6 +853,157 @@ static bool file_exists_regular(const char *path)
     return S_ISREG(st.st_mode);
 }
 
+static bool file_exists_dir(const char *path)
+{
+    struct stat st = {0};
+    if (stat(path, &st) != 0) return false;
+    return S_ISDIR(st.st_mode);
+}
+
+static bool ensure_dir_recursive(const char *path)
+{
+    if (!path || !path[0]) return false;
+    if (file_exists_dir(path)) return true;
+
+    char tmp[512];
+    size_t n = strlen(path);
+    if (n == 0 || n >= sizeof(tmp)) return false;
+    memcpy(tmp, path, n + 1);
+
+    for (size_t i = 1; i < n; i++) {
+        if (tmp[i] != '/') continue;
+        tmp[i] = '\0';
+        if (tmp[0] && !file_exists_dir(tmp) && mkdir(tmp, 0755) != 0) return false;
+        tmp[i] = '/';
+    }
+    if (!file_exists_dir(tmp) && mkdir(tmp, 0755) != 0) return false;
+    return true;
+}
+
+static int parse_octal_field(const char *p, size_t n)
+{
+    int v = 0;
+    size_t i = 0;
+    while (i < n && (p[i] == ' ' || p[i] == '\0')) i++;
+    for (; i < n; i++) {
+        char c = p[i];
+        if (c < '0' || c > '7') break;
+        v = (v << 3) + (c - '0');
+    }
+    return v;
+}
+
+static bool extract_tar_to_dir(const char *tar_path, const char *out_dir)
+{
+    if (!tar_path || !out_dir) return false;
+    if (!ensure_dir_recursive(out_dir)) return false;
+
+    FILE *f = fopen(tar_path, "rb");
+    if (!f) return false;
+
+    uint8_t header[512];
+    uint8_t io_buf[512];
+    bool ok = true;
+
+    while (ok) {
+        size_t r = fread(header, 1, sizeof(header), f);
+        if (r != sizeof(header)) {
+            ok = false;
+            break;
+        }
+
+        bool all_zero = true;
+        for (size_t i = 0; i < sizeof(header); i++) {
+            if (header[i] != 0) {
+                all_zero = false;
+                break;
+            }
+        }
+        if (all_zero) break;
+
+        const char *name = (const char *)&header[0];
+        const char *size_field = (const char *)&header[124];
+        const char *typeflag = (const char *)&header[156];
+        const char *prefix = (const char *)&header[345];
+
+        char rel[320] = {0};
+        if (prefix[0]) snprintf(rel, sizeof(rel), "%s/%s", prefix, name);
+        else snprintf(rel, sizeof(rel), "%s", name);
+
+        if (!is_safe_relpath(rel)) {
+            ok = false;
+            break;
+        }
+
+        int file_sz = parse_octal_field(size_field, 12);
+        if (file_sz < 0) {
+            ok = false;
+            break;
+        }
+
+        char full[512];
+        if (snprintf(full, sizeof(full), "%s/%s", out_dir, rel) <= 0 || strlen(full) >= sizeof(full)) {
+            ok = false;
+            break;
+        }
+
+        char tf = typeflag[0];
+        if (tf == '5') {
+            if (!ensure_dir_recursive(full)) {
+                ok = false;
+                break;
+            }
+        } else if (tf == '0' || tf == '\0') {
+            char *slash = strrchr(full, '/');
+            if (slash) {
+                *slash = '\0';
+                if (!ensure_dir_recursive(full)) {
+                    ok = false;
+                    break;
+                }
+                *slash = '/';
+            }
+            FILE *out = fopen(full, "wb");
+            if (!out) {
+                ok = false;
+                break;
+            }
+            int remain = file_sz;
+            while (remain > 0) {
+                int chunk = remain > (int)sizeof(io_buf) ? (int)sizeof(io_buf) : remain;
+                size_t rr = fread(io_buf, 1, (size_t)chunk, f);
+                if (rr != (size_t)chunk) {
+                    ok = false;
+                    break;
+                }
+                if (fwrite(io_buf, 1, rr, out) != rr) {
+                    ok = false;
+                    break;
+                }
+                remain -= chunk;
+            }
+            fclose(out);
+            if (!ok) break;
+            int pad = (512 - (file_sz % 512)) % 512;
+            if (pad > 0 && fseek(f, pad, SEEK_CUR) != 0) {
+                ok = false;
+                break;
+            }
+            continue;
+        }
+
+        int skip = file_sz;
+        int pad = (512 - (skip % 512)) % 512;
+        if (fseek(f, skip + pad, SEEK_CUR) != 0) {
+            ok = false;
+            break;
+        }
+    }
+
+    fclose(f);
+    return ok;
+}
+
 static int find_slot_by_skill_name(const char *name)
 {
     if (!name || !name[0]) return -1;
@@ -861,6 +1012,23 @@ static int find_slot_by_skill_name(const char *name)
         if (strcmp(s_slots[i].name, name) == 0) return i;
     }
     return -1;
+}
+
+static int find_free_slot_idx(void)
+{
+    for (int i = 0; i < SKILL_MAX_SLOTS; i++) {
+        if (!s_slots[i].used) return i;
+    }
+    return -1;
+}
+
+static int count_used_slots(void)
+{
+    int n = 0;
+    for (int i = 0; i < SKILL_MAX_SLOTS; i++) {
+        if (s_slots[i].used) n++;
+    }
+    return n;
 }
 
 static void parse_perm_array(cJSON *obj, const char *key, char out[][16], int *count)
@@ -1532,7 +1700,7 @@ static void bytes_to_hex_lower(const uint8_t *bytes, size_t n, char *out, size_t
 esp_err_t skill_engine_install_with_checksum(const char *url, const char *checksum_hex)
 {
     if (!url || !url[0]) return ESP_ERR_INVALID_ARG;
-    if (s_slot_count >= SKILL_MAX_SLOTS) return ESP_ERR_NO_MEM;
+    int free_slot_idx = find_free_slot_idx();
 
     char expected_sha256[65] = {0};
     bool verify_checksum = false;
@@ -1564,10 +1732,12 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
 
     char staging_path[512];
     char out_path[512];
+    char backup_path[512];
     size_t skill_dir_len = strlen(SKILL_DIR);
     size_t staging_dir_len = strlen(staging_dir);
     size_t out_need = skill_dir_len + 1 + fname_len + 1;
     size_t staging_need = staging_dir_len + 1 + fname_len + 5 + 1; /* "/"+fname+".part"+NUL */
+    size_t backup_need = staging_dir_len + 1 + fname_len + 4 + 1;  /* "/"+fname+".bak"+NUL */
 
     if (out_need > sizeof(out_path)) {
         ESP_LOGE(TAG, "Output path too long");
@@ -1575,6 +1745,10 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
     }
     if (staging_need > sizeof(staging_path)) {
         ESP_LOGE(TAG, "Staging path too long");
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (backup_need > sizeof(backup_path)) {
+        ESP_LOGE(TAG, "Backup path too long");
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -1589,6 +1763,12 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
     memcpy(staging_path + staging_dir_len + 1 + fname_len, ".part", 5);
     staging_path[staging_dir_len + 1 + fname_len + 5] = '\0';
 
+    memcpy(backup_path, staging_dir, staging_dir_len);
+    backup_path[staging_dir_len] = '/';
+    memcpy(backup_path + staging_dir_len + 1, fname, fname_len);
+    memcpy(backup_path + staging_dir_len + 1 + fname_len, ".bak", 4);
+    backup_path[staging_dir_len + 1 + fname_len + 4] = '\0';
+
     FILE *f = fopen(staging_path, "wb");
     if (!f) return ESP_FAIL;
 
@@ -1599,6 +1779,18 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
         fclose(f);
         esp_http_client_cleanup(client);
         return ret;
+    }
+    int status = esp_http_client_fetch_headers(client);
+    if (status >= 0) {
+        int code = esp_http_client_get_status_code(client);
+        if (code < 200 || code >= 300) {
+            fclose(f);
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            remove(staging_path);
+            ESP_LOGE(TAG, "Skill download failed, HTTP status=%d", code);
+            return ESP_FAIL;
+        }
     }
     mbedtls_sha256_context sha_ctx;
     uint8_t sha_bin[32] = {0};
@@ -1635,24 +1827,161 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
             return ESP_ERR_INVALID_CRC;
         }
     }
-    remove(out_path);
-    if (rename(staging_path, out_path) != 0) {
-        remove(staging_path);
-        return ESP_FAIL;
-    }
-
     if (has_suffix(fname, ".lua")) {
-        if (!lua_lock_take(pdMS_TO_TICKS(500))) return ESP_ERR_TIMEOUT;
-        bool ok_load = load_legacy_lua_file(fname, s_slot_count);
+        bool had_old = file_exists_regular(out_path);
+        remove(backup_path);
+        if (had_old && rename(out_path, backup_path) != 0) {
+            remove(staging_path);
+            ESP_LOGE(TAG, "Failed to backup existing skill file");
+            return ESP_FAIL;
+        }
+        if (rename(staging_path, out_path) != 0) {
+            if (had_old) (void)rename(backup_path, out_path);
+            remove(staging_path);
+            return ESP_FAIL;
+        }
+
+        int existing_slot = find_slot_by_skill_name(fname);
+        int load_slot = free_slot_idx;
+        if (existing_slot < 0 && load_slot < 0) {
+            remove(out_path);
+            if (had_old) (void)rename(backup_path, out_path);
+            else remove(backup_path);
+            return ESP_ERR_NO_MEM;
+        }
+        if (existing_slot >= 0) {
+            unload_slot(existing_slot);
+            load_slot = existing_slot;
+        }
+        if (!lua_lock_take(pdMS_TO_TICKS(500))) {
+            remove(out_path);
+            if (had_old) (void)rename(backup_path, out_path);
+            else remove(backup_path);
+            return ESP_ERR_TIMEOUT;
+        }
+        bool ok_load = load_legacy_lua_file(fname, load_slot);
         lua_lock_give();
         if (ok_load) {
-            s_slot_count++;
+            remove(backup_path);
+            s_slot_count = count_used_slots();
             tool_registry_rebuild_json();
             return ESP_OK;
         }
+
         remove(out_path);
+        if (had_old) {
+            (void)rename(backup_path, out_path);
+            if (!lua_lock_take(pdMS_TO_TICKS(500))) return ESP_ERR_TIMEOUT;
+            bool restored = load_legacy_lua_file(fname, load_slot);
+            lua_lock_give();
+            if (restored) {
+                s_slot_count = count_used_slots();
+                tool_registry_rebuild_json();
+            }
+        } else {
+            remove(backup_path);
+        }
+        return ESP_FAIL;
     }
-    return ESP_FAIL;
+
+    if (has_suffix(fname, ".tar")) {
+        char extract_dir[512];
+        if (snprintf(extract_dir, sizeof(extract_dir), "%s/.extract_skill", staging_dir) <= 0 ||
+            strlen(extract_dir) >= sizeof(extract_dir)) {
+            remove(staging_path);
+            return ESP_ERR_INVALID_ARG;
+        }
+        remove_path_recursive(extract_dir);
+        if (!extract_tar_to_dir(staging_path, extract_dir)) {
+            remove(staging_path);
+            remove_path_recursive(extract_dir);
+            ESP_LOGE(TAG, "Tar extract failed");
+            return ESP_FAIL;
+        }
+        remove(staging_path);
+
+        skill_slot_t meta = {0};
+        meta.env_ref = LUA_NOREF;
+        if (!load_manifest(&meta, extract_dir)) {
+            remove_path_recursive(extract_dir);
+            ESP_LOGE(TAG, "Invalid bundle manifest in tar");
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        char final_dir[512];
+        if (snprintf(final_dir, sizeof(final_dir), "%s/%s", SKILL_DIR, meta.name) <= 0 ||
+            strlen(final_dir) >= sizeof(final_dir)) {
+            remove_path_recursive(extract_dir);
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        char dir_backup[512];
+        if (snprintf(dir_backup, sizeof(dir_backup), "%s/%s.bakdir", staging_dir, meta.name) <= 0 ||
+            strlen(dir_backup) >= sizeof(dir_backup)) {
+            remove_path_recursive(extract_dir);
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        bool had_old_dir = file_exists_dir(final_dir);
+        remove_path_recursive(dir_backup);
+        if (had_old_dir && rename(final_dir, dir_backup) != 0) {
+            remove_path_recursive(extract_dir);
+            ESP_LOGE(TAG, "Failed to backup existing bundle directory");
+            return ESP_FAIL;
+        }
+        if (rename(extract_dir, final_dir) != 0) {
+            if (had_old_dir) (void)rename(dir_backup, final_dir);
+            remove_path_recursive(extract_dir);
+            ESP_LOGE(TAG, "Failed to place extracted bundle");
+            return ESP_FAIL;
+        }
+
+        int existing_slot = find_slot_by_skill_name(meta.name);
+        int load_slot = free_slot_idx;
+        if (existing_slot < 0 && load_slot < 0) {
+            remove_path_recursive(final_dir);
+            if (had_old_dir) (void)rename(dir_backup, final_dir);
+            else remove_path_recursive(dir_backup);
+            return ESP_ERR_NO_MEM;
+        }
+        if (existing_slot >= 0) {
+            unload_slot(existing_slot);
+            load_slot = existing_slot;
+        }
+
+        if (!lua_lock_take(pdMS_TO_TICKS(500))) {
+            remove_path_recursive(final_dir);
+            if (had_old_dir) (void)rename(dir_backup, final_dir);
+            return ESP_ERR_TIMEOUT;
+        }
+        bool ok_load = load_bundle_dir(final_dir, load_slot);
+        lua_lock_give();
+
+        if (ok_load) {
+            remove_path_recursive(dir_backup);
+            s_slot_count = count_used_slots();
+            tool_registry_rebuild_json();
+            return ESP_OK;
+        }
+
+        remove_path_recursive(final_dir);
+        if (had_old_dir) {
+            (void)rename(dir_backup, final_dir);
+            if (!lua_lock_take(pdMS_TO_TICKS(500))) return ESP_ERR_TIMEOUT;
+            bool restored = load_bundle_dir(final_dir, load_slot);
+            lua_lock_give();
+            if (restored) {
+                s_slot_count = count_used_slots();
+                tool_registry_rebuild_json();
+            }
+        } else {
+            remove_path_recursive(dir_backup);
+        }
+        return ESP_FAIL;
+    }
+
+    remove(staging_path);
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 esp_err_t skill_engine_install(const char *url)
@@ -1674,6 +2003,7 @@ esp_err_t skill_engine_uninstall(const char *name)
         }
         unload_slot(i);
         if (fs_path[0]) remove_path_recursive(fs_path);
+        s_slot_count = count_used_slots();
         tool_registry_rebuild_json();
         ESP_LOGI(TAG, "Skill uninstalled: %s", name);
         return ESP_OK;
@@ -1706,5 +2036,5 @@ char *skill_engine_list_json(void)
 
 int skill_engine_get_count(void)
 {
-    return s_slot_count;
+    return count_used_slots();
 }
