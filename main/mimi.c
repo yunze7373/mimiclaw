@@ -134,6 +134,9 @@ void app_main(void)
     ESP_ERROR_CHECK(llm_proxy_init());
     ESP_ERROR_CHECK(tool_registry_init());
 
+    /* Initialize RGB LED (lazy init in tool, but try here for early boot feedback) */
+    rgb_init();
+
     /* Load Lua hardware skills (must be after SPIFFS + tool_registry) */
     ESP_ERROR_CHECK(skill_engine_init());
 
