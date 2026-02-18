@@ -26,6 +26,7 @@ char *skill_engine_list_json(void);
 char *skill_engine_install_status_json(void);
 char *skill_engine_install_capabilities_json(void);
 char *skill_engine_install_history_json(void);
+void skill_engine_install_history_clear(void);
 
 /**
  * Number of active skill slots.

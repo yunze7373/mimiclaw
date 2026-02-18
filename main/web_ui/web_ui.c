@@ -1317,8 +1317,8 @@ static esp_err_t skills_install_handler(httpd_req_t *req)
 
     esp_err_t err = skill_engine_install_with_checksum(url->valuestring, checksum_str);
     cJSON_Delete(root);
+    char *status = skill_engine_install_status_json();
     if (err != ESP_OK) {
-        char *status = skill_engine_install_status_json();
         char resp[512];
         if (status) {
             snprintf(resp, sizeof(resp),
@@ -1333,6 +1333,14 @@ static esp_err_t skills_install_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
+    if (status) {
+        char resp[512];
+        snprintf(resp, sizeof(resp), "{\"success\":true,\"install_status\":%s}", status);
+        free(status);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
@@ -1361,6 +1369,15 @@ static esp_err_t skills_delete_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t skills_install_history_delete_handler(httpd_req_t *req)
+{
+    (void)req;
+    skill_engine_install_history_clear();
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
@@ -1494,6 +1511,13 @@ esp_err_t web_ui_init(void)
         .handler = skills_install_history_handler,
     };
     httpd_register_uri_handler(server, &api_skills_install_history);
+
+    httpd_uri_t api_skills_install_history_delete = {
+        .uri = "/api/skills/install_history",
+        .method = HTTP_DELETE,
+        .handler = skills_install_history_delete_handler,
+    };
+    httpd_register_uri_handler(server, &api_skills_install_history_delete);
 
     httpd_uri_t api_skills_install = {
         .uri = "/api/skills/install",

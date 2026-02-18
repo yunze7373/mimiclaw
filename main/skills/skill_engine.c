@@ -100,7 +100,10 @@ typedef struct {
     uint32_t seq;
     int64_t started_us;
     int64_t finished_us;
+    int64_t total_bytes;
+    int64_t downloaded_bytes;
     char stage[32];
+    char package_type[8];
     char url[256];
     char last_error[64];
 } install_status_t;
@@ -170,7 +173,10 @@ static void install_status_begin(const char *url)
     s_install_status.seq++;
     s_install_status.started_us = esp_timer_get_time();
     s_install_status.finished_us = 0;
+    s_install_status.total_bytes = 0;
+    s_install_status.downloaded_bytes = 0;
     snprintf(s_install_status.stage, sizeof(s_install_status.stage), "%s", "prepare");
+    snprintf(s_install_status.package_type, sizeof(s_install_status.package_type), "%s", "");
     snprintf(s_install_status.url, sizeof(s_install_status.url), "%s", url ? url : "");
     s_install_status.last_error[0] = '\0';
 }
@@ -205,6 +211,27 @@ static void install_status_finish(esp_err_t err)
 
     s_install_history_next = (s_install_history_next + 1) % INSTALL_HISTORY_MAX;
     if (s_install_history_count < INSTALL_HISTORY_MAX) s_install_history_count++;
+}
+
+static void install_status_set_total_bytes(int64_t n)
+{
+    if (n > 0) s_install_status.total_bytes = n;
+}
+
+static void install_status_add_downloaded(int64_t n)
+{
+    if (n <= 0) return;
+    s_install_status.downloaded_bytes += n;
+    if (s_install_status.total_bytes > 0 &&
+        s_install_status.downloaded_bytes > s_install_status.total_bytes) {
+        s_install_status.downloaded_bytes = s_install_status.total_bytes;
+    }
+}
+
+static void install_status_set_package_type(const char *t)
+{
+    if (!t || !t[0]) return;
+    snprintf(s_install_status.package_type, sizeof(s_install_status.package_type), "%s", t);
 }
 
 static cJSON *lua_value_to_cjson(lua_State *L, int idx);
@@ -2183,6 +2210,10 @@ static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const 
         ESP_LOGE(TAG, "Unsupported skill format (only .lua/.tar/.zip)");
         return ESP_ERR_NOT_SUPPORTED;
     }
+    if (has_suffix(fname, ".lua")) install_status_set_package_type("lua");
+    else if (has_suffix(fname, ".tar")) install_status_set_package_type("tar");
+    else if (has_suffix(fname, ".zip")) install_status_set_package_type("zip");
+
     char staging_dir[512];
     snprintf(staging_dir, sizeof(staging_dir), "%s/.staging", SKILL_DIR);
     struct stat st = {0};
@@ -2252,6 +2283,7 @@ static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const 
             ESP_LOGE(TAG, "Skill download too large: %lld bytes", (long long)content_len);
             return ESP_ERR_NO_MEM;
         }
+        install_status_set_total_bytes(content_len);
     }
     mbedtls_sha256_context sha_ctx;
     uint8_t sha_bin[32] = {0};
@@ -2266,6 +2298,7 @@ static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const 
     while ((n = esp_http_client_read(client, buf, sizeof(buf))) > 0) {
         fwrite(buf, 1, n, f);
         total_read += n;
+        install_status_add_downloaded(n);
         if (total_read > SKILL_INSTALL_MAX_BYTES) {
             fclose(f);
             esp_http_client_close(client);
@@ -2482,8 +2515,11 @@ char *skill_engine_install_status_json(void)
     cJSON_AddBoolToObject(obj, "in_progress", s_install_status.in_progress);
     cJSON_AddNumberToObject(obj, "seq", (double)s_install_status.seq);
     cJSON_AddStringToObject(obj, "stage", s_install_status.stage);
+    cJSON_AddStringToObject(obj, "package_type", s_install_status.package_type);
     cJSON_AddStringToObject(obj, "url", s_install_status.url);
     cJSON_AddStringToObject(obj, "last_error", s_install_status.last_error);
+    cJSON_AddNumberToObject(obj, "total_bytes", (double)s_install_status.total_bytes);
+    cJSON_AddNumberToObject(obj, "downloaded_bytes", (double)s_install_status.downloaded_bytes);
     cJSON_AddNumberToObject(obj, "started_us", (double)s_install_status.started_us);
     cJSON_AddNumberToObject(obj, "finished_us", (double)s_install_status.finished_us);
     int64_t end_us = s_install_status.in_progress ? esp_timer_get_time() : s_install_status.finished_us;
@@ -2492,6 +2528,12 @@ char *skill_engine_install_status_json(void)
         elapsed_ms = (end_us - s_install_status.started_us) / 1000;
     }
     cJSON_AddNumberToObject(obj, "elapsed_ms", (double)elapsed_ms);
+    double progress_pct = 0.0;
+    if (s_install_status.total_bytes > 0) {
+        progress_pct = ((double)s_install_status.downloaded_bytes * 100.0) /
+                       (double)s_install_status.total_bytes;
+    }
+    cJSON_AddNumberToObject(obj, "progress_pct", progress_pct);
 
     char *json = cJSON_PrintUnformatted(obj);
     cJSON_Delete(obj);
@@ -2517,6 +2559,7 @@ char *skill_engine_install_capabilities_json(void)
     cJSON_AddBoolToObject(obj, "signature_verification", false);
     cJSON_AddStringToObject(obj, "downgrade_policy", "reject_if_installed_newer");
     cJSON_AddNumberToObject(obj, "max_package_bytes", (double)SKILL_INSTALL_MAX_BYTES);
+    cJSON_AddNumberToObject(obj, "install_history_max", (double)INSTALL_HISTORY_MAX);
 
     char *json = cJSON_PrintUnformatted(obj);
     cJSON_Delete(obj);
@@ -2554,4 +2597,11 @@ char *skill_engine_install_history_json(void)
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     return json;
+}
+
+void skill_engine_install_history_clear(void)
+{
+    memset(s_install_history, 0, sizeof(s_install_history));
+    s_install_history_count = 0;
+    s_install_history_next = 0;
 }
