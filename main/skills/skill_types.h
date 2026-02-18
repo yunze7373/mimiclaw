@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <string.h>
 
-#define SKILL_MAX_SLOTS             16
+#define SKILL_MAX_SLOTS             4
 #define SKILL_MAX_TOOLS_PER_SKILL   8
 #define SKILL_MAX_EVENTS_PER_SKILL  8
 #define SKILL_MAX_PERM_ITEMS        8
