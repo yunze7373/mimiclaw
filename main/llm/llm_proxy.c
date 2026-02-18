@@ -23,6 +23,7 @@ static char s_model[LLM_MODEL_MAX_LEN] = MIMI_LLM_DEFAULT_MODEL;
 static char s_provider[LLM_PROVIDER_MAX_LEN] = MIMI_LLM_PROVIDER_DEFAULT;
 static char s_ollama_host[64] = MIMI_SECRET_OLLAMA_HOST;
 static char s_ollama_port[8] = MIMI_SECRET_OLLAMA_PORT;
+static bool s_streaming = true; /* streaming enabled by default */
 
 static void safe_copy(char *dst, size_t dst_size, const char *src)
 {
@@ -350,6 +351,10 @@ esp_err_t llm_proxy_init(void)
         memset(tmp, 0, sizeof(tmp));
         if (nvs_get_str(nvs, MIMI_NVS_KEY_OLLAMA_PORT, tmp, &len) == ESP_OK && tmp[0]) {
             safe_copy(s_ollama_port, sizeof(s_ollama_port), tmp);
+        }
+        uint8_t stream_val = 1;
+        if (nvs_get_u8(nvs, "streaming", &stream_val) == ESP_OK) {
+            s_streaming = (stream_val != 0);
         }
         nvs_close(nvs);
     }
@@ -1375,4 +1380,22 @@ const char *llm_get_provider(void)
 const char *llm_get_model(void)
 {
     return s_model;
+}
+
+esp_err_t llm_set_streaming(bool enable)
+{
+    nvs_handle_t nvs;
+    ESP_ERROR_CHECK(nvs_open(MIMI_NVS_LLM, NVS_READWRITE, &nvs));
+    ESP_ERROR_CHECK(nvs_set_u8(nvs, "streaming", enable ? 1 : 0));
+    ESP_ERROR_CHECK(nvs_commit(nvs));
+    nvs_close(nvs);
+
+    s_streaming = enable;
+    ESP_LOGI(TAG, "Streaming %s", enable ? "enabled" : "disabled");
+    return ESP_OK;
+}
+
+bool llm_get_streaming(void)
+{
+    return s_streaming;
 }

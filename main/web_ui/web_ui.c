@@ -298,6 +298,12 @@ static const char *HTML_PAGE =
 "              <input type='text' id='ollama_port' placeholder='默认: 11434'>"
 "            </div>"
 "          </div>"
+"          <div class='form-row'>"
+"            <div class='form-group' style='flex-direction:row;align-items:center;gap:12px'>"
+"              <input type='checkbox' id='streaming' style='width:18px;height:18px'>"
+"              <label for='streaming' style='margin:0'>启用流式输出 (Streaming)</label>"
+"            </div>"
+"          </div>"
 "        </div>"
 ""
 "        <div class='card'>"
@@ -449,6 +455,7 @@ static const char *HTML_PAGE =
 "        document.getElementById('api_key').value = data.api_key || '';"
 "        document.getElementById('ollama_host').value = data.ollama_host || '';"
 "        document.getElementById('ollama_port').value = data.ollama_port || '11434';"
+"        document.getElementById('streaming').checked = data.streaming !== false;"
 "        updateOllamaFields();"
 "      } catch(e) { console.error(e); }"
 "    }"
@@ -465,7 +472,8 @@ static const char *HTML_PAGE =
 "        model: document.getElementById('model').value,"
 "        api_key: document.getElementById('api_key').value,"
 "        ollama_host: document.getElementById('ollama_host').value,"
-"        ollama_port: document.getElementById('ollama_port').value"
+"        ollama_port: document.getElementById('ollama_port').value,"
+"        streaming: document.getElementById('streaming').checked"
 "      };"
 "      try {"
 "        const resp = await fetch('/api/config', {"
@@ -864,10 +872,19 @@ static esp_err_t favicon_handler(httpd_req_t *req)
 
 static esp_err_t config_get_handler(httpd_req_t *req)
 {
-    // TODO: read from NVS
-    const char *json = "{}";
+    const char *provider = llm_get_provider();
+    const char *model = llm_get_model();
+    bool streaming = llm_get_streaming();
+
+    char buf[512];
+    int len = snprintf(buf, sizeof(buf),
+        "{\"provider\":\"%s\",\"model\":\"%s\",\"streaming\":%s}",
+        provider ? provider : "",
+        model ? model : "",
+        streaming ? "true" : "false");
+
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json, strlen(json));
+    httpd_resp_send(req, buf, len);
     return ESP_OK;
 }
 
@@ -900,6 +917,9 @@ static esp_err_t config_post_handler(httpd_req_t *req)
 
     cJSON *ollama_port = cJSON_GetObjectItem(root, "ollama_port");
     if (ollama_port && cJSON_IsString(ollama_port)) llm_set_ollama_port(ollama_port->valuestring);
+
+    cJSON *streaming = cJSON_GetObjectItem(root, "streaming");
+    if (streaming && cJSON_IsBool(streaming)) llm_set_streaming(cJSON_IsTrue(streaming));
 
     cJSON_Delete(root);
 

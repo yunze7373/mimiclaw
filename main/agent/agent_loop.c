@@ -240,7 +240,7 @@ void agent_loop_task(void *pvParameters)
         while (iteration < MIMI_AGENT_MAX_TOOL_ITER) {
             /* Send "working" indicator before each API call */
             /* Determine if we can stream */
-            bool use_stream = (strcmp(msg.channel, "websocket") == 0);
+            bool use_stream = (strcmp(msg.channel, "websocket") == 0) && llm_get_streaming();
             agent_stream_ctx_t stream_ctx = {0};
             
             if (use_stream) {

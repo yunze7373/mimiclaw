@@ -48,6 +48,16 @@ const char *llm_get_provider(void);
 const char *llm_get_model(void);
 
 /**
+ * Enable or disable streaming mode. Saved to NVS.
+ */
+esp_err_t llm_set_streaming(bool enable);
+
+/**
+ * Get whether streaming is enabled.
+ */
+bool llm_get_streaming(void);
+
+/**
  * Send a chat completion request to the configured LLM API (non-streaming).
  *
  * @param system_prompt  System prompt string

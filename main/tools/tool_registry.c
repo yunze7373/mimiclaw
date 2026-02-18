@@ -4,12 +4,28 @@
 #include "tools/tool_files.h"
 #include "tools/tool_cron.h"
 #include "tools/tool_hardware.h"
+#include "llm/llm_proxy.h"
 
 #include <string.h>
 #include "esp_log.h"
 #include "cJSON.h"
 
 static const char *TAG = "tools";
+
+/* Inline tool: set_streaming */
+static esp_err_t tool_set_streaming_execute(const char *input_json, char *output, size_t output_size)
+{
+    cJSON *root = cJSON_Parse(input_json);
+    bool enable = true;
+    if (root) {
+        cJSON *val = cJSON_GetObjectItem(root, "enable");
+        if (val && cJSON_IsBool(val)) enable = cJSON_IsTrue(val);
+        cJSON_Delete(root);
+    }
+    llm_set_streaming(enable);
+    snprintf(output, output_size, "Streaming %s.", enable ? "enabled" : "disabled");
+    return ESP_OK;
+}
 
 #define MAX_TOOLS 16
 
@@ -94,6 +110,18 @@ esp_err_t tool_registry_init(void)
         .execute = tool_set_timezone_execute,
     };
     register_tool(&stz);
+
+    /* Register set_streaming */
+    mimi_tool_t ss = {
+        .name = "set_streaming",
+        .description = "Enable or disable streaming mode. When streaming is enabled, responses appear token by token in real-time. When disabled, the full response is sent at once (faster overall but no live typing effect).",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{\"enable\":{\"type\":\"boolean\",\"description\":\"true to enable streaming, false to disable\"}},"
+            "\"required\":[\"enable\"]}",
+        .execute = tool_set_streaming_execute,
+    };
+    register_tool(&ss);
 
     /* Register read_file */
     mimi_tool_t rf = {
