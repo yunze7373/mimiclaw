@@ -355,10 +355,11 @@ static esp_err_t llm_http_direct(const char *post_data, http_req_ctx_t *ctx, int
         .url = llm_api_url(),
         .event_handler = http_event_handler,
         .user_data = ctx,
-        .timeout_ms = 60000,   /* 60s timeout */
+        .timeout_ms = 120000,   /* 120s timeout for large prompts */
         .buffer_size = 4096,
         .buffer_size_tx = 4096,
         .crt_bundle_attach = esp_crt_bundle_attach,
+        .keep_alive_enable = false,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -388,7 +389,7 @@ static esp_err_t llm_http_direct(const char *post_data, http_req_ctx_t *ctx, int
 
 static esp_err_t llm_http_via_proxy(const char *post_data, http_req_ctx_t *ctx, int *out_status)
 {
-    proxy_conn_t *conn = proxy_conn_open(llm_api_host(), 443, 60000);
+    proxy_conn_t *conn = proxy_conn_open(llm_api_host(), 443, 120000);
     if (!conn) return ESP_ERR_HTTP_CONNECT;
 
     int body_len = strlen(post_data);
