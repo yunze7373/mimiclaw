@@ -16,6 +16,7 @@ static const char *TAG = "cron";
 
 #define MAX_CRON_JOBS  MIMI_CRON_MAX_JOBS
 #define CRON_BACKPRESSURE_DELAY_S  5
+#define CRON_MIN_FIRE_GAP_S        20
 
 static cron_job_t s_jobs[MAX_CRON_JOBS];
 static int s_job_count = 0;
@@ -214,12 +215,34 @@ static void cron_process_due_jobs(void)
         if (job->next_run <= 0) continue;
         if (job->next_run > now) continue;
 
+        if (job->last_run > 0 && (now - job->last_run) < CRON_MIN_FIRE_GAP_S) {
+            job->next_run = job->last_run + CRON_MIN_FIRE_GAP_S;
+            changed = true;
+            continue;
+        }
+
         int inbound_depth = message_bus_inbound_depth();
         if (inbound_depth >= (MIMI_BUS_QUEUE_LEN - 1)) {
             job->next_run = now + CRON_BACKPRESSURE_DELAY_S;
             changed = true;
             ESP_LOGW(TAG, "Deferring cron job %s due to inbound backpressure (depth=%d)",
                      job->name, inbound_depth);
+            continue;
+        }
+
+        if (message_bus_inbound_has_channel(MIMI_CHAN_WEBSOCKET)) {
+            job->next_run = now + CRON_BACKPRESSURE_DELAY_S;
+            changed = true;
+            ESP_LOGI(TAG, "Deferring cron job %s because websocket requests are pending", job->name);
+            continue;
+        }
+
+        if (strcmp(job->channel, MIMI_CHAN_SYSTEM) == 0 &&
+            message_bus_inbound_contains(job->channel, job->chat_id)) {
+            job->next_run = now + CRON_BACKPRESSURE_DELAY_S;
+            changed = true;
+            ESP_LOGW(TAG, "Deferring cron job %s due to dedupe on %s:%s",
+                     job->name, job->channel, job->chat_id);
             continue;
         }
 
@@ -375,6 +398,11 @@ esp_err_t cron_add_job(cron_job_t *job)
     /* Compute initial next_run */
     job->enabled = true;
     job->last_run = 0;
+    if (job->kind == CRON_KIND_EVERY && job->interval_s > 0 && job->interval_s < CRON_MIN_FIRE_GAP_S) {
+        ESP_LOGW(TAG, "Cron interval %us too small, clamped to %us",
+                 job->interval_s, (unsigned)CRON_MIN_FIRE_GAP_S);
+        job->interval_s = CRON_MIN_FIRE_GAP_S;
+    }
     compute_initial_next_run(job);
 
     /* Copy into static array */

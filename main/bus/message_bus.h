@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include <stdbool.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
@@ -44,6 +45,17 @@ esp_err_t message_bus_pop_inbound_prefer_websocket(mimi_msg_t *msg, uint32_t tim
  * Current inbound queue depth.
  */
 int message_bus_inbound_depth(void);
+
+/**
+ * Check whether inbound queue already contains a message with channel/chat_id.
+ * Returns true if found.
+ */
+bool message_bus_inbound_contains(const char *channel, const char *chat_id);
+
+/**
+ * Check whether inbound queue contains any message on given channel.
+ */
+bool message_bus_inbound_has_channel(const char *channel);
 
 /**
  * Push a message to the outbound queue (towards channels).

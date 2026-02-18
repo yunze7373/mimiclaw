@@ -93,6 +93,52 @@ int message_bus_inbound_depth(void)
     return (int)uxQueueMessagesWaiting(s_inbound_queue);
 }
 
+bool message_bus_inbound_contains(const char *channel, const char *chat_id)
+{
+    if (!s_inbound_queue || !channel || !chat_id) return false;
+
+    int waiting = (int)uxQueueMessagesWaiting(s_inbound_queue);
+    if (waiting <= 0) return false;
+
+    mimi_msg_t tmp[MIMI_BUS_QUEUE_LEN];
+    int count = 0;
+    while (count < MIMI_BUS_QUEUE_LEN && xQueueReceive(s_inbound_queue, &tmp[count], 0) == pdTRUE) {
+        count++;
+    }
+
+    bool found = false;
+    for (int i = 0; i < count; i++) {
+        if (strcmp(tmp[i].channel, channel) == 0 && strcmp(tmp[i].chat_id, chat_id) == 0) {
+            found = true;
+        }
+        xQueueSendToBack(s_inbound_queue, &tmp[i], 0);
+    }
+    return found;
+}
+
+bool message_bus_inbound_has_channel(const char *channel)
+{
+    if (!s_inbound_queue || !channel) return false;
+
+    int waiting = (int)uxQueueMessagesWaiting(s_inbound_queue);
+    if (waiting <= 0) return false;
+
+    mimi_msg_t tmp[MIMI_BUS_QUEUE_LEN];
+    int count = 0;
+    while (count < MIMI_BUS_QUEUE_LEN && xQueueReceive(s_inbound_queue, &tmp[count], 0) == pdTRUE) {
+        count++;
+    }
+
+    bool found = false;
+    for (int i = 0; i < count; i++) {
+        if (strcmp(tmp[i].channel, channel) == 0) {
+            found = true;
+        }
+        xQueueSendToBack(s_inbound_queue, &tmp[i], 0);
+    }
+    return found;
+}
+
 esp_err_t message_bus_push_outbound(const mimi_msg_t *msg)
 {
     if (xQueueSend(s_outbound_queue, msg, pdMS_TO_TICKS(1000)) != pdTRUE) {

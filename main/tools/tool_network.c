@@ -5,6 +5,9 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
+#include "esp_heap_caps.h"
+#include "esp_timer.h"
+#include "esp_bt.h"
 #include "mimi_config.h"
 
 /* NimBLE includes */
@@ -178,6 +181,36 @@ static ble_scan_result_t s_ble_results[BLE_SCAN_MAX_RESULTS];
 static int s_ble_result_count = 0;
 static SemaphoreHandle_t s_ble_scan_done = NULL;
 static bool s_ble_initialized = false;
+static int64_t s_ble_last_init_fail_us = 0;
+static int s_ble_init_fail_count = 0;
+
+#define BLE_INIT_FAIL_COOLDOWN_MS        10000
+#define BLE_MIN_INTERNAL_HEAP_BYTES      (90 * 1024)
+#define BLE_MIN_LARGEST_BLOCK_BYTES      (32 * 1024)
+
+static void ble_write_unavailable_json(char *output, size_t out_len,
+                                       const char *reason,
+                                       uint32_t free_internal,
+                                       uint32_t largest_internal,
+                                       uint32_t retry_after_s)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", false);
+    cJSON_AddStringToObject(root, "error", "ble_unavailable");
+    cJSON_AddStringToObject(root, "reason", reason ? reason : "unknown");
+    cJSON_AddNumberToObject(root, "free_internal", free_internal);
+    cJSON_AddNumberToObject(root, "largest_internal", largest_internal);
+    cJSON_AddNumberToObject(root, "retry_after_s", retry_after_s);
+
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (json) {
+        snprintf(output, out_len, "%s", json);
+        free(json);
+    } else {
+        snprintf(output, out_len, "Error: BLE unavailable");
+    }
+}
 
 /* BLE GAP event callback */
 static int ble_gap_event_cb(struct ble_gap_event *event, void *arg) {
@@ -244,17 +277,57 @@ esp_err_t tool_ble_scan(const char *input, char *output, size_t out_len) {
     /* Lazy init: start NimBLE only when BLE scan is first requested.
      * This avoids consuming ~80KB internal RAM at boot. */
     if (!s_ble_initialized) {
+        int64_t now_us = esp_timer_get_time();
+        uint32_t retry_after_s = (s_ble_init_fail_count >= 3) ? 30 : (BLE_INIT_FAIL_COOLDOWN_MS / 1000);
+        if (s_ble_last_init_fail_us > 0 &&
+            ((now_us - s_ble_last_init_fail_us) / 1000) < (int64_t)retry_after_s * 1000) {
+            ble_write_unavailable_json(output, out_len,
+                                       "cooldown",
+                                       (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                                       (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                                       retry_after_s);
+            return ESP_OK;
+        }
+
+        size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+        if (free_internal < BLE_MIN_INTERNAL_HEAP_BYTES ||
+            largest_internal < BLE_MIN_LARGEST_BLOCK_BYTES) {
+            ble_write_unavailable_json(output, out_len,
+                                       "low_internal_ram",
+                                       (uint32_t)free_internal,
+                                       (uint32_t)largest_internal,
+                                       retry_after_s);
+            s_ble_last_init_fail_us = now_us;
+            s_ble_init_fail_count++;
+            return ESP_OK;
+        }
+
         ESP_LOGI(TAG, "Initializing NimBLE (lazy, first ble_scan call)...");
+        /* Free Classic BT memory (NimBLE only needs BLE mode). */
+        esp_err_t rel = esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
+        if (rel != ESP_OK && rel != ESP_ERR_INVALID_STATE) {
+            ESP_LOGW(TAG, "esp_bt_controller_mem_release failed: %s", esp_err_to_name(rel));
+        }
+
         esp_err_t ret = nimble_port_init();
         if (ret != ESP_OK) {
-            snprintf(output, out_len,
-                     "Error: NimBLE init failed: %s", esp_err_to_name(ret));
+            const char *reason = (ret == ESP_ERR_NO_MEM) ? "controller_no_mem" : "nimble_init_failed";
+            ble_write_unavailable_json(output, out_len,
+                                       reason,
+                                       (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                                       (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                                       retry_after_s);
+            s_ble_last_init_fail_us = now_us;
+            s_ble_init_fail_count++;
             return ESP_OK;
         }
 
         ble_hs_cfg.sync_cb = ble_on_sync;
         nimble_port_freertos_init(ble_host_task);
         s_ble_initialized = true;
+        s_ble_last_init_fail_us = 0;
+        s_ble_init_fail_count = 0;
 
         /* Give NimBLE host a moment to sync */
         vTaskDelay(pdMS_TO_TICKS(500));
@@ -282,7 +355,11 @@ esp_err_t tool_ble_scan(const char *input, char *output, size_t out_len) {
     esp_err_t ret = ble_gap_disc(BLE_OWN_ADDR_PUBLIC, MIMI_BLE_SCAN_DURATION_S * 1000,
                                   &scan_params, ble_gap_event_cb, NULL);
     if (ret != 0) {
-        snprintf(output, out_len, "Error: BLE scan start failed (rc=%d)", ret);
+        ble_write_unavailable_json(output, out_len,
+                                   "scan_start_failed",
+                                   (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                                   (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                                   3);
         return ESP_OK;
     }
 
@@ -293,6 +370,7 @@ esp_err_t tool_ble_scan(const char *input, char *output, size_t out_len) {
 
     /* Build JSON response */
     cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", true);
     cJSON_AddNumberToObject(root, "count", s_ble_result_count);
     cJSON *devices = cJSON_CreateArray();
     cJSON_AddItemToObject(root, "devices", devices);
