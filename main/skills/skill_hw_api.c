@@ -19,6 +19,7 @@
 #include "freertos/task.h"
 
 #include "skills/skill_resource_manager.h"
+#include "skills/skill_runtime.h"
 
 static const char *TAG = "skill_hw";
 
@@ -307,10 +308,50 @@ static int l_free_heap(lua_State *L)
     return 1;
 }
 
-static int l_timer_stub(lua_State *L)
+static int l_timer_every(lua_State *L)
 {
-    (void)L;
-    return luaL_error(L, "timer callbacks are not enabled in this build yet");
+    int skill_id = up_skill_id(L);
+    int ms = (int)luaL_checkinteger(L, 1);
+    luaL_checktype(L, 2, LUA_TFUNCTION);
+    if (ms < 10) return luaL_error(L, "timer period must be >= 10ms");
+
+    lua_pushvalue(L, 2);
+    int cb_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    int timer_id = 0;
+    esp_err_t ret = skill_runtime_register_timer(skill_id, ms, true, cb_ref, &timer_id);
+    if (ret != ESP_OK) {
+        luaL_unref(L, LUA_REGISTRYINDEX, cb_ref);
+        return luaL_error(L, "timer_every failed: %s", esp_err_to_name(ret));
+    }
+    lua_pushinteger(L, timer_id);
+    return 1;
+}
+
+static int l_timer_once(lua_State *L)
+{
+    int skill_id = up_skill_id(L);
+    int ms = (int)luaL_checkinteger(L, 1);
+    luaL_checktype(L, 2, LUA_TFUNCTION);
+    if (ms < 1) return luaL_error(L, "timer delay must be >= 1ms");
+
+    lua_pushvalue(L, 2);
+    int cb_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    int timer_id = 0;
+    esp_err_t ret = skill_runtime_register_timer(skill_id, ms, false, cb_ref, &timer_id);
+    if (ret != ESP_OK) {
+        luaL_unref(L, LUA_REGISTRYINDEX, cb_ref);
+        return luaL_error(L, "timer_once failed: %s", esp_err_to_name(ret));
+    }
+    lua_pushinteger(L, timer_id);
+    return 1;
+}
+
+static int l_timer_cancel(lua_State *L)
+{
+    int timer_id = (int)luaL_checkinteger(L, 1);
+    esp_err_t ret = skill_runtime_cancel_timer(timer_id);
+    lua_pushboolean(L, ret == ESP_OK);
+    return 1;
 }
 
 static int l_interrupt_stub(lua_State *L)
@@ -344,9 +385,9 @@ void skill_hw_api_push_table(lua_State *L, int skill_id, const skill_permissions
         {"delay_ms", l_delay_ms},
         {"log", l_log},
         {"free_heap", l_free_heap},
-        {"timer_every", l_timer_stub},
-        {"timer_once", l_timer_stub},
-        {"timer_cancel", l_timer_stub},
+        {"timer_every", l_timer_every},
+        {"timer_once", l_timer_once},
+        {"timer_cancel", l_timer_cancel},
         {"gpio_attach_interrupt", l_interrupt_stub},
         {"gpio_detach_interrupt", l_interrupt_stub},
     };

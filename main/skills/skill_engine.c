@@ -12,12 +12,17 @@
 #include "esp_http_client.h"
 #include "esp_timer.h"
 #include "cJSON.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "lua.h"
 #include "lauxlib.h"
 #include "lualib.h"
 
 #include "skills/skill_types.h"
 #include "skills/skill_hw_api.h"
+#include "skills/skill_runtime.h"
 #include "skills/skill_resource_manager.h"
 #include "tools/tool_registry.h"
 #include "bus/message_bus.h"
@@ -29,6 +34,8 @@ static const char *TAG = "skill_engine";
 #define SKILL_EXEC_INSTR_BUDGET   200000
 #define SKILL_EXEC_TIME_BUDGET_MS 200
 #define LUA_HOOK_STRIDE           1000
+#define SKILL_MAX_TIMERS          24
+#define SKILL_CB_QUEUE_DEPTH      32
 
 typedef struct {
     bool used;
@@ -74,6 +81,26 @@ static int s_slot_count = 0;
 static lua_tool_ctx_t s_tool_ctx[SKILL_MAX_SLOTS * SKILL_MAX_TOOLS_PER_SKILL];
 static int s_tool_ctx_count = 0;
 static exec_guard_t s_guard = {0};
+static SemaphoreHandle_t s_lua_lock = NULL;
+
+typedef struct {
+    bool used;
+    int timer_id;
+    int skill_id;
+    bool periodic;
+    int period_ms;
+    int lua_cb_ref;
+    esp_timer_handle_t handle;
+} skill_timer_t;
+
+typedef struct {
+    int timer_id;
+} skill_cb_event_t;
+
+static skill_timer_t s_timers[SKILL_MAX_TIMERS];
+static int s_next_timer_id = 1;
+static QueueHandle_t s_cb_queue = NULL;
+static TaskHandle_t s_cb_task = NULL;
 
 static bool slot_has_declared_event(int slot_idx, const char *event_name)
 {
@@ -209,6 +236,17 @@ static void guard_end(void)
 {
     s_guard.active = false;
     lua_sethook(s_L, NULL, 0, 0);
+}
+
+static bool lua_lock_take(TickType_t ticks)
+{
+    if (!s_lua_lock) return false;
+    return xSemaphoreTakeRecursive(s_lua_lock, ticks) == pdTRUE;
+}
+
+static void lua_lock_give(void)
+{
+    if (s_lua_lock) xSemaphoreGiveRecursive(s_lua_lock);
 }
 
 static int l_console_log(lua_State *L)
@@ -367,6 +405,165 @@ static int l_struct_pack(lua_State *L)
     lua_pushlstring(L, (const char *)buf, total);
     free(buf);
     return 1;
+}
+
+static skill_timer_t *find_timer_by_id(int timer_id)
+{
+    for (int i = 0; i < SKILL_MAX_TIMERS; i++) {
+        if (s_timers[i].used && s_timers[i].timer_id == timer_id) return &s_timers[i];
+    }
+    return NULL;
+}
+
+static void timer_fire_isr(void *arg)
+{
+    int timer_id = (int)(intptr_t)arg;
+    if (!s_cb_queue) return;
+    skill_cb_event_t evt = {.timer_id = timer_id};
+    xQueueSend(s_cb_queue, &evt, 0);
+}
+
+static void timer_cleanup_locked(skill_timer_t *t)
+{
+    if (!t || !t->used) return;
+    if (t->handle) {
+        esp_timer_stop(t->handle);
+        esp_timer_delete(t->handle);
+        t->handle = NULL;
+    }
+    if (t->lua_cb_ref != LUA_NOREF && s_L) {
+        luaL_unref(s_L, LUA_REGISTRYINDEX, t->lua_cb_ref);
+        t->lua_cb_ref = LUA_NOREF;
+    }
+    memset(t, 0, sizeof(*t));
+}
+
+static void callback_worker_task(void *arg)
+{
+    (void)arg;
+    skill_cb_event_t evt = {0};
+    while (1) {
+        if (xQueueReceive(s_cb_queue, &evt, portMAX_DELAY) != pdTRUE) continue;
+
+        if (!lua_lock_take(pdMS_TO_TICKS(200))) continue;
+        skill_timer_t *t = find_timer_by_id(evt.timer_id);
+        if (!t || !t->used || t->lua_cb_ref == LUA_NOREF) {
+            lua_lock_give();
+            continue;
+        }
+
+        lua_rawgeti(s_L, LUA_REGISTRYINDEX, t->lua_cb_ref);
+        guard_begin();
+        int rc = lua_pcall(s_L, 0, 0, 0);
+        guard_end();
+        if (rc != LUA_OK) {
+            const char *err = lua_tostring(s_L, -1);
+            ESP_LOGE(TAG, "Timer callback failed (skill=%d,timer=%d): %s",
+                     t->skill_id, t->timer_id, err ? err : "unknown");
+            lua_pop(s_L, 1);
+            if (t->skill_id >= 0 && t->skill_id < SKILL_MAX_SLOTS && s_slots[t->skill_id].used) {
+                s_slots[t->skill_id].state = SKILL_STATE_ERROR;
+            }
+            timer_cleanup_locked(t);
+            lua_lock_give();
+            continue;
+        }
+
+        if (!t->periodic) {
+            timer_cleanup_locked(t);
+        }
+        lua_lock_give();
+    }
+}
+
+esp_err_t skill_runtime_init(void)
+{
+    if (!s_cb_queue) {
+        s_cb_queue = xQueueCreate(SKILL_CB_QUEUE_DEPTH, sizeof(skill_cb_event_t));
+        if (!s_cb_queue) return ESP_ERR_NO_MEM;
+    }
+    if (!s_cb_task) {
+        BaseType_t ok = xTaskCreatePinnedToCore(callback_worker_task, "skill_cb",
+                                                4096, NULL, 4, &s_cb_task, 0);
+        if (ok != pdPASS) return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+esp_err_t skill_runtime_register_timer(int skill_id, int period_ms, bool periodic, int lua_cb_ref, int *out_timer_id)
+{
+    if (skill_id < 0 || skill_id >= SKILL_MAX_SLOTS || period_ms <= 0 || !out_timer_id) return ESP_ERR_INVALID_ARG;
+    if (!lua_lock_take(pdMS_TO_TICKS(200))) return ESP_ERR_TIMEOUT;
+
+    int slot = -1;
+    for (int i = 0; i < SKILL_MAX_TIMERS; i++) {
+        if (!s_timers[i].used) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        lua_lock_give();
+        return ESP_ERR_NO_MEM;
+    }
+
+    int timer_id = s_next_timer_id++;
+    if (s_next_timer_id <= 0) s_next_timer_id = 1;
+
+    skill_timer_t *t = &s_timers[slot];
+    memset(t, 0, sizeof(*t));
+    t->used = true;
+    t->timer_id = timer_id;
+    t->skill_id = skill_id;
+    t->periodic = periodic;
+    t->period_ms = period_ms;
+    t->lua_cb_ref = lua_cb_ref;
+
+    esp_timer_create_args_t args = {
+        .callback = timer_fire_isr,
+        .arg = (void *)(intptr_t)timer_id,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "skill_tmr",
+    };
+    esp_err_t ret = esp_timer_create(&args, &t->handle);
+    if (ret == ESP_OK) {
+        if (periodic) ret = esp_timer_start_periodic(t->handle, (uint64_t)period_ms * 1000ULL);
+        else ret = esp_timer_start_once(t->handle, (uint64_t)period_ms * 1000ULL);
+    }
+    if (ret != ESP_OK) {
+        timer_cleanup_locked(t);
+        lua_lock_give();
+        return ret;
+    }
+
+    *out_timer_id = timer_id;
+    lua_lock_give();
+    return ESP_OK;
+}
+
+esp_err_t skill_runtime_cancel_timer(int timer_id)
+{
+    if (timer_id <= 0) return ESP_ERR_INVALID_ARG;
+    if (!lua_lock_take(pdMS_TO_TICKS(200))) return ESP_ERR_TIMEOUT;
+    skill_timer_t *t = find_timer_by_id(timer_id);
+    if (!t) {
+        lua_lock_give();
+        return ESP_ERR_NOT_FOUND;
+    }
+    timer_cleanup_locked(t);
+    lua_lock_give();
+    return ESP_OK;
+}
+
+void skill_runtime_release_skill(int skill_id)
+{
+    if (!lua_lock_take(pdMS_TO_TICKS(300))) return;
+    for (int i = 0; i < SKILL_MAX_TIMERS; i++) {
+        if (!s_timers[i].used) continue;
+        if (s_timers[i].skill_id != skill_id) continue;
+        timer_cleanup_locked(&s_timers[i]);
+    }
+    lua_lock_give();
 }
 
 static void build_safe_stdlib(void)
@@ -583,8 +780,13 @@ static bool register_tool_ctx(int slot_idx, int tool_idx)
 
 static esp_err_t lua_tool_execute(int ctx_idx, const char *input_json, char *output, size_t output_size)
 {
+    if (!lua_lock_take(pdMS_TO_TICKS(500))) {
+        snprintf(output, output_size, "{\"ok\":false,\"error\":\"lua lock timeout\"}");
+        return ESP_OK;
+    }
     if (ctx_idx < 0 || ctx_idx >= s_tool_ctx_count || !s_tool_ctx[ctx_idx].used) {
         snprintf(output, output_size, "{\"ok\":false,\"error\":\"invalid tool context\"}");
+        lua_lock_give();
         return ESP_OK;
     }
     int slot_idx = s_tool_ctx[ctx_idx].slot_idx;
@@ -592,6 +794,7 @@ static esp_err_t lua_tool_execute(int ctx_idx, const char *input_json, char *out
     skill_slot_t *slot = &s_slots[slot_idx];
     if (!slot->used || slot->state != SKILL_STATE_READY) {
         snprintf(output, output_size, "{\"ok\":false,\"error\":\"skill not ready\"}");
+        lua_lock_give();
         return ESP_OK;
     }
 
@@ -613,18 +816,21 @@ static esp_err_t lua_tool_execute(int ctx_idx, const char *input_json, char *out
         snprintf(output, output_size, "{\"ok\":false,\"error\":\"%s\"}", err ? err : "lua error");
         lua_pop(s_L, 1);
         slot->state = SKILL_STATE_ERROR;
+        lua_lock_give();
         return ESP_OK;
     }
 
     if (!lua_istable(s_L, -1)) {
         snprintf(output, output_size, "{\"ok\":false,\"error\":\"tool must return object\"}");
         lua_pop(s_L, 1);
+        lua_lock_give();
         return ESP_OK;
     }
     if (!lua_table_to_json_buf(s_L, -1, output, output_size)) {
         snprintf(output, output_size, "{\"ok\":false,\"error\":\"failed to encode output\"}");
     }
     lua_pop(s_L, 1);
+    lua_lock_give();
     return ESP_OK;
 }
 #define TRAMPOLINE(N) \
@@ -798,6 +1004,11 @@ static void unload_slot(int idx)
 {
     skill_slot_t *slot = &s_slots[idx];
     if (!slot->used) return;
+    skill_runtime_release_skill(idx);
+    if (!lua_lock_take(pdMS_TO_TICKS(500))) {
+        ESP_LOGW(TAG, "Failed to take lua lock during unload for slot %d", idx);
+        return;
+    }
     for (int i = 0; i < slot->tool_count; i++) {
         tool_registry_unregister(slot->tool_names[i]);
         if (slot->tool_handler_ref[i] != LUA_NOREF) {
@@ -812,6 +1023,7 @@ static void unload_slot(int idx)
     skill_resmgr_release_all(idx);
     slot->state = SKILL_STATE_UNINSTALLED;
     slot->used = false;
+    lua_lock_give();
 }
 
 static void remove_path_recursive(const char *path)
@@ -924,20 +1136,32 @@ static bool load_legacy_lua_file(const char *filename, int slot_idx)
     return true;
 }
 
-esp_err_t skill_engine_init(void)
+static esp_err_t skill_engine_init_impl(void)
 {
     memset(s_slots, 0, sizeof(s_slots));
     memset(s_tool_ctx, 0, sizeof(s_tool_ctx));
+    memset(s_timers, 0, sizeof(s_timers));
+    s_next_timer_id = 1;
     s_slot_count = 0;
     s_tool_ctx_count = 0;
     ESP_ERROR_CHECK(skill_resmgr_init());
+
+    if (!s_lua_lock) {
+        s_lua_lock = xSemaphoreCreateRecursiveMutex();
+        if (!s_lua_lock) return ESP_ERR_NO_MEM;
+    }
+
+    if (!lua_lock_take(pdMS_TO_TICKS(500))) return ESP_ERR_TIMEOUT;
 
     if (s_L) {
         lua_close(s_L);
         s_L = NULL;
     }
     s_L = luaL_newstate();
-    if (!s_L) return ESP_ERR_NO_MEM;
+    if (!s_L) {
+        lua_lock_give();
+        return ESP_ERR_NO_MEM;
+    }
     luaL_requiref(s_L, "_G", luaopen_base, 1); lua_pop(s_L, 1);
     luaL_requiref(s_L, "table", luaopen_table, 1); lua_pop(s_L, 1);
     luaL_requiref(s_L, "string", luaopen_string, 1); lua_pop(s_L, 1);
@@ -949,7 +1173,11 @@ esp_err_t skill_engine_init(void)
     if (stat(SKILL_DIR, &st) != 0) mkdir(SKILL_DIR, 0755);
 
     DIR *dir = opendir(SKILL_DIR);
-    if (!dir) return ESP_OK;
+    if (!dir) {
+        lua_lock_give();
+        ESP_ERROR_CHECK(skill_runtime_init());
+        return ESP_OK;
+    }
 
     struct dirent *ent = NULL;
     while ((ent = readdir(dir)) != NULL && s_slot_count < SKILL_MAX_SLOTS) {
@@ -970,8 +1198,45 @@ esp_err_t skill_engine_init(void)
     closedir(dir);
 
     tool_registry_rebuild_json();
+    lua_lock_give();
+
+    ESP_ERROR_CHECK(skill_runtime_init());
     ESP_LOGI(TAG, "Single-VM runtime ready: %d skills, %d tools", s_slot_count, s_tool_ctx_count);
     return ESP_OK;
+}
+
+typedef struct {
+    SemaphoreHandle_t done;
+    esp_err_t ret;
+} skill_init_ctx_t;
+
+static void skill_init_task(void *arg)
+{
+    skill_init_ctx_t *ctx = (skill_init_ctx_t *)arg;
+    ctx->ret = skill_engine_init_impl();
+    xSemaphoreGive(ctx->done);
+    vTaskDelete(NULL);
+}
+
+esp_err_t skill_engine_init(void)
+{
+    skill_init_ctx_t ctx = {0};
+    ctx.done = xSemaphoreCreateBinary();
+    if (!ctx.done) return ESP_ERR_NO_MEM;
+
+    BaseType_t ok = xTaskCreatePinnedToCore(skill_init_task, "skill_init",
+                                            12 * 1024, &ctx, 5, NULL, 0);
+    if (ok != pdPASS) {
+        vSemaphoreDelete(ctx.done);
+        return ESP_FAIL;
+    }
+
+    if (xSemaphoreTake(ctx.done, pdMS_TO_TICKS(20000)) != pdTRUE) {
+        vSemaphoreDelete(ctx.done);
+        return ESP_ERR_TIMEOUT;
+    }
+    vSemaphoreDelete(ctx.done);
+    return ctx.ret;
 }
 
 esp_err_t skill_engine_install(const char *url)
@@ -1005,7 +1270,10 @@ esp_err_t skill_engine_install(const char *url)
     esp_http_client_cleanup(client);
 
     if (strstr(fname, ".lua")) {
-        if (load_legacy_lua_file(fname, s_slot_count)) {
+        if (!lua_lock_take(pdMS_TO_TICKS(500))) return ESP_ERR_TIMEOUT;
+        bool ok_load = load_legacy_lua_file(fname, s_slot_count);
+        lua_lock_give();
+        if (ok_load) {
             s_slot_count++;
             tool_registry_rebuild_json();
             return ESP_OK;
