@@ -1,0 +1,12 @@
+{
+  "board_id": "esp32s3_default",
+  "gpio_reserved": [0, 3, 19],
+  "i2c": {
+    "i2c0": { "sda": 8, "scl": 9, "freq_hz": 100000 }
+  },
+  "gpio_aliases": {
+    "LED": 38,
+    "BOOT": 0
+  }
+}
+

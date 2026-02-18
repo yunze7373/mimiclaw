@@ -25,6 +25,7 @@
 #include "skills/skill_hw_api.h"
 #include "skills/skill_runtime.h"
 #include "skills/skill_resource_manager.h"
+#include "skills/board_profile.h"
 #include "tools/tool_registry.h"
 #include "bus/message_bus.h"
 
@@ -60,6 +61,11 @@ typedef struct {
 
     int event_count;
     char event_names[SKILL_MAX_EVENTS_PER_SKILL][32];
+
+    bool req_i2c_enabled;
+    char req_i2c_bus[16];
+    int req_i2c_min_freq_hz;
+    int req_i2c_max_freq_hz;
 } skill_slot_t;
 
 typedef struct {
@@ -883,6 +889,22 @@ static bool load_manifest(skill_slot_t *slot, const char *bundle_dir)
             slot->event_count++;
         }
     }
+
+    cJSON *hw_req = cJSON_GetObjectItem(root, "hw_requirements");
+    if (cJSON_IsObject(hw_req)) {
+        cJSON *i2c_req = cJSON_GetObjectItem(hw_req, "i2c");
+        if (cJSON_IsObject(i2c_req)) {
+            cJSON *bus = cJSON_GetObjectItem(i2c_req, "bus");
+            cJSON *minf = cJSON_GetObjectItem(i2c_req, "min_freq_hz");
+            cJSON *maxf = cJSON_GetObjectItem(i2c_req, "max_freq_hz");
+            if (cJSON_IsString(bus)) {
+                slot->req_i2c_enabled = true;
+                snprintf(slot->req_i2c_bus, sizeof(slot->req_i2c_bus), "%s", bus->valuestring);
+                slot->req_i2c_min_freq_hz = cJSON_IsNumber(minf) ? minf->valueint : 0;
+                slot->req_i2c_max_freq_hz = cJSON_IsNumber(maxf) ? maxf->valueint : 0;
+            }
+        }
+    }
     cJSON_Delete(root);
     return true;
 }
@@ -1223,6 +1245,23 @@ static bool load_bundle_dir(const char *bundle_dir, int slot_idx)
         ESP_LOGW(TAG, "Invalid manifest: %s", bundle_dir);
         return false;
     }
+
+    if (slot->req_i2c_enabled) {
+        int sda = 0, scl = 0, freq = 0;
+        if (!board_profile_get_i2c(slot->req_i2c_bus, &sda, &scl, &freq)) {
+            ESP_LOGW(TAG, "Skill %s requires missing I2C bus: %s", slot->name, slot->req_i2c_bus);
+            return false;
+        }
+        if (slot->req_i2c_min_freq_hz > 0 && freq < slot->req_i2c_min_freq_hz) {
+            ESP_LOGW(TAG, "Skill %s I2C freq too low: %d < %d", slot->name, freq, slot->req_i2c_min_freq_hz);
+            return false;
+        }
+        if (slot->req_i2c_max_freq_hz > 0 && freq > slot->req_i2c_max_freq_hz) {
+            ESP_LOGW(TAG, "Skill %s I2C freq too high: %d > %d", slot->name, freq, slot->req_i2c_max_freq_hz);
+            return false;
+        }
+    }
+
     slot->used = true;
     slot->state = SKILL_STATE_INSTALLED;
     slot->env_ref = create_sandbox_env(slot_idx);
@@ -1311,6 +1350,7 @@ static esp_err_t skill_engine_init_impl(void)
     s_next_intr_id = 1;
     s_slot_count = 0;
     s_tool_ctx_count = 0;
+    ESP_ERROR_CHECK(board_profile_init());
     ESP_ERROR_CHECK(skill_resmgr_init());
 
     if (!s_lua_lock) {
@@ -1413,10 +1453,19 @@ esp_err_t skill_engine_install(const char *url)
 
     const char *fname = strrchr(url, '/');
     fname = fname ? fname + 1 : url;
+    char staging_dir[512];
+    snprintf(staging_dir, sizeof(staging_dir), "%s/.staging", SKILL_DIR);
+    struct stat st = {0};
+    if (stat(staging_dir, &st) != 0) {
+        mkdir(staging_dir, 0755);
+    }
+
+    char staging_path[512];
+    snprintf(staging_path, sizeof(staging_path), "%s/%s.part", staging_dir, fname);
     char out_path[512];
     snprintf(out_path, sizeof(out_path), "%s/%s", SKILL_DIR, fname);
 
-    FILE *f = fopen(out_path, "wb");
+    FILE *f = fopen(staging_path, "wb");
     if (!f) return ESP_FAIL;
 
     esp_http_client_config_t cfg = {.url = url, .timeout_ms = 10000};
@@ -1435,6 +1484,11 @@ esp_err_t skill_engine_install(const char *url)
     fclose(f);
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
+    remove(out_path);
+    if (rename(staging_path, out_path) != 0) {
+        remove(staging_path);
+        return ESP_FAIL;
+    }
 
     if (strstr(fname, ".lua")) {
         if (!lua_lock_take(pdMS_TO_TICKS(500))) return ESP_ERR_TIMEOUT;
@@ -1445,6 +1499,7 @@ esp_err_t skill_engine_install(const char *url)
             tool_registry_rebuild_json();
             return ESP_OK;
         }
+        remove(out_path);
     }
     return ESP_FAIL;
 }

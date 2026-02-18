@@ -20,6 +20,7 @@
 
 #include "skills/skill_resource_manager.h"
 #include "skills/skill_runtime.h"
+#include "skills/board_profile.h"
 
 static const char *TAG = "skill_hw";
 
@@ -41,11 +42,38 @@ static int up_skill_id(lua_State *L)
     return (int)lua_tointeger(L, lua_upvalueindex(1));
 }
 
-static bool has_perm_gpio(int skill_id, int pin)
+static bool resolve_gpio_arg(lua_State *L, int idx, int *out_pin, char *out_alias, size_t alias_size)
+{
+    int t = lua_type(L, idx);
+    if (t == LUA_TNUMBER) {
+        *out_pin = (int)lua_tointeger(L, idx);
+        if (out_alias && alias_size > 0) out_alias[0] = '\0';
+        return true;
+    }
+    if (t == LUA_TSTRING) {
+        const char *alias = lua_tostring(L, idx);
+        int pin = -1;
+        if (!board_profile_resolve_gpio(alias, &pin)) return false;
+        *out_pin = pin;
+        if (out_alias && alias_size > 0) snprintf(out_alias, alias_size, "%s", alias);
+        return true;
+    }
+    return false;
+}
+
+static bool has_perm_gpio(int skill_id, int pin, const char *alias)
 {
     char key[16];
     snprintf(key, sizeof(key), "%d", pin);
-    return skill_perm_contains(s_permissions[skill_id].gpio, s_permissions[skill_id].gpio_count, key);
+    if (skill_perm_contains(s_permissions[skill_id].gpio, s_permissions[skill_id].gpio_count, "*")) return true;
+    if (skill_perm_contains(s_permissions[skill_id].gpio, s_permissions[skill_id].gpio_count, key)) return true;
+    if (alias && alias[0]) {
+        if (skill_perm_contains(s_permissions[skill_id].gpio, s_permissions[skill_id].gpio_count, alias)) return true;
+        char scoped[24];
+        snprintf(scoped, sizeof(scoped), "gpio:%s", alias);
+        if (skill_perm_contains(s_permissions[skill_id].gpio, s_permissions[skill_id].gpio_count, scoped)) return true;
+    }
+    return false;
 }
 
 static bool has_perm_i2c(int skill_id, const char *bus)
@@ -60,11 +88,19 @@ static bool has_perm_uart(int skill_id, int uart_port)
     return skill_perm_contains(s_permissions[skill_id].uart, s_permissions[skill_id].uart_count, key);
 }
 
-static bool has_perm_pwm(int skill_id, int pin)
+static bool has_perm_pwm(int skill_id, int pin, const char *alias)
 {
     char key[16];
     snprintf(key, sizeof(key), "%d", pin);
-    return skill_perm_contains(s_permissions[skill_id].pwm, s_permissions[skill_id].pwm_count, key);
+    if (skill_perm_contains(s_permissions[skill_id].pwm, s_permissions[skill_id].pwm_count, "*")) return true;
+    if (skill_perm_contains(s_permissions[skill_id].pwm, s_permissions[skill_id].pwm_count, key)) return true;
+    if (alias && alias[0]) {
+        if (skill_perm_contains(s_permissions[skill_id].pwm, s_permissions[skill_id].pwm_count, alias)) return true;
+        char scoped[24];
+        snprintf(scoped, sizeof(scoped), "gpio:%s", alias);
+        if (skill_perm_contains(s_permissions[skill_id].pwm, s_permissions[skill_id].pwm_count, scoped)) return true;
+    }
+    return false;
 }
 
 static bool has_perm_adc(int skill_id, int ch)
@@ -77,10 +113,12 @@ static bool has_perm_adc(int skill_id, int ch)
 static int l_gpio_set_mode(lua_State *L)
 {
     int skill_id = up_skill_id(L);
-    int pin = (int)luaL_checkinteger(L, 1);
+    int pin = -1;
+    char alias[24] = {0};
+    if (!resolve_gpio_arg(L, 1, &pin, alias, sizeof(alias))) return luaL_error(L, "invalid gpio pin/alias");
     const char *mode = luaL_checkstring(L, 2);
 
-    if (!has_perm_gpio(skill_id, pin)) {
+    if (!has_perm_gpio(skill_id, pin, alias)) {
         return luaL_error(L, "permission denied: gpio %d", pin);
     }
     if (skill_resmgr_acquire_gpio(skill_id, pin) != ESP_OK) {
@@ -106,8 +144,10 @@ static int l_gpio_set_mode(lua_State *L)
 static int l_gpio_read(lua_State *L)
 {
     int skill_id = up_skill_id(L);
-    int pin = (int)luaL_checkinteger(L, 1);
-    if (!has_perm_gpio(skill_id, pin)) return luaL_error(L, "permission denied: gpio %d", pin);
+    int pin = -1;
+    char alias[24] = {0};
+    if (!resolve_gpio_arg(L, 1, &pin, alias, sizeof(alias))) return luaL_error(L, "invalid gpio pin/alias");
+    if (!has_perm_gpio(skill_id, pin, alias)) return luaL_error(L, "permission denied: gpio %d", pin);
     lua_pushinteger(L, gpio_get_level(pin));
     return 1;
 }
@@ -115,9 +155,11 @@ static int l_gpio_read(lua_State *L)
 static int l_gpio_write(lua_State *L)
 {
     int skill_id = up_skill_id(L);
-    int pin = (int)luaL_checkinteger(L, 1);
+    int pin = -1;
+    char alias[24] = {0};
+    if (!resolve_gpio_arg(L, 1, &pin, alias, sizeof(alias))) return luaL_error(L, "invalid gpio pin/alias");
     int val = (int)luaL_checkinteger(L, 2);
-    if (!has_perm_gpio(skill_id, pin)) return luaL_error(L, "permission denied: gpio %d", pin);
+    if (!has_perm_gpio(skill_id, pin, alias)) return luaL_error(L, "permission denied: gpio %d", pin);
     if (skill_resmgr_acquire_gpio(skill_id, pin) != ESP_OK) return luaL_error(L, "gpio conflict: %d", pin);
     gpio_set_level(pin, val ? 1 : 0);
     return 0;
@@ -126,10 +168,27 @@ static int l_gpio_write(lua_State *L)
 static int l_i2c_init(lua_State *L)
 {
     int skill_id = up_skill_id(L);
-    const char *bus = luaL_optstring(L, 1, "i2c0");
-    int sda = (int)luaL_optinteger(L, 2, 8);
-    int scl = (int)luaL_optinteger(L, 3, 9);
-    int freq_hz = (int)luaL_optinteger(L, 4, 100000);
+    const char *bus = "i2c0";
+    int sda = 8, scl = 9, freq_hz = 100000;
+
+    int argc = lua_gettop(L);
+    if (argc >= 1 && lua_type(L, 1) == LUA_TSTRING) {
+        bus = lua_tostring(L, 1);
+        bool ok = board_profile_get_i2c(bus, &sda, &scl, &freq_hz);
+        if (!ok) return luaL_error(L, "unknown i2c bus: %s", bus);
+        if (argc >= 2 && lua_isnumber(L, 2)) sda = (int)lua_tointeger(L, 2);
+        if (argc >= 3 && lua_isnumber(L, 3)) scl = (int)lua_tointeger(L, 3);
+        if (argc >= 4 && lua_isnumber(L, 4)) freq_hz = (int)lua_tointeger(L, 4);
+    } else if (argc >= 1 && lua_type(L, 1) == LUA_TNUMBER) {
+        sda = (int)lua_tointeger(L, 1);
+        scl = (int)luaL_checkinteger(L, 2);
+        freq_hz = (argc >= 3 && lua_isnumber(L, 3)) ? (int)lua_tointeger(L, 3) : 100000;
+        bus = "i2c0";
+    } else {
+        if (!board_profile_get_i2c(bus, &sda, &scl, &freq_hz)) {
+            sda = 8; scl = 9; freq_hz = 100000;
+        }
+    }
 
     if (!has_perm_i2c(skill_id, bus)) return luaL_error(L, "permission denied: i2c %s", bus);
     if (skill_resmgr_acquire_i2c(skill_id, bus, freq_hz) != ESP_OK) {
@@ -169,10 +228,18 @@ static int l_i2c_init(lua_State *L)
 static int l_i2c_read(lua_State *L)
 {
     int skill_id = up_skill_id(L);
-    const char *bus = luaL_optstring(L, 1, "i2c0");
-    int addr = (int)luaL_checkinteger(L, 2);
-    int reg = (int)luaL_checkinteger(L, 3);
-    int len = (int)luaL_checkinteger(L, 4);
+    const char *bus = "i2c0";
+    int addr = 0, reg = 0, len = 0;
+    if (lua_type(L, 1) == LUA_TSTRING) {
+        bus = lua_tostring(L, 1);
+        addr = (int)luaL_checkinteger(L, 2);
+        reg = (int)luaL_checkinteger(L, 3);
+        len = (int)luaL_checkinteger(L, 4);
+    } else {
+        addr = (int)luaL_checkinteger(L, 1);
+        reg = (int)luaL_checkinteger(L, 2);
+        len = (int)luaL_checkinteger(L, 3);
+    }
     if (!has_perm_i2c(skill_id, bus)) return luaL_error(L, "permission denied: i2c %s", bus);
     i2c_ctx_t *ctx = &s_i2c_ctx[skill_id];
     if (!ctx->inited || strcmp(ctx->bus, bus) != 0) return luaL_error(L, "i2c not initialized: %s", bus);
@@ -194,11 +261,20 @@ static int l_i2c_read(lua_State *L)
 static int l_i2c_write(lua_State *L)
 {
     int skill_id = up_skill_id(L);
-    const char *bus = luaL_optstring(L, 1, "i2c0");
-    int addr = (int)luaL_checkinteger(L, 2);
-    int reg = (int)luaL_checkinteger(L, 3);
+    const char *bus = "i2c0";
+    int addr = 0, reg = 0;
     size_t len = 0;
-    const char *payload = luaL_checklstring(L, 4, &len);
+    const char *payload = NULL;
+    if (lua_type(L, 1) == LUA_TSTRING) {
+        bus = lua_tostring(L, 1);
+        addr = (int)luaL_checkinteger(L, 2);
+        reg = (int)luaL_checkinteger(L, 3);
+        payload = luaL_checklstring(L, 4, &len);
+    } else {
+        addr = (int)luaL_checkinteger(L, 1);
+        reg = (int)luaL_checkinteger(L, 2);
+        payload = luaL_checklstring(L, 3, &len);
+    }
     if (!has_perm_i2c(skill_id, bus)) return luaL_error(L, "permission denied: i2c %s", bus);
     i2c_ctx_t *ctx = &s_i2c_ctx[skill_id];
     if (!ctx->inited || strcmp(ctx->bus, bus) != 0) return luaL_error(L, "i2c not initialized: %s", bus);
@@ -228,10 +304,12 @@ static int l_uart_send(lua_State *L)
 static int l_pwm_set(lua_State *L)
 {
     int skill_id = up_skill_id(L);
-    int pin = (int)luaL_checkinteger(L, 1);
+    int pin = -1;
+    char alias[24] = {0};
+    if (!resolve_gpio_arg(L, 1, &pin, alias, sizeof(alias))) return luaL_error(L, "invalid gpio pin/alias");
     int freq = (int)luaL_optinteger(L, 2, 5000);
     lua_Number duty_pct = luaL_optnumber(L, 3, 50.0);
-    if (!has_perm_pwm(skill_id, pin)) return luaL_error(L, "permission denied: pwm pin %d", pin);
+    if (!has_perm_pwm(skill_id, pin, alias)) return luaL_error(L, "permission denied: pwm pin %d", pin);
     if (skill_resmgr_acquire_gpio(skill_id, pin) != ESP_OK) return luaL_error(L, "pwm pin conflict: %d", pin);
 
     ledc_timer_config_t timer_cfg = {
@@ -258,7 +336,9 @@ static int l_pwm_set(lua_State *L)
 static int l_pwm_stop(lua_State *L)
 {
     (void)up_skill_id(L);
-    int pin = (int)luaL_checkinteger(L, 1);
+    int pin = -1;
+    char alias[24] = {0};
+    if (!resolve_gpio_arg(L, 1, &pin, alias, sizeof(alias))) return luaL_error(L, "invalid gpio pin/alias");
     ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_4, 0);
     gpio_set_level(pin, 0);
     return 0;
@@ -357,11 +437,13 @@ static int l_timer_cancel(lua_State *L)
 static int l_gpio_attach_interrupt(lua_State *L)
 {
     int skill_id = up_skill_id(L);
-    int pin = (int)luaL_checkinteger(L, 1);
+    int pin = -1;
+    char alias[24] = {0};
+    if (!resolve_gpio_arg(L, 1, &pin, alias, sizeof(alias))) return luaL_error(L, "invalid gpio pin/alias");
     const char *edge = luaL_optstring(L, 2, "both");
     luaL_checktype(L, 3, LUA_TFUNCTION);
 
-    if (!has_perm_gpio(skill_id, pin)) return luaL_error(L, "permission denied: gpio %d", pin);
+    if (!has_perm_gpio(skill_id, pin, alias)) return luaL_error(L, "permission denied: gpio %d", pin);
     if (skill_resmgr_acquire_gpio(skill_id, pin) != ESP_OK) return luaL_error(L, "gpio conflict: %d", pin);
 
     lua_pushvalue(L, 3);
@@ -378,8 +460,10 @@ static int l_gpio_attach_interrupt(lua_State *L)
 static int l_gpio_detach_interrupt(lua_State *L)
 {
     int skill_id = up_skill_id(L);
-    int pin = (int)luaL_checkinteger(L, 1);
-    if (!has_perm_gpio(skill_id, pin)) return luaL_error(L, "permission denied: gpio %d", pin);
+    int pin = -1;
+    char alias[24] = {0};
+    if (!resolve_gpio_arg(L, 1, &pin, alias, sizeof(alias))) return luaL_error(L, "invalid gpio pin/alias");
+    if (!has_perm_gpio(skill_id, pin, alias)) return luaL_error(L, "permission denied: gpio %d", pin);
     esp_err_t ret = skill_runtime_detach_gpio_interrupt(skill_id, pin);
     lua_pushboolean(L, ret == ESP_OK);
     return 1;

@@ -8,6 +8,7 @@
 #include "freertos/semphr.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "skills/board_profile.h"
 
 static const char *TAG = "skill_res";
 
@@ -60,6 +61,10 @@ esp_err_t skill_resmgr_acquire_gpio(int skill_id, int pin)
 {
     if (pin < 0 || pin >= GPIO_NUM_MAX) return ESP_ERR_INVALID_ARG;
     if (!s_lock) return ESP_ERR_INVALID_STATE;
+    if (board_profile_is_gpio_reserved(pin)) {
+        ESP_LOGW(TAG, "GPIO %d is reserved by board profile", pin);
+        return ESP_ERR_INVALID_STATE;
+    }
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
     esp_err_t ret = ESP_OK;
