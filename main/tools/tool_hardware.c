@@ -645,8 +645,17 @@ static esp_err_t hw_scan_handler(httpd_req_t *req) {
             .scl_pullup_en = GPIO_PULLUP_ENABLE,
             .master.clk_speed = MIMI_I2C0_FREQ_HZ,
         };
-        i2c_driver_install(I2C_NUM_0, &conf, 0, NULL, 0);
-        i2c_inited = true;
+        esp_err_t ret = i2c_param_config(I2C_NUM_0, &conf);
+        if (ret == ESP_OK) {
+            ret = i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, NULL, 0);
+            /* ESP_ERR_INVALID_STATE means driver already installed */
+            if (ret == ESP_OK || ret == ESP_ERR_INVALID_STATE) {
+                i2c_inited = true;
+            }
+        }
+        if (!i2c_inited) {
+            ESP_LOGW(TAG, "I2C driver init failed");
+        }
     }
 
     cJSON *root = cJSON_CreateObject();
