@@ -35,6 +35,7 @@ static const char *TAG = "skill_engine";
 
 #define SKILL_DIR                 "/spiffs/skills"
 #define SKILL_MAX_SCHEMA_JSON     512
+#define SKILL_INSTALL_MAX_BYTES   (1024 * 1024)
 #define SKILL_EXEC_INSTR_BUDGET   200000
 #define SKILL_EXEC_TIME_BUDGET_MS 200
 #define LUA_HOOK_STRIDE           1000
@@ -136,6 +137,7 @@ static int s_next_timer_id = 1;
 static int s_next_intr_id = 1;
 static QueueHandle_t s_cb_queue = NULL;
 static TaskHandle_t s_cb_task = NULL;
+static void remove_path_recursive(const char *path);
 
 static bool slot_has_declared_event(int slot_idx, const char *event_name)
 {
@@ -1034,6 +1036,29 @@ static bool build_staging_file_path(char *out, size_t out_size,
     return true;
 }
 
+static void cleanup_staging_temp(const char *staging_dir)
+{
+    if (!staging_dir || !staging_dir[0]) return;
+    DIR *dir = opendir(staging_dir);
+    if (!dir) return;
+
+    struct dirent *ent = NULL;
+    while ((ent = readdir(dir)) != NULL) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+        bool is_tmp = false;
+        if (strstr(ent->d_name, ".part")) is_tmp = true;
+        else if (strstr(ent->d_name, ".bak")) is_tmp = true;
+        else if (strstr(ent->d_name, ".dir")) is_tmp = true;
+        else if (strstr(ent->d_name, ".bakdir")) is_tmp = true;
+        if (!is_tmp) continue;
+
+        char full[512];
+        if (!join_path2(full, sizeof(full), staging_dir, ent->d_name)) continue;
+        remove_path_recursive(full);
+    }
+    closedir(dir);
+}
+
 static bool extract_tar_to_dir(const char *tar_path, const char *out_dir)
 {
     if (!tar_path || !out_dir) return false;
@@ -1894,6 +1919,8 @@ static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const 
     if (stat(staging_dir, &st) != 0) {
         mkdir(staging_dir, 0755);
     }
+    install_status_step("cleanup_staging");
+    cleanup_staging_temp(staging_dir);
 
     char staging_path[512];
     char out_path[512];
@@ -1946,6 +1973,15 @@ static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const 
             ESP_LOGE(TAG, "Skill download failed, HTTP status=%d", code);
             return ESP_FAIL;
         }
+        int64_t content_len = esp_http_client_get_content_length(client);
+        if (content_len > 0 && content_len > SKILL_INSTALL_MAX_BYTES) {
+            fclose(f);
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            remove(staging_path);
+            ESP_LOGE(TAG, "Skill download too large: %lld bytes", (long long)content_len);
+            return ESP_ERR_NO_MEM;
+        }
     }
     mbedtls_sha256_context sha_ctx;
     uint8_t sha_bin[32] = {0};
@@ -1955,9 +1991,20 @@ static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const 
         mbedtls_sha256_starts(&sha_ctx, 0);
     }
     char buf[512];
+    int total_read = 0;
     int n = 0;
     while ((n = esp_http_client_read(client, buf, sizeof(buf))) > 0) {
         fwrite(buf, 1, n, f);
+        total_read += n;
+        if (total_read > SKILL_INSTALL_MAX_BYTES) {
+            fclose(f);
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            remove(staging_path);
+            if (verify_checksum) mbedtls_sha256_free(&sha_ctx);
+            ESP_LOGE(TAG, "Skill download exceeded max size");
+            return ESP_ERR_NO_MEM;
+        }
         if (verify_checksum) {
             mbedtls_sha256_update(&sha_ctx, (const unsigned char *)buf, (size_t)n);
         }
