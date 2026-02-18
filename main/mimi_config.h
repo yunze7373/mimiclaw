@@ -71,7 +71,7 @@
 #define MIMI_LLM_API_URL             "https://api.anthropic.com/v1/messages"
 #define MIMI_OPENAI_API_URL          "https://api.openai.com/v1/chat/completions"
 #define MIMI_MINIMAX_API_URL         "https://api.minimax.io/v1/text/chatcompletion_v2"
-#define MIMI_MINIMAX_CODING_URL      "https://api.minimaxi.com/v1/messages"
+#define MIMI_MINIMAX_CODING_URL      "https://api.minimaxi.com/anthropic/v1/messages"
 #define MIMI_OLLAMA_API_URL          "http://localhost:11434/v1/chat/completions"
 #define MIMI_LLM_API_VERSION         "2023-06-01"
 #define MIMI_LLM_STREAM_BUF_SIZE     (32 * 1024)
