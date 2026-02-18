@@ -893,6 +893,30 @@ static int parse_octal_field(const char *p, size_t n)
     return v;
 }
 
+static void copy_tar_field(char *dst, size_t dst_size, const char *src, size_t src_len)
+{
+    if (!dst || dst_size == 0) return;
+    size_t n = 0;
+    while (n < src_len && src[n] != '\0') n++;
+    if (n >= dst_size) n = dst_size - 1;
+    if (n > 0) memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
+static bool join_path2(char *dst, size_t dst_size, const char *a, const char *b)
+{
+    if (!dst || dst_size == 0 || !a || !b) return false;
+    size_t la = strlen(a);
+    size_t lb = strlen(b);
+    if (la == 0 || lb == 0) return false;
+    if (la + 1 + lb + 1 > dst_size) return false;
+    memcpy(dst, a, la);
+    dst[la] = '/';
+    memcpy(dst + la + 1, b, lb);
+    dst[la + 1 + lb] = '\0';
+    return true;
+}
+
 static bool extract_tar_to_dir(const char *tar_path, const char *out_dir)
 {
     if (!tar_path || !out_dir) return false;
@@ -921,14 +945,29 @@ static bool extract_tar_to_dir(const char *tar_path, const char *out_dir)
         }
         if (all_zero) break;
 
-        const char *name = (const char *)&header[0];
+        const char *name_raw = (const char *)&header[0];
         const char *size_field = (const char *)&header[124];
         const char *typeflag = (const char *)&header[156];
-        const char *prefix = (const char *)&header[345];
+        const char *prefix_raw = (const char *)&header[345];
+        char name[101] = {0};
+        char prefix[156] = {0};
+        copy_tar_field(name, sizeof(name), name_raw, 100);
+        copy_tar_field(prefix, sizeof(prefix), prefix_raw, 155);
 
         char rel[320] = {0};
-        if (prefix[0]) snprintf(rel, sizeof(rel), "%s/%s", prefix, name);
-        else snprintf(rel, sizeof(rel), "%s", name);
+        if (prefix[0]) {
+            if (!join_path2(rel, sizeof(rel), prefix, name)) {
+                ok = false;
+                break;
+            }
+        } else {
+            size_t ln = strlen(name);
+            if (ln == 0 || ln >= sizeof(rel)) {
+                ok = false;
+                break;
+            }
+            memcpy(rel, name, ln + 1);
+        }
 
         if (!is_safe_relpath(rel)) {
             ok = false;
@@ -942,7 +981,7 @@ static bool extract_tar_to_dir(const char *tar_path, const char *out_dir)
         }
 
         char full[512];
-        if (snprintf(full, sizeof(full), "%s/%s", out_dir, rel) <= 0 || strlen(full) >= sizeof(full)) {
+        if (!join_path2(full, sizeof(full), out_dir, rel)) {
             ok = false;
             break;
         }
@@ -1723,6 +1762,10 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
         ESP_LOGE(TAG, "Invalid skill filename token");
         return ESP_ERR_INVALID_ARG;
     }
+    if (!has_suffix(fname, ".lua") && !has_suffix(fname, ".tar")) {
+        ESP_LOGE(TAG, "Unsupported skill format (only .lua/.tar)");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     char staging_dir[512];
     snprintf(staging_dir, sizeof(staging_dir), "%s/.staging", SKILL_DIR);
     struct stat st = {0};
@@ -1886,7 +1929,7 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
 
     if (has_suffix(fname, ".tar")) {
         char extract_dir[512];
-        if (snprintf(extract_dir, sizeof(extract_dir), "%s/.extract_skill", staging_dir) <= 0 ||
+        if (snprintf(extract_dir, sizeof(extract_dir), "%s/.extract_%s", staging_dir, fname) <= 0 ||
             strlen(extract_dir) >= sizeof(extract_dir)) {
             remove(staging_path);
             return ESP_ERR_INVALID_ARG;
