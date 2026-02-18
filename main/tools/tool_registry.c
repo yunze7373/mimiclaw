@@ -112,7 +112,7 @@ esp_err_t tool_registry_init(void)
     register_tool(&stz);
 
     /* Register set_streaming */
-    mimi_tool_t ss = {
+    mimi_tool_t stm = {
         .name = "set_streaming",
         .description = "Enable or disable streaming mode. When streaming is enabled, responses appear token by token in real-time. When disabled, the full response is sent at once (faster overall but no live typing effect).",
         .input_schema_json =
@@ -121,7 +121,7 @@ esp_err_t tool_registry_init(void)
             "\"required\":[\"enable\"]}",
         .execute = tool_set_streaming_execute,
     };
-    register_tool(&ss);
+    register_tool(&stm);
 
     /* Register read_file */
     mimi_tool_t rf = {
