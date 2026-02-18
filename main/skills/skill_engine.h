@@ -14,6 +14,39 @@ esp_err_t skill_engine_install(const char *url);
 esp_err_t skill_engine_install_with_checksum(const char *url, const char *checksum_hex);
 
 /**
+ * Install skill with Ed25519 signature verification.
+ * @param url Skill bundle URL
+ * @param checksum_hex Optional SHA256 hex string (can be NULL)
+ * @param signature_hex Ed25519 signature hex string (64 chars)
+ * @return ESP_OK on success
+ */
+esp_err_t skill_engine_install_with_signature(const char *url, const char *checksum_hex, const char *signature_hex);
+
+/**
+ * Set trusted Ed25519 public key for signature verification.
+ * @param public_key_hex 64-character hex-encoded public key
+ * @return ESP_OK on success
+ */
+esp_err_t skill_engine_set_trusted_key(const char *public_key_hex);
+
+/**
+ * Get currently configured trusted public key (for UI display).
+ * Caller must free() the returned string.
+ * @return Hex string or NULL if no key set
+ */
+char *skill_engine_get_trusted_key(void);
+
+/**
+ * Clear trusted public key.
+ */
+esp_err_t skill_engine_clear_trusted_key(void);
+
+/**
+ * Check if signature verification is enabled.
+ */
+bool skill_engine_signature_verification_enabled(void);
+
+/**
  * Uninstall a skill by name.
  */
 esp_err_t skill_engine_uninstall(const char *name);
