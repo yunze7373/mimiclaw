@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include <stdbool.h>
 
 /**
  * Initialize single-VM Lua skill runtime and load bundles from /spiffs/skills.

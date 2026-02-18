@@ -12,7 +12,6 @@
 #include "esp_log.h"
 #include "esp_http_client.h"
 #include "esp_timer.h"
-#include "esp_nvs.h"
 #include "nvs.h"
 #include "cJSON.h"
 #include "mbedtls/sha256.h"

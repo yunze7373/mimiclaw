@@ -228,18 +228,8 @@ static int l_i2c_init(lua_State *L)
 static int l_i2c_scan(lua_State *L)
 {
     /* Scan I2C bus for devices - returns table of found addresses */
-    i2c_port_t port = I2C_NUM_0;
-
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = -1,  /* Will be set by board profile */
-        .scl_io_num = -1,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 100000,
-    };
-
-    /* For now, return empty table - real scan requires pin config */
+    /* For now, return empty table - real scan requires pin config from board profile */
+    (void)L;  /* Unused parameter */
     lua_newtable(L);
     return 1;
 }
@@ -489,7 +479,11 @@ static int l_gpio_detach_interrupt(lua_State *L)
 }
 
 /* ── I2S API (for INMP441 mic, MAX98357A amp) ── */
+/* Using deprecated driver API for compatibility */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include "driver/i2s.h"
+#pragma GCC diagnostic pop
 
 static bool has_perm_i2s(int skill_id, const char *i2s)
 {
