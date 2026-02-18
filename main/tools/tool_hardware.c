@@ -460,7 +460,15 @@ esp_err_t tool_uart_send(const char *input, char *output, size_t out_len) {
     }
 
     const char *data = data_item->valuestring;
-    int port = port_item ? port_item->valueint : UART_NUM_1;
+    int port = UART_NUM_1;
+    if (port_item) {
+        if (!cJSON_IsNumber(port_item)) {
+            cJSON_Delete(in_json);
+            snprintf(output, out_len, "Error: 'port' must be an integer (0-%d)", UART_NUM_MAX - 1);
+            return ESP_OK;
+        }
+        port = port_item->valueint;
+    }
     cJSON_Delete(in_json);
 
     if (port < 0 || port > UART_NUM_MAX - 1) {
