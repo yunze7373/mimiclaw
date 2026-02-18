@@ -317,20 +317,12 @@ esp_err_t telegram_bot_init(void)
 
 esp_err_t telegram_bot_start(void)
 {
-    /* Allocate task stack from PSRAM to save ~12KB of internal SRAM */
-    static StaticTask_t s_tg_tcb;
-    StackType_t *stack = heap_caps_malloc(MIMI_TG_POLL_STACK, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!stack) {
-        ESP_LOGE(TAG, "Failed to allocate telegram stack from PSRAM");
-        return ESP_ERR_NO_MEM;
-    }
-
-    TaskHandle_t handle = xTaskCreateStaticPinnedToCore(
+    BaseType_t ret = xTaskCreatePinnedToCore(
         telegram_poll_task, "tg_poll",
         MIMI_TG_POLL_STACK, NULL,
-        MIMI_TG_POLL_PRIO, stack, &s_tg_tcb, MIMI_TG_POLL_CORE);
+        MIMI_TG_POLL_PRIO, NULL, MIMI_TG_POLL_CORE);
 
-    return handle ? ESP_OK : ESP_FAIL;
+    return (ret == pdPASS) ? ESP_OK : ESP_FAIL;
 }
 
 esp_err_t telegram_send_chat_action(const char *chat_id, const char *action)

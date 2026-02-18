@@ -112,12 +112,10 @@ esp_err_t ssd1306_init(void)
     /* Configure I2C params (may fail if already configured, that's OK) */
     i2c_param_config(I2C_MASTER_NUM, &conf);
 
-    /* Install driver if not already installed */
-    esp_err_t ret = i2c_driver_install(I2C_MASTER_NUM, I2C_MODE_MASTER, 0, 0, 0);
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "I2C driver install failed: %d", ret);
-        return ret;
-    }
+    /* Install driver — may already be installed by IMU or tool_hw, that's OK */
+    i2c_driver_install(I2C_MASTER_NUM, I2C_MODE_MASTER, 0, 0, 0);
+    /* Ignore return: if driver is already installed, ESP-IDF returns ESP_FAIL.
+       We'll detect a real problem when i2c_master_cmd_begin fails below. */
 
     /* Reset display */
     ssd1306_write_cmd(0xAE);  /* Display off */

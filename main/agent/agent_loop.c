@@ -459,18 +459,10 @@ esp_err_t agent_loop_init(void)
 
 esp_err_t agent_loop_start(void)
 {
-    /* Allocate task stack from PSRAM to save ~12KB of internal SRAM */
-    static StaticTask_t s_agent_tcb;
-    StackType_t *stack = heap_caps_malloc(MIMI_AGENT_STACK, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!stack) {
-        ESP_LOGE(TAG, "Failed to allocate agent stack from PSRAM");
-        return ESP_ERR_NO_MEM;
-    }
-
-    TaskHandle_t handle = xTaskCreateStaticPinnedToCore(
+    BaseType_t ret = xTaskCreatePinnedToCore(
         agent_loop_task, "agent_loop",
         MIMI_AGENT_STACK, NULL,
-        MIMI_AGENT_PRIO, stack, &s_agent_tcb, MIMI_AGENT_CORE);
+        MIMI_AGENT_PRIO, NULL, MIMI_AGENT_CORE);
 
-    return handle ? ESP_OK : ESP_FAIL;
+    return (ret == pdPASS) ? ESP_OK : ESP_FAIL;
 }
