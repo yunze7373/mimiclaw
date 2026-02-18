@@ -54,7 +54,7 @@
 #define MIMI_TG_POLL_CORE            0
 
 /* Agent Loop */
-#define MIMI_AGENT_STACK             (8 * 1024)
+#define MIMI_AGENT_STACK             (12 * 1024)
 #define MIMI_AGENT_PRIO              6
 #define MIMI_AGENT_CORE              1
 #define MIMI_AGENT_MAX_HISTORY       20
@@ -78,7 +78,7 @@
 
 /* Message Bus */
 #define MIMI_BUS_QUEUE_LEN           8
-#define MIMI_OUTBOUND_STACK          (4 * 1024)
+#define MIMI_OUTBOUND_STACK          (6 * 1024)
 #define MIMI_OUTBOUND_PRIO           5
 #define MIMI_OUTBOUND_CORE           0
 
