@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "esp_log.h"
+#include "esp_check.h"
 #include "driver/i2c.h"
 #include "mimi_config.h"
 #include "driver/gpio.h"
@@ -81,8 +82,7 @@ bool ssd1306_is_connected(void)
         }
     }
 
-    /* Try to read ID */
-    uint8_t id;
+    /* Try to read ID (simple check by sending display off command) */
     i2c_cmd_handle_t handle = i2c_cmd_link_create();
     i2c_master_start(handle);
     i2c_master_write_byte(handle, (SSD1306_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
