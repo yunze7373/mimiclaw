@@ -15,6 +15,7 @@
 static const char *TAG = "cron";
 
 #define MAX_CRON_JOBS  MIMI_CRON_MAX_JOBS
+#define CRON_BACKPRESSURE_DELAY_S  5
 
 static cron_job_t s_jobs[MAX_CRON_JOBS];
 static int s_job_count = 0;
@@ -212,6 +213,15 @@ static void cron_process_due_jobs(void)
         if (!job->enabled) continue;
         if (job->next_run <= 0) continue;
         if (job->next_run > now) continue;
+
+        int inbound_depth = message_bus_inbound_depth();
+        if (inbound_depth >= (MIMI_BUS_QUEUE_LEN - 1)) {
+            job->next_run = now + CRON_BACKPRESSURE_DELAY_S;
+            changed = true;
+            ESP_LOGW(TAG, "Deferring cron job %s due to inbound backpressure (depth=%d)",
+                     job->name, inbound_depth);
+            continue;
+        }
 
         /* Job is due — fire it */
         ESP_LOGI(TAG, "Cron job firing: %s (%s)", job->name, job->id);

@@ -239,7 +239,7 @@ void agent_loop_task(void *pvParameters)
 
     while (1) {
         mimi_msg_t msg;
-        esp_err_t err = message_bus_pop_inbound(&msg, UINT32_MAX);
+        esp_err_t err = message_bus_pop_inbound_prefer_websocket(&msg, UINT32_MAX);
         if (err != ESP_OK) continue;
 
         ESP_LOGI(TAG, "Processing message from %s:%s", msg.channel, msg.chat_id);

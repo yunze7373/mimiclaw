@@ -40,6 +40,59 @@ esp_err_t message_bus_pop_inbound(mimi_msg_t *msg, uint32_t timeout_ms)
     return ESP_OK;
 }
 
+esp_err_t message_bus_pop_inbound_prefer_websocket(mimi_msg_t *msg, uint32_t timeout_ms)
+{
+    TickType_t ticks = (timeout_ms == UINT32_MAX) ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
+    if (xQueueReceive(s_inbound_queue, msg, ticks) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    if (strcmp(msg->channel, MIMI_CHAN_WEBSOCKET) == 0) {
+        return ESP_OK;
+    }
+
+    int waiting = (int)uxQueueMessagesWaiting(s_inbound_queue);
+    if (waiting <= 0) return ESP_OK;
+
+    mimi_msg_t tmp[MIMI_BUS_QUEUE_LEN];
+    int count = 0;
+    while (count < MIMI_BUS_QUEUE_LEN && xQueueReceive(s_inbound_queue, &tmp[count], 0) == pdTRUE) {
+        count++;
+    }
+
+    int ws_idx = -1;
+    for (int i = 0; i < count; i++) {
+        if (strcmp(tmp[i].channel, MIMI_CHAN_WEBSOCKET) == 0) {
+            ws_idx = i;
+            break;
+        }
+    }
+
+    if (ws_idx < 0) {
+        for (int i = 0; i < count; i++) {
+            xQueueSendToBack(s_inbound_queue, &tmp[i], 0);
+        }
+        return ESP_OK;
+    }
+
+    mimi_msg_t original = *msg;
+    *msg = tmp[ws_idx];
+
+    for (int i = 0; i < count; i++) {
+        if (i == ws_idx) continue;
+        xQueueSendToBack(s_inbound_queue, &tmp[i], 0);
+    }
+    xQueueSendToBack(s_inbound_queue, &original, 0);
+
+    return ESP_OK;
+}
+
+int message_bus_inbound_depth(void)
+{
+    if (!s_inbound_queue) return 0;
+    return (int)uxQueueMessagesWaiting(s_inbound_queue);
+}
+
 esp_err_t message_bus_push_outbound(const mimi_msg_t *msg)
 {
     if (xQueueSend(s_outbound_queue, msg, pdMS_TO_TICKS(1000)) != pdTRUE) {

@@ -35,6 +35,17 @@ esp_err_t message_bus_push_inbound(const mimi_msg_t *msg);
 esp_err_t message_bus_pop_inbound(mimi_msg_t *msg, uint32_t timeout_ms);
 
 /**
+ * Pop inbound message with WebSocket priority.
+ * If both websocket and non-websocket messages exist, websocket is returned first.
+ */
+esp_err_t message_bus_pop_inbound_prefer_websocket(mimi_msg_t *msg, uint32_t timeout_ms);
+
+/**
+ * Current inbound queue depth.
+ */
+int message_bus_inbound_depth(void);
+
+/**
  * Push a message to the outbound queue (towards channels).
  * The bus takes ownership of msg->content.
  */
