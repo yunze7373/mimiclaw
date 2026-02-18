@@ -56,6 +56,9 @@ static cJSON *build_assistant_content(const llm_response_t *resp)
 /* Send a status message to the frontend */
 static void send_status_msg(const char *channel, const char *chat_id, const char *text)
 {
+    /* Only send status to WebSocket (WebUI); other channels have native indicators */
+    if (strcmp(channel, "websocket") != 0) return;
+
     /* Construct JSON manually: {"type":"status","content":"...","chat_id":"..."} */
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", "status");
