@@ -828,6 +828,41 @@ static bool read_file_alloc(const char *path, char **out)
     return true;
 }
 
+static bool has_suffix(const char *s, const char *suffix)
+{
+    if (!s || !suffix) return false;
+    size_t n = strlen(s);
+    size_t m = strlen(suffix);
+    if (n < m) return false;
+    return strcmp(s + n - m, suffix) == 0;
+}
+
+static bool is_safe_relpath(const char *p)
+{
+    if (!p || !p[0]) return false;
+    if (p[0] == '/' || p[0] == '\\') return false;
+    if (strstr(p, "..")) return false;
+    if (strchr(p, '\\')) return false;
+    return true;
+}
+
+static bool file_exists_regular(const char *path)
+{
+    struct stat st = {0};
+    if (stat(path, &st) != 0) return false;
+    return S_ISREG(st.st_mode);
+}
+
+static int find_slot_by_skill_name(const char *name)
+{
+    if (!name || !name[0]) return -1;
+    for (int i = 0; i < SKILL_MAX_SLOTS; i++) {
+        if (!s_slots[i].used) continue;
+        if (strcmp(s_slots[i].name, name) == 0) return i;
+    }
+    return -1;
+}
+
 static void parse_perm_array(cJSON *obj, const char *key, char out[][16], int *count)
 {
     *count = 0;
@@ -861,6 +896,17 @@ static bool load_manifest(skill_slot_t *slot, const char *bundle_dir)
         cJSON_Delete(root);
         return false;
     }
+    if (!name->valuestring || !name->valuestring[0] ||
+        strlen(name->valuestring) >= sizeof(slot->name)) {
+        cJSON_Delete(root);
+        return false;
+    }
+    if (!entry->valuestring || !entry->valuestring[0] ||
+        strlen(entry->valuestring) >= sizeof(slot->entry) ||
+        !is_safe_relpath(entry->valuestring)) {
+        cJSON_Delete(root);
+        return false;
+    }
 
     snprintf(slot->name, sizeof(slot->name), "%s", name->valuestring);
     snprintf(slot->version, sizeof(slot->version), "%s", cJSON_IsString(version) ? version->valuestring : "1.0.0");
@@ -868,6 +914,12 @@ static bool load_manifest(skill_slot_t *slot, const char *bundle_dir)
     snprintf(slot->description, sizeof(slot->description), "%s", cJSON_IsString(desc) ? desc->valuestring : "");
     snprintf(slot->entry, sizeof(slot->entry), "%s", entry->valuestring);
     snprintf(slot->root_dir, sizeof(slot->root_dir), "%s", bundle_dir);
+    char entry_path[512];
+    snprintf(entry_path, sizeof(entry_path), "%s/%s", slot->root_dir, slot->entry);
+    if (!file_exists_regular(entry_path)) {
+        cJSON_Delete(root);
+        return false;
+    }
 
     cJSON *perms = cJSON_GetObjectItem(root, "permissions");
     if (cJSON_IsObject(perms)) {
@@ -1247,6 +1299,10 @@ static bool load_bundle_dir(const char *bundle_dir, int slot_idx)
         ESP_LOGW(TAG, "Invalid manifest: %s", bundle_dir);
         return false;
     }
+    if (find_slot_by_skill_name(slot->name) >= 0) {
+        ESP_LOGW(TAG, "Duplicate skill name rejected: %s", slot->name);
+        return false;
+    }
 
     if (slot->req_i2c_enabled) {
         int sda = 0, scl = 0, freq = 0;
@@ -1495,6 +1551,10 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
         ESP_LOGE(TAG, "Invalid skill filename in URL");
         return ESP_ERR_INVALID_ARG;
     }
+    if (strchr(fname, '?') || strchr(fname, '#') || strchr(fname, '\\')) {
+        ESP_LOGE(TAG, "Invalid skill filename token");
+        return ESP_ERR_INVALID_ARG;
+    }
     char staging_dir[512];
     snprintf(staging_dir, sizeof(staging_dir), "%s/.staging", SKILL_DIR);
     struct stat st = {0};
@@ -1581,7 +1641,7 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
         return ESP_FAIL;
     }
 
-    if (strstr(fname, ".lua")) {
+    if (has_suffix(fname, ".lua")) {
         if (!lua_lock_take(pdMS_TO_TICKS(500))) return ESP_ERR_TIMEOUT;
         bool ok_load = load_legacy_lua_file(fname, s_slot_count);
         lua_lock_give();
