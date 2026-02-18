@@ -115,7 +115,7 @@ static void process_sse_line(stream_ctx_t *ctx, char *line)
     } else if (strncmp(line, "data:", 5) == 0) {
         line += 5;
     } else {
-        return; /* Not a data line (e.g. :keep-alive) */
+        return; /* Not a data line (e.g. :keep-alive, event:) */
     }
 
     /* Check for [DONE] */
@@ -139,6 +139,21 @@ static void process_sse_line(stream_ctx_t *ctx, char *line)
             }
         }
     }
+
+    /* Anthropic format: content_block_delta with delta.text */
+    cJSON *type = cJSON_GetObjectItem(root, "type");
+    if (type && cJSON_IsString(type)) {
+        if (strcmp(type->valuestring, "content_block_delta") == 0) {
+            cJSON *delta = cJSON_GetObjectItem(root, "delta");
+            if (delta) {
+                cJSON *text = cJSON_GetObjectItem(delta, "text");
+                if (text && cJSON_IsString(text)) {
+                    if (ctx->cb) ctx->cb(text->valuestring, ctx->ctx);
+                }
+            }
+        }
+    }
+
     cJSON_Delete(root);
 }
 
@@ -280,7 +295,7 @@ static const char *llm_api_path(void)
 {
     if (provider_is_openai()) return "/v1/chat/completions";
     if (provider_is_minimax()) return "/v1/text/chatcompletion_v2";
-    if (provider_is_minimax_coding()) return "/v1/messages";
+    if (provider_is_minimax_coding()) return "/anthropic/v1/messages";
     if (provider_is_ollama()) return "/v1/chat/completions";
     return "/v1/messages";  /* anthropic */
 }
@@ -1090,7 +1105,6 @@ static void parse_sse_response(const char *sse_data, llm_response_t *resp)
                                     /* Append arguments */
                                     size_t args_len = strlen(args->valuestring);
                                     size_t existing_len = call->input ? call->input_len : 0;
-                                    /* Handle call->input == NULL initially */
                                     char *new_input = realloc(call->input, existing_len + args_len + 1);
                                     if (new_input) {
                                         call->input = new_input;
@@ -1114,6 +1128,76 @@ static void parse_sse_response(const char *sse_data, llm_response_t *resp)
                 }
             }
         }
+
+        /* Anthropic format: content_block_delta / content_block_start */
+        cJSON *evt_type = cJSON_GetObjectItem(root, "type");
+        if (evt_type && cJSON_IsString(evt_type)) {
+            const char *t = evt_type->valuestring;
+
+            /* Text content: content_block_delta */
+            if (strcmp(t, "content_block_delta") == 0) {
+                cJSON *delta = cJSON_GetObjectItem(root, "delta");
+                if (delta) {
+                    cJSON *text = cJSON_GetObjectItem(delta, "text");
+                    if (text && cJSON_IsString(text)) {
+                        size_t new_len = strlen(text->valuestring);
+                        char *new_text = realloc(resp->text, resp->text_len + new_len + 1);
+                        if (new_text) {
+                            resp->text = new_text;
+                            memcpy(resp->text + resp->text_len, text->valuestring, new_len);
+                            resp->text_len += new_len;
+                            resp->text[resp->text_len] = '\0';
+                        }
+                    }
+                    /* Tool input JSON delta */
+                    cJSON *partial = cJSON_GetObjectItem(delta, "partial_json");
+                    if (partial && cJSON_IsString(partial) && resp->call_count > 0) {
+                        llm_tool_call_t *call = &resp->calls[resp->call_count - 1];
+                        size_t plen = strlen(partial->valuestring);
+                        size_t existing = call->input ? call->input_len : 0;
+                        char *new_input = realloc(call->input, existing + plen + 1);
+                        if (new_input) {
+                            call->input = new_input;
+                            memcpy(call->input + existing, partial->valuestring, plen);
+                            call->input_len += plen;
+                            call->input[call->input_len] = '\0';
+                        }
+                    }
+                }
+            }
+
+            /* Tool use start: content_block_start with type=tool_use */
+            if (strcmp(t, "content_block_start") == 0) {
+                cJSON *cb = cJSON_GetObjectItem(root, "content_block");
+                if (cb) {
+                    cJSON *cb_type = cJSON_GetObjectItem(cb, "type");
+                    if (cb_type && cJSON_IsString(cb_type) && strcmp(cb_type->valuestring, "tool_use") == 0) {
+                        resp->tool_use = true;
+                        int idx = resp->call_count;
+                        if (idx < MIMI_MAX_TOOL_CALLS) {
+                            resp->call_count = idx + 1;
+                            llm_tool_call_t *call = &resp->calls[idx];
+                            cJSON *id = cJSON_GetObjectItem(cb, "id");
+                            if (id && cJSON_IsString(id)) strncpy(call->id, id->valuestring, sizeof(call->id) - 1);
+                            cJSON *name = cJSON_GetObjectItem(cb, "name");
+                            if (name && cJSON_IsString(name)) strncpy(call->name, name->valuestring, sizeof(call->name) - 1);
+                        }
+                    }
+                }
+            }
+
+            /* Message delta with stop_reason */
+            if (strcmp(t, "message_delta") == 0) {
+                cJSON *delta = cJSON_GetObjectItem(root, "delta");
+                if (delta) {
+                    cJSON *stop = cJSON_GetObjectItem(delta, "stop_reason");
+                    if (stop && cJSON_IsString(stop) && strcmp(stop->valuestring, "tool_use") == 0) {
+                        resp->tool_use = true;
+                    }
+                }
+            }
+        }
+
         cJSON_Delete(root);
     }
 }
