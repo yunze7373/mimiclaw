@@ -34,6 +34,7 @@
 static const char *TAG = "skill_engine";
 
 #define SKILL_DIR                 "/spiffs/skills"
+#define SKILL_MARKET_META_FILE    "/spiffs/skills/.market_meta.json"
 #define SKILL_MAX_SCHEMA_JSON     512
 #define SKILL_INSTALL_MAX_BYTES   (1024 * 1024)
 #define SKILL_EXEC_INSTR_BUDGET   200000
@@ -69,6 +70,10 @@ typedef struct {
     char req_i2c_bus[16];
     int req_i2c_min_freq_hz;
     int req_i2c_max_freq_hz;
+
+    bool installed_from_marketplace;
+    char market_source_id[64];
+    char market_version[16];
 } skill_slot_t;
 
 typedef struct {
@@ -166,6 +171,10 @@ static bool slot_has_declared_event(int slot_idx, const char *event_name)
     }
     return false;
 }
+
+static void persist_market_meta(void);
+static int find_slot_by_skill_name(const char *name);
+static void apply_market_meta_to_slot(int slot_idx, const char *source_id, const char *source_version);
 
 static void install_status_begin(const char *url)
 {
@@ -927,6 +936,67 @@ static bool read_file_alloc(const char *path, char **out)
     return true;
 }
 
+static void persist_market_meta(void)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON *items = cJSON_CreateArray();
+    if (!root || !items) {
+        if (root) cJSON_Delete(root);
+        if (items) cJSON_Delete(items);
+        return;
+    }
+    cJSON_AddItemToObject(root, "items", items);
+
+    for (int i = 0; i < SKILL_MAX_SLOTS; i++) {
+        if (!s_slots[i].used || !s_slots[i].installed_from_marketplace) continue;
+        if (!s_slots[i].market_source_id[0]) continue;
+        cJSON *it = cJSON_CreateObject();
+        cJSON_AddStringToObject(it, "name", s_slots[i].name);
+        cJSON_AddStringToObject(it, "source_id", s_slots[i].market_source_id);
+        cJSON_AddStringToObject(it, "market_version",
+                                s_slots[i].market_version[0] ? s_slots[i].market_version : s_slots[i].version);
+        cJSON_AddItemToArray(items, it);
+    }
+
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!json) return;
+    FILE *f = fopen(SKILL_MARKET_META_FILE, "wb");
+    if (f) {
+        fwrite(json, 1, strlen(json), f);
+        fclose(f);
+    }
+    free(json);
+}
+
+static void load_market_meta(void)
+{
+    char *s = NULL;
+    if (!read_file_alloc(SKILL_MARKET_META_FILE, &s)) return;
+    cJSON *root = cJSON_Parse(s);
+    free(s);
+    if (!root) return;
+    cJSON *items = cJSON_GetObjectItem(root, "items");
+    if (!cJSON_IsArray(items)) {
+        cJSON_Delete(root);
+        return;
+    }
+
+    cJSON *it = NULL;
+    cJSON_ArrayForEach(it, items) {
+        cJSON *name = cJSON_GetObjectItem(it, "name");
+        cJSON *sid = cJSON_GetObjectItem(it, "source_id");
+        cJSON *mver = cJSON_GetObjectItem(it, "market_version");
+        if (!cJSON_IsString(name) || !name->valuestring || !name->valuestring[0]) continue;
+        if (!cJSON_IsString(sid) || !sid->valuestring || !sid->valuestring[0]) continue;
+        int idx = find_slot_by_skill_name(name->valuestring);
+        if (idx < 0) continue;
+        apply_market_meta_to_slot(idx, sid->valuestring,
+                                  (cJSON_IsString(mver) && mver->valuestring) ? mver->valuestring : NULL);
+    }
+    cJSON_Delete(root);
+}
+
 static bool has_suffix(const char *s, const char *suffix)
 {
     if (!s || !suffix) return false;
@@ -1401,6 +1471,32 @@ static int compare_versions_old_vs_new(const char *old_v, const char *new_v)
         if (ov[i] > nv[i]) return 1;
     }
     return 0;
+}
+
+static void apply_market_meta_to_slot(int slot_idx, const char *source_id, const char *source_version)
+{
+    if (slot_idx < 0 || slot_idx >= SKILL_MAX_SLOTS) return;
+    skill_slot_t *slot = &s_slots[slot_idx];
+    if (!slot->used) return;
+    if (!source_id || !source_id[0]) return;
+
+    slot->installed_from_marketplace = true;
+    snprintf(slot->market_source_id, sizeof(slot->market_source_id), "%s", source_id);
+    if (source_version && source_version[0]) {
+        snprintf(slot->market_version, sizeof(slot->market_version), "%s", source_version);
+    } else {
+        snprintf(slot->market_version, sizeof(slot->market_version), "%s", slot->version);
+    }
+}
+
+static int find_slot_by_market_source_id(const char *source_id)
+{
+    if (!source_id || !source_id[0]) return -1;
+    for (int i = 0; i < SKILL_MAX_SLOTS; i++) {
+        if (!s_slots[i].used || !s_slots[i].installed_from_marketplace) continue;
+        if (strcmp(s_slots[i].market_source_id, source_id) == 0) return i;
+    }
+    return -1;
 }
 
 static void parse_perm_array(cJSON *obj, const char *key, char out[][16], int *count)
@@ -2007,6 +2103,7 @@ static esp_err_t skill_engine_init_impl(void)
     closedir(dir);
 
     tool_registry_rebuild_json();
+    load_market_meta();
     lua_lock_give();
 
     ESP_ERROR_CHECK(skill_runtime_init());
@@ -2076,7 +2173,9 @@ static void bytes_to_hex_lower(const uint8_t *bytes, size_t n, char *out, size_t
 static esp_err_t activate_bundle_from_extracted_dir(const char *extract_dir,
                                                     const char *staging_dir,
                                                     const char *install_tag,
-                                                    int free_slot_idx)
+                                                    int free_slot_idx,
+                                                    const char *market_source_id,
+                                                    const char *market_version)
 {
     char bundle_root[512];
     if (!detect_bundle_root_dir(extract_dir, bundle_root, sizeof(bundle_root))) {
@@ -2157,6 +2256,8 @@ static esp_err_t activate_bundle_from_extracted_dir(const char *extract_dir,
     lua_lock_give();
 
     if (ok_load) {
+        apply_market_meta_to_slot(load_slot, market_source_id, market_version);
+        persist_market_meta();
         remove_path_recursive(dir_backup);
         s_slot_count = count_used_slots();
         tool_registry_rebuild_json();
@@ -2179,7 +2280,10 @@ static esp_err_t activate_bundle_from_extracted_dir(const char *extract_dir,
     return ESP_FAIL;
 }
 
-static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const char *checksum_hex)
+static esp_err_t skill_engine_install_with_checksum_impl(const char *url,
+                                                         const char *checksum_hex,
+                                                         const char *market_source_id,
+                                                         const char *market_version)
 {
     if (!url || !url[0]) return ESP_ERR_INVALID_ARG;
     install_status_step("validate");
@@ -2369,9 +2473,11 @@ static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const 
         bool ok_load = load_legacy_lua_file(fname, load_slot);
         lua_lock_give();
         if (ok_load) {
+            apply_market_meta_to_slot(load_slot, market_source_id, market_version);
             remove(backup_path);
             s_slot_count = count_used_slots();
             tool_registry_rebuild_json();
+            persist_market_meta();
             return ESP_OK;
         }
 
@@ -2426,7 +2532,8 @@ static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const 
             return ESP_FAIL;
         }
         remove(staging_path);
-        return activate_bundle_from_extracted_dir(extract_dir, staging_dir, install_tag, free_slot_idx);
+        return activate_bundle_from_extracted_dir(extract_dir, staging_dir, install_tag, free_slot_idx,
+                                                  market_source_id, market_version);
     }
 
     remove(staging_path);
@@ -2440,10 +2547,45 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
         return ESP_ERR_TIMEOUT;
     }
     install_status_begin(url);
-    esp_err_t ret = skill_engine_install_with_checksum_impl(url, checksum_hex);
+    esp_err_t ret = skill_engine_install_with_checksum_impl(url, checksum_hex, NULL, NULL);
     install_status_finish(ret);
     xSemaphoreGive(s_install_lock);
     return ret;
+}
+
+esp_err_t skill_engine_install_from_market(const char *url,
+                                           const char *checksum_hex,
+                                           const char *source_id,
+                                           const char *source_version)
+{
+    if (!source_id || !source_id[0]) {
+        return skill_engine_install_with_checksum(url, checksum_hex);
+    }
+    if (!s_install_lock) return ESP_ERR_INVALID_STATE;
+    if (xSemaphoreTake(s_install_lock, pdMS_TO_TICKS(15000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    install_status_begin(url);
+    esp_err_t ret = skill_engine_install_with_checksum_impl(url, checksum_hex, source_id, source_version);
+    install_status_finish(ret);
+    xSemaphoreGive(s_install_lock);
+    return ret;
+}
+
+esp_err_t skill_engine_upgrade_from_market_offer(const char *url,
+                                                 const char *checksum_hex,
+                                                 const char *source_id,
+                                                 const char *source_version)
+{
+    if (!url || !url[0] || !source_id || !source_id[0] || !source_version || !source_version[0]) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    int idx = find_slot_by_market_source_id(source_id);
+    if (idx < 0) return ESP_ERR_NOT_FOUND;
+    const char *installed_v = s_slots[idx].market_version[0] ? s_slots[idx].market_version : s_slots[idx].version;
+    int cmp = compare_versions_old_vs_new(installed_v, source_version);
+    if (cmp >= 0) return ESP_ERR_INVALID_VERSION;
+    return skill_engine_install_from_market(url, checksum_hex, source_id, source_version);
 }
 
 esp_err_t skill_engine_install(const char *url)
@@ -2471,6 +2613,7 @@ esp_err_t skill_engine_uninstall(const char *name)
         if (fs_path[0]) remove_path_recursive(fs_path);
         s_slot_count = count_used_slots();
         tool_registry_rebuild_json();
+        persist_market_meta();
         ESP_LOGI(TAG, "Skill uninstalled: %s", name);
         xSemaphoreGive(s_install_lock);
         return ESP_OK;
@@ -2488,6 +2631,10 @@ char *skill_engine_list_json(void)
         cJSON_AddStringToObject(obj, "name", s_slots[i].name);
         cJSON_AddStringToObject(obj, "version", s_slots[i].version);
         cJSON_AddStringToObject(obj, "description", s_slots[i].description);
+        cJSON_AddBoolToObject(obj, "installed_from_marketplace", s_slots[i].installed_from_marketplace);
+        cJSON_AddStringToObject(obj, "source_id", s_slots[i].market_source_id);
+        cJSON_AddStringToObject(obj, "market_version",
+                                s_slots[i].market_version[0] ? s_slots[i].market_version : s_slots[i].version);
         cJSON_AddNumberToObject(obj, "tools", s_slots[i].tool_count);
         cJSON_AddNumberToObject(obj, "state", s_slots[i].state);
         cJSON *events = cJSON_CreateArray();
@@ -2499,6 +2646,62 @@ char *skill_engine_list_json(void)
     }
     char *json = cJSON_PrintUnformatted(arr);
     cJSON_Delete(arr);
+    return json;
+}
+
+char *skill_engine_check_updates_json(const char *offers_json)
+{
+    cJSON *root = cJSON_Parse(offers_json ? offers_json : "{}");
+    if (!root) return NULL;
+    cJSON *items = cJSON_GetObjectItem(root, "items");
+    if (!cJSON_IsArray(items)) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+
+    cJSON *out = cJSON_CreateObject();
+    cJSON *updates = cJSON_CreateArray();
+    cJSON_AddItemToObject(out, "updates", updates);
+
+    cJSON *it = NULL;
+    cJSON_ArrayForEach(it, items) {
+        cJSON *sid = cJSON_GetObjectItem(it, "source_id");
+        cJSON *ver = cJSON_GetObjectItem(it, "version");
+        cJSON *url = cJSON_GetObjectItem(it, "url");
+        cJSON *checksum = cJSON_GetObjectItem(it, "checksum");
+        if (!cJSON_IsString(sid) || !sid->valuestring || !sid->valuestring[0]) continue;
+        if (!cJSON_IsString(ver) || !ver->valuestring || !ver->valuestring[0]) continue;
+
+        for (int i = 0; i < SKILL_MAX_SLOTS; i++) {
+            if (!s_slots[i].used || !s_slots[i].installed_from_marketplace) continue;
+            if (strcmp(s_slots[i].market_source_id, sid->valuestring) != 0) continue;
+            const char *installed_v = s_slots[i].market_version[0] ? s_slots[i].market_version : s_slots[i].version;
+            int cmp = compare_versions_old_vs_new(installed_v, ver->valuestring);
+            if (cmp < 0) {
+                cJSON *u = cJSON_CreateObject();
+                cJSON_AddStringToObject(u, "name", s_slots[i].name);
+                cJSON_AddStringToObject(u, "source_id", s_slots[i].market_source_id);
+                cJSON_AddStringToObject(u, "installed_version", installed_v);
+                cJSON_AddStringToObject(u, "available_version", ver->valuestring);
+                bool can_upgrade_now = false;
+                if (cJSON_IsString(url) && url->valuestring && url->valuestring[0]) {
+                    cJSON_AddStringToObject(u, "url", url->valuestring);
+                    can_upgrade_now = true;
+                }
+                if (cJSON_IsString(checksum) && checksum->valuestring && checksum->valuestring[0]) {
+                    cJSON_AddStringToObject(u, "checksum", checksum->valuestring);
+                }
+                cJSON_AddBoolToObject(u, "can_upgrade_now", can_upgrade_now);
+                cJSON_AddItemToArray(updates, u);
+            }
+            break;
+        }
+    }
+
+    cJSON_AddNumberToObject(out, "count", cJSON_GetArraySize(updates));
+    char *json = cJSON_PrintUnformatted(out);
+    cJSON_Delete(out);
+    cJSON_Delete(root);
     return json;
 }
 
@@ -2560,6 +2763,8 @@ char *skill_engine_install_capabilities_json(void)
     cJSON_AddStringToObject(obj, "downgrade_policy", "reject_if_installed_newer");
     cJSON_AddNumberToObject(obj, "max_package_bytes", (double)SKILL_INSTALL_MAX_BYTES);
     cJSON_AddNumberToObject(obj, "install_history_max", (double)INSTALL_HISTORY_MAX);
+    cJSON_AddBoolToObject(obj, "supports_check_updates_api", true);
+    cJSON_AddBoolToObject(obj, "supports_upgrade_api", true);
 
     char *json = cJSON_PrintUnformatted(obj);
     cJSON_Delete(obj);
@@ -2604,4 +2809,52 @@ void skill_engine_install_history_clear(void)
     memset(s_install_history, 0, sizeof(s_install_history));
     s_install_history_count = 0;
     s_install_history_next = 0;
+}
+
+char *skill_engine_framework_status_json(void)
+{
+    cJSON *root = cJSON_CreateObject();
+    if (!root) return NULL;
+
+    cJSON *runtime = cJSON_CreateObject();
+    cJSON_AddBoolToObject(runtime, "single_vm_ready", s_L != NULL);
+    cJSON_AddBoolToObject(runtime, "lua_lock_ready", s_lua_lock != NULL);
+    cJSON_AddBoolToObject(runtime, "install_lock_ready", s_install_lock != NULL);
+    cJSON_AddBoolToObject(runtime, "event_worker_ready", s_cb_task != NULL);
+    cJSON_AddNumberToObject(runtime, "skills_active", count_used_slots());
+    cJSON_AddItemToObject(root, "runtime", runtime);
+
+    cJSON *market = cJSON_CreateObject();
+    cJSON_AddBoolToObject(market, "install_api", true);
+    cJSON_AddBoolToObject(market, "check_updates_api", true);
+    cJSON_AddBoolToObject(market, "upgrade_api", true);
+    cJSON_AddBoolToObject(market, "meta_persistence", file_exists_regular(SKILL_MARKET_META_FILE));
+    cJSON_AddItemToObject(root, "marketplace", market);
+
+    cJSON *policy = cJSON_CreateObject();
+    cJSON_AddStringToObject(policy, "downgrade_policy", "reject_if_installed_newer");
+    cJSON_AddStringToObject(policy, "checksum", "sha256");
+    cJSON_AddNumberToObject(policy, "max_package_bytes", (double)SKILL_INSTALL_MAX_BYTES);
+    cJSON_AddBoolToObject(policy, "signature_verification", false);
+    cJSON_AddItemToObject(root, "policy", policy);
+
+    cJSON *package = cJSON_CreateObject();
+    cJSON *ext = cJSON_CreateArray();
+    cJSON_AddItemToArray(ext, cJSON_CreateString("lua"));
+    cJSON_AddItemToArray(ext, cJSON_CreateString("tar"));
+    cJSON_AddItemToArray(ext, cJSON_CreateString("zip"));
+    cJSON_AddItemToObject(package, "extensions", ext);
+    cJSON *zipm = cJSON_CreateArray();
+    cJSON_AddItemToArray(zipm, cJSON_CreateString("stored"));
+    cJSON_AddItemToObject(package, "zip_methods", zipm);
+    cJSON_AddItemToObject(root, "package_support", package);
+
+    cJSON *history = cJSON_CreateObject();
+    cJSON_AddNumberToObject(history, "count", s_install_history_count);
+    cJSON_AddNumberToObject(history, "capacity", INSTALL_HISTORY_MAX);
+    cJSON_AddItemToObject(root, "history", history);
+
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return json;
 }

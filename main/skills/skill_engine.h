@@ -12,6 +12,14 @@ esp_err_t skill_engine_init(void);
  */
 esp_err_t skill_engine_install(const char *url);
 esp_err_t skill_engine_install_with_checksum(const char *url, const char *checksum_hex);
+esp_err_t skill_engine_install_from_market(const char *url,
+                                           const char *checksum_hex,
+                                           const char *source_id,
+                                           const char *source_version);
+esp_err_t skill_engine_upgrade_from_market_offer(const char *url,
+                                                 const char *checksum_hex,
+                                                 const char *source_id,
+                                                 const char *source_version);
 
 /**
  * Uninstall a skill by name.
@@ -27,6 +35,8 @@ char *skill_engine_install_status_json(void);
 char *skill_engine_install_capabilities_json(void);
 char *skill_engine_install_history_json(void);
 void skill_engine_install_history_clear(void);
+char *skill_engine_check_updates_json(const char *offers_json);
+char *skill_engine_framework_status_json(void);
 
 /**
  * Number of active skill slots.

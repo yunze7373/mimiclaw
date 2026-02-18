@@ -28,7 +28,7 @@ static const char *TAG = "web_ui";
 #define STRINGIFY_HELPER(x) #x
 #define STRINGIFY(x) STRINGIFY_HELPER(x)
 
-/* ── SPA HTML Page ───────────────────────────────────────────────── */
+/* 笏笏 SPA HTML Page 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏 */
 
 static const char *HTML_PAGE =
 "<!DOCTYPE html>"
@@ -37,7 +37,7 @@ static const char *HTML_PAGE =
 "  <meta charset='utf-8'>"
 "  <meta name='viewport' content='width=device-width, initial-scale=1'>"
 "  <title>MimiClaw</title>"
-"  <link rel='icon' href='data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text y=\".9em\" font-size=\"90\">🦊</text></svg>'>"
+"  <link rel='icon' href='data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text y=\".9em\" font-size=\"90\">ｦ・/text></svg>'>"
 "  <style>"
 "    :root {"
 "      --primary: #6366f1; --primary-dark: #4f46e5;"
@@ -138,39 +138,43 @@ static const char *HTML_PAGE =
 "  <!-- Sidebar -->"
 "  <div class='sidebar'>"
 "    <div class='logo'>"
-"      <span class='logo-icon'>🦊</span>"
+"      <span class='logo-icon'>ｦ・/span>"
 "      <span>MimiClaw</span>"
 "    </div>"
 "    <div class='nav'>"
 "      <div class='nav-item active' data-view='dashboard'>"
-"        <span class='nav-icon'>📊</span>"
-"        <span class='nav-label'>仪表盘</span>"
+"        <span class='nav-icon'>投</span>"
+"        <span class='nav-label'>莉ｪ陦ｨ逶・/span>"
 "      </div>"
 "      <div class='nav-item' data-view='chat'>"
-"        <span class='nav-icon'>💬</span>"
-"        <span class='nav-label'>聊天</span>"
+"        <span class='nav-icon'>町</span>"
+"        <span class='nav-label'>閨雁､ｩ</span>"
 "      </div>"
 "      <div class='nav-item' data-view='agent'>"
-"        <span class='nav-icon'>🤖</span>"
+"        <span class='nav-icon'>､・/span>"
 "        <span class='nav-label'>Agent</span>"
 "      </div>"
 "      <div class='nav-item' data-view='hardware'>"
-"        <span class='nav-icon'>🔌</span>"
-"        <span class='nav-label'>硬件</span>"
+"        <span class='nav-icon'>伯</span>"
+"        <span class='nav-label'>遑ｬ莉ｶ</span>"
+"      </div>"
+"      <div class='nav-item' data-view='market'>"
+"        <span class='nav-icon'>M</span>"
+"        <span class='nav-label'>Marketplace</span>"
 "      </div>"
 "      <div class='nav-item' data-view='settings'>"
-"        <span class='nav-icon'>⚙️</span>"
-"        <span class='nav-label'>设置</span>"
+"        <span class='nav-icon'>笞呻ｸ・/span>"
+"        <span class='nav-label'>隶ｾ鄂ｮ</span>"
 "      </div>"
 "      <div class='nav-item' data-view='tools'>"
-"        <span class='nav-icon'>🔧</span>"
-"        <span class='nav-label'>工具</span>"
+"        <span class='nav-icon'>肌</span>"
+"        <span class='nav-label'>蟾･蜈ｷ</span>"
 "      </div>"
 "    </div>"
 "    <div class='sidebar-footer'>"
 "      <div class='ws-status'>"
 "        <div class='ws-dot' id='wsDot'></div>"
-"        <span id='wsText'>未连接</span>"
+"        <span id='wsText'>譛ｪ霑樊磁</span>"
 "      </div>"
 "    </div>"
 "  </div>"
@@ -178,9 +182,9 @@ static const char *HTML_PAGE =
 "  <!-- Main Content -->"
 "  <div class='main'>"
 "    <div class='header'>"
-"      <h1 id='pageTitle'>仪表盘</h1>"
+"      <h1 id='pageTitle'>莉ｪ陦ｨ逶・/h1>"
 "      <div class='header-right'>"
-"        <span class='ip-badge' id='ipBadge'>获取IP...</span>"
+"        <span class='ip-badge' id='ipBadge'>闔ｷ蜿蜂P...</span>"
 "      </div>"
 "    </div>"
 ""
@@ -189,19 +193,19 @@ static const char *HTML_PAGE =
 "      <div class='content'>"
 "        <div class='card'>"
 "          <div class='card-header'>"
-"            <span class='card-title'>系统状态</span>"
-"            <button class='btn btn-sm btn-primary' onclick='refreshStatus()'>刷新</button>"
+"            <span class='card-title'>邉ｻ扈溽憾諤・/span>"
+"            <button class='btn btn-sm btn-primary' onclick='refreshStatus()'>蛻ｷ譁ｰ</button>"
 "          </div>"
 "          <div class='status-grid' id='statusGrid'></div>"
 "        </div>"
 ""
 "        <div class='card'>"
 "          <div class='card-header'>"
-"            <span class='card-title'>快速操作</span>"
+"            <span class='card-title'>蠢ｫ騾滓桃菴・/span>"
 "          </div>"
 "          <div class='form-row'>"
-"            <button class='btn btn-primary' onclick='switchView(\"chat\")'>进入聊天</button>"
-"            <button class='btn btn-danger' onclick='reboot()'>重启设备</button>"
+"            <button class='btn btn-primary' onclick='switchView(\"chat\")'>霑帛・閨雁､ｩ</button>"
+"            <button class='btn btn-danger' onclick='reboot()'>驥榊星隶ｾ螟・/button>"
 "          </div>"
 "        </div>"
 "      </div>"
@@ -214,7 +218,7 @@ static const char *HTML_PAGE =
 "          <div class='chat-messages' id='chatMessages'></div>"
 "          <div class='chat-input-row'>"
 "            <select id='modelSelect'>"
-"              <option value=''>默认模型</option>"
+"              <option value=''>鮟倩ｮ､讓｡蝙・/option>"
 "              <option value='claude-opus-4-5'>Claude Opus 4.5</option>"
 "              <option value='claude-sonnet-4-5'>Claude Sonnet 4.5</option>"
 "              <option value='claude-haiku-3-5'>Claude Haude 3.5</option>"
@@ -225,8 +229,8 @@ static const char *HTML_PAGE =
 "              <option value='ollama:llama3'>Ollama Llama3</option>"
 "              <option value='ollama:qwen2.5'>Ollama Qwen2.5</option>"
 "            </select>"
-"            <input type='text' id='chatInput' placeholder='发送消息...' onkeypress='handleChatKey(event)'>"
-"            <button onclick='sendChat()' id='sendBtn'>发送</button>"
+"            <input type='text' id='chatInput' placeholder='蜿鷹∵ｶ域・...' onkeypress='handleChatKey(event)'>"
+"            <button onclick='sendChat()' id='sendBtn'>蜿鷹・/button>"
 "          </div>"
 "        </div>"
 "      </div>"
@@ -237,23 +241,23 @@ static const char *HTML_PAGE =
 "      <div class='content'>"
 "        <div class='card'>"
 "          <div class='card-header'>"
-"            <span class='card-title'>Agent 配置</span>"
-"            <button class='btn btn-sm btn-primary' onclick='saveAgent()'>保存</button>"
+"            <span class='card-title'>Agent 驟咲ｽｮ</span>"
+"            <button class='btn btn-sm btn-primary' onclick='saveAgent()'>菫晏ｭ・/button>"
 "          </div>"
 "          <div class='form-group'>"
-"            <label>SOUL.md (性格设定)</label>"
+"            <label>SOUL.md (諤ｧ譬ｼ隶ｾ螳・</label>"
 "            <textarea id='agentSoul' rows='6' style='width:100%;font-family:monospace;font-size:13px;padding:8px;border:1px solid #333;border-radius:6px;background:#1a1a2e;color:#e0e0e0;resize:vertical'></textarea>"
 "          </div>"
 "          <div class='form-group'>"
-"            <label>USER.md (用户信息)</label>"
+"            <label>USER.md (逕ｨ謌ｷ菫｡諱ｯ)</label>"
 "            <textarea id='agentUser' rows='6' style='width:100%;font-family:monospace;font-size:13px;padding:8px;border:1px solid #333;border-radius:6px;background:#1a1a2e;color:#e0e0e0;resize:vertical'></textarea>"
 "          </div>"
 "          <div class='form-group'>"
-"            <label>MEMORY.md (长期记忆)</label>"
+"            <label>MEMORY.md (髟ｿ譛溯ｮｰ蠢・</label>"
 "            <textarea id='agentMemory' rows='6' style='width:100%;font-family:monospace;font-size:13px;padding:8px;border:1px solid #333;border-radius:6px;background:#1a1a2e;color:#e0e0e0;resize:vertical'></textarea>"
 "          </div>"
 "          <div class='form-group'>"
-"            <label>HEARTBEAT.md (定时任务)</label>"
+"            <label>HEARTBEAT.md (螳壽慮莉ｻ蜉｡)</label>"
 "            <textarea id='agentHeartbeat' rows='6' style='width:100%;font-family:monospace;font-size:13px;padding:8px;border:1px solid #333;border-radius:6px;background:#1a1a2e;color:#e0e0e0;resize:vertical'></textarea>"
 "          </div>"
 "        </div>"
@@ -265,23 +269,23 @@ static const char *HTML_PAGE =
 "      <div class='content'>"
 "        <div class='card'>"
 "          <div class='card-header'>"
-"            <span class='card-title'>LLM 配置</span>"
-"            <button class='btn btn-sm btn-primary' onclick='saveSettings()'>保存</button>"
+"            <span class='card-title'>LLM 驟咲ｽｮ</span>"
+"            <button class='btn btn-sm btn-primary' onclick='saveSettings()'>菫晏ｭ・/button>"
 "          </div>"
 "          <div class='form-row'>"
 "            <div class='form-group'>"
-"              <label>提供商</label>"
+"              <label>謠蝉ｾ帛膚</label>"
 "              <select id='provider'>"
 "                <option value='anthropic'>Anthropic (Claude)</option>"
 "                <option value='openai'>OpenAI (GPT)</option>"
 "                <option value='minimax'>MiniMax</option>"
 "                <option value='minimax_coding'>MiniMax Coding</option>"
-"                <option value='ollama'>Ollama (本地)</option>"
+"                <option value='ollama'>Ollama (譛ｬ蝨ｰ)</option>"
 "              </select>"
 "            </div>"
 "            <div class='form-group'>"
-"              <label>默认模型</label>"
-"              <input type='text' id='model' placeholder='如: claude-opus-4-5'>"
+"              <label>鮟倩ｮ､讓｡蝙・/label>"
+"              <input type='text' id='model' placeholder='螯・ claude-opus-4-5'>"
 "            </div>"
 "          </div>"
 "          <div class='form-row'>"
@@ -292,27 +296,27 @@ static const char *HTML_PAGE =
 "          </div>"
 "          <div class='form-row' id='ollamaFields' style='display:none'>"
 "            <div class='form-group'>"
-"              <label>Ollama 主机</label>"
-"              <input type='text' id='ollama_host' placeholder='如: 192.168.1.100'>"
+"              <label>Ollama 荳ｻ譛ｺ</label>"
+"              <input type='text' id='ollama_host' placeholder='螯・ 192.168.1.100'>"
 "            </div>"
 "            <div class='form-group'>"
-"              <label>Ollama 端口</label>"
-"              <input type='text' id='ollama_port' placeholder='默认: 11434'>"
+"              <label>Ollama 遶ｯ蜿｣</label>"
+"              <input type='text' id='ollama_port' placeholder='鮟倩ｮ､: 11434'>"
 "            </div>"
 "          </div>"
 "          <div class='form-row'>"
 "            <div class='form-group' style='flex-direction:row;align-items:center;gap:12px'>"
 "              <input type='checkbox' id='streaming' style='width:18px;height:18px'>"
-"              <label for='streaming' style='margin:0'>启用流式输出 (Streaming)</label>"
+"              <label for='streaming' style='margin:0'>蜷ｯ逕ｨ豬∝ｼ剰ｾ灘・ (Streaming)</label>"
 "            </div>"
 "          </div>"
 "        </div>"
 ""
 "        <div class='card'>"
 "          <div class='card-header'>"
-"            <span class='card-title'>设备操作</span>"
+"            <span class='card-title'>隶ｾ螟・桃菴・/span>"
 "          </div>"
-"          <button class='btn btn-danger' onclick='reboot()'>重启设备</button>"
+"          <button class='btn btn-danger' onclick='reboot()'>驥榊星隶ｾ螟・/button>"
 "        </div>"
 "      </div>"
 "    </div>"
@@ -323,31 +327,31 @@ static const char *HTML_PAGE =
 ""
 "        <div class='card'>"
 "          <div class='card-header'>"
-"            <span class='card-title'>🔍 网络搜索 (Brave)</span>"
-"            <button class='btn btn-sm btn-primary' onclick='saveSearchKey()'>保存</button>"
+"            <span class='card-title'>剥 鄂醍ｻ懈頗邏｢ (Brave)</span>"
+"            <button class='btn btn-sm btn-primary' onclick='saveSearchKey()'>菫晏ｭ・/button>"
 "          </div>"
 "          <div class='form-group'>"
 "            <label>Brave Search API Key</label>"
 "            <input type='password' id='searchKey' placeholder='BSA-xxxx...'>"
 "          </div>"
-"          <div style='font-size:12px;color:#888;margin-top:4px'>从 <a href='https://brave.com/search/api/' style='color:#6C9BD2' target='_blank'>brave.com/search/api</a> 获取免费 API Key</div>"
+"          <div style='font-size:12px;color:#888;margin-top:4px'>莉・<a href='https://brave.com/search/api/' style='color:#6C9BD2' target='_blank'>brave.com/search/api</a> 闔ｷ蜿門・雍ｹ API Key</div>"
 "        </div>"
 ""
 "        <div class='card'>"
 "          <div class='card-header'>"
-"            <span class='card-title'>⏰ 定时任务</span>"
-"            <button class='btn btn-sm btn-primary' onclick='loadCronJobs()'>刷新</button>"
+"            <span class='card-title'>竢ｰ 螳壽慮莉ｻ蜉｡</span>"
+"            <button class='btn btn-sm btn-primary' onclick='loadCronJobs()'>蛻ｷ譁ｰ</button>"
 "          </div>"
-"          <div id='cronList' style='font-size:13px;color:#ccc'>加载中...</div>"
+"          <div id='cronList' style='font-size:13px;color:#ccc'>蜉霓ｽ荳ｭ...</div>"
 "        </div>"
 ""
 "        <div class='card'>"
 "          <div class='card-header'>"
-"            <span class='card-title'>工具状态</span>"
+"            <span class='card-title'>蟾･蜈ｷ迥ｶ諤・/span>"
 "          </div>"
 "          <div style='font-size:13px;color:#ccc;line-height:2'>"
-"            <div>📅 <b>获取时间</b>：通过 SNTP 自动同步，无需配置</div>"
-"            <div>📁 <b>文件管理</b>：读 / 写 / 编辑 / 列出 SPIFFS 文件</div>"
+"            <div>套 <b>闔ｷ蜿匁慮髣ｴ</b>・夐夊ｿ・SNTP 閾ｪ蜉ｨ蜷梧ｭ･・梧裏髴驟咲ｽｮ</div>"
+"            <div>刀 <b>譁・ｻｶ邂｡逅・/b>・夊ｯｻ / 蜀・/ 郛冶ｾ・/ 蛻怜・ SPIFFS 譁・ｻｶ</div>"
 "          </div>"
 "        </div>"
 ""
@@ -359,25 +363,96 @@ static const char *HTML_PAGE =
 "      <div class='content'>"
 "        <div class='card'>"
 "          <div class='card-header'>"
-"            <span class='card-title'>硬件状态</span>"
-"            <button class='btn btn-sm btn-primary' onclick='loadHardwareStatus()'>刷新</button>"
+"            <span class='card-title'>遑ｬ莉ｶ迥ｶ諤・/span>"
+"            <button class='btn btn-sm btn-primary' onclick='loadHardwareStatus()'>蛻ｷ譁ｰ</button>"
 "          </div>"
-"          <div id='hw-status' style='font-size:13px;color:#ccc'>加载中...</div>"
+"          <div id='hw-status' style='font-size:13px;color:#ccc'>蜉霓ｽ荳ｭ...</div>"
 "        </div>"
 ""
 "        <div class='card'>"
 "          <div class='card-header'>"
-"            <span class='card-title'>I2C 设备扫描</span>"
-"            <button class='btn btn-sm btn-primary' onclick='scanI2C()'>扫描</button>"
+"            <span class='card-title'>I2C 隶ｾ螟・沖謠・/span>"
+"            <button class='btn btn-sm btn-primary' onclick='scanI2C()'>謇ｫ謠・/button>"
 "          </div>"
-"          <div id='i2c-result' style='font-size:13px;color:#ccc'>点击扫描...</div>"
+"          <div id='i2c-result' style='font-size:13px;color:#ccc'>轤ｹ蜃ｻ謇ｫ謠・..</div>"
 "        </div>"
 ""
 "        <div class='card'>"
 "          <div class='card-header'>"
-"            <span class='card-title'>GPIO 控制</span>"
+"            <span class='card-title'>GPIO 謗ｧ蛻ｶ</span>"
 "          </div>"
 "          <div id='gpio-grid' style='display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));gap:8px;font-size:13px;color:#ccc'></div>"
+"        </div>"
+"      </div>"
+"    </div>"
+""
+"    <!-- Marketplace View -->"
+"    <div class='view' id='view-market'>"
+"      <div class='content'>"
+"        <div class='card'>"
+"          <div class='card-header'>"
+"            <span class='card-title'>Hardware Marketplace</span>"
+"            <button class='btn btn-sm btn-primary' onclick='loadMarketInstalled()'>Refresh</button>"
+"          </div>"
+"          <div class='form-row'>"
+"            <div class='form-group'>"
+"              <label>Package URL</label>"
+"              <input type='text' id='marketUrl' placeholder='https://.../skill.tar'>"
+"            </div>"
+"            <div class='form-group'>"
+"              <label>SHA256 (optional)</label>"
+"              <input type='text' id='marketChecksum' placeholder='64 hex chars'>"
+"            </div>"
+"          </div>"
+"          <div class='form-row'>"
+"            <div class='form-group'>"
+"              <label>Source ID (optional)</label>"
+"              <input type='text' id='marketSourceId' placeholder='bme280'>"
+"            </div>"
+"            <div class='form-group'>"
+"              <label>Version (optional)</label>"
+"              <input type='text' id='marketVersion' placeholder='1.2.0'>"
+"            </div>"
+"          </div>"
+"          <div class='form-row'>"
+"            <button class='btn btn-primary' onclick='marketInstall()'>Install</button>"
+"            <button class='btn btn-warning' onclick='marketUpgrade()'>Upgrade</button>"
+"          </div>"
+"        </div>"
+""
+"        <div class='card'>"
+"          <div class='card-header'>"
+"            <span class='card-title'>Check Updates</span>"
+"            <button class='btn btn-sm btn-primary' onclick='marketCheckUpdates()'>Check</button>"
+"          </div>"
+"          <div class='form-group'>"
+"            <label>Offers JSON</label>"
+"            <textarea id='marketOffers' rows='5' style='width:100%;font-family:monospace;font-size:13px;padding:8px;border:1px solid #333;border-radius:6px;background:#1a1a2e;color:#e0e0e0;resize:vertical' placeholder='{\"items\":[{\"source_id\":\"bme280\",\"version\":\"1.2.0\",\"url\":\"https://...\",\"checksum\":\"...\"}]}'></textarea>"
+"          </div>"
+"          <pre id='marketUpdates' style='font-size:12px;color:#cbd5e1;white-space:pre-wrap;margin:0'>-</pre>"
+"        </div>"
+""
+"        <div class='card'>"
+"          <div class='card-header'>"
+"            <span class='card-title'>Installed Skills</span>"
+"          </div>"
+"          <pre id='marketInstalled' style='font-size:12px;color:#cbd5e1;white-space:pre-wrap;margin:0'>loading...</pre>"
+"        </div>"
+""
+"        <div class='card'>"
+"          <div class='card-header'>"
+"            <span class='card-title'>Install Status</span>"
+"            <button class='btn btn-sm btn-primary' onclick='loadMarketStatus()'>Refresh</button>"
+"          </div>"
+"          <pre id='marketStatus' style='font-size:12px;color:#cbd5e1;white-space:pre-wrap;margin:0'>loading...</pre>"
+"        </div>"
+""
+"        <div class='card'>"
+"          <div class='card-header'>"
+"            <span class='card-title'>Framework Status</span>"
+"            <button class='btn btn-sm btn-primary' onclick='loadMarketFramework()'>Refresh</button>"
+"          </div>"
+"          <pre id='marketFramework' style='font-size:12px;color:#cbd5e1;white-space:pre-wrap;margin:0'>loading...</pre>"
 "        </div>"
 "      </div>"
 "    </div>"
@@ -399,7 +474,7 @@ static const char *HTML_PAGE =
 "      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));\n"
 "      document.getElementById('view-' + view).classList.add('active');\n"
 "      document.querySelector('[data-view=' + view + ']').classList.add('active');\n"
-"      const titles = { dashboard: '仪表盘', chat: '聊天', agent: 'Agent', settings: '设置', tools: '工具', hardware: '硬件' };\n"
+"      const titles = { dashboard: '莉ｪ陦ｨ逶・, chat: '閨雁､ｩ', agent: 'Agent', settings: '隶ｾ鄂ｮ', tools: '蟾･蜈ｷ', hardware: '遑ｬ莉ｶ', market: 'Marketplace' };\n"
 "      document.getElementById('pageTitle').textContent = titles[view] || view;\n"
 "    }\n"
 "\n"
@@ -424,27 +499,27 @@ static const char *HTML_PAGE =
 "        const grid = document.getElementById('statusGrid');"
 "        grid.innerHTML = '';"
 "        const items = ["
-"          { label: 'WiFi IP', value: data.wifi_ip || '未连接' },"
-"          { label: 'LLM 提供商', value: data.provider || '未知' },"
-"          { label: '模型', value: data.model || '未设置' },"
-"          { label: '运行时间', value: formatUptime(data.uptime_ms) },"
+"          { label: 'WiFi IP', value: data.wifi_ip || '譛ｪ霑樊磁' },"
+"          { label: 'LLM 謠蝉ｾ帛膚', value: data.provider || '譛ｪ遏･' },"
+"          { label: '讓｡蝙・, value: data.model || '譛ｪ隶ｾ鄂ｮ' },"
+"          { label: '霑占｡梧慮髣ｴ', value: formatUptime(data.uptime_ms) },"
 "        ];"
 "        items.forEach(item => {"
 "          grid.innerHTML += '<div class=\\'status-item\\'><div class=\\'status-label\\'>' + item.label + '</div><div class=\\'status-value\\'>' + item.value + '</div></div>';"
 "        });"
-"        document.getElementById('ipBadge').textContent = data.wifi_ip || '无网络';"
-"      } catch(e) { showToast('获取状态失败', 'error'); }"
+"        document.getElementById('ipBadge').textContent = data.wifi_ip || '譌鄂醍ｻ・;"
+"      } catch(e) { showToast('闔ｷ蜿也憾諤∝､ｱ雍･', 'error'); }"
 "    }"
 ""
 "    function formatUptime(ms) {"
-"      if (!ms) return '0秒';"
+"      if (!ms) return '0遘・;"
 "      const s = Math.floor(ms / 1000);"
 "      const m = Math.floor(s / 60);"
 "      const h = Math.floor(m / 60);"
 "      const d = Math.floor(h / 24);"
-"      if (h > 0) return h + '小时 ' + (m % 60) + '分钟';"
-"      if (m > 0) return m + '分钟 ' + (s % 60) + '秒';"
-"      return s + '秒';"
+"      if (h > 0) return h + '蟆乗慮 ' + (m % 60) + '蛻・帖';"
+"      if (m > 0) return m + '蛻・帖 ' + (s % 60) + '遘・;"
+"      return s + '遘・;"
 "    }"
 ""
 "    /* Settings */"
@@ -483,26 +558,26 @@ static const char *HTML_PAGE =
 "          headers: {'Content-Type': 'application/json'},"
 "          body: JSON.stringify(config)"
 "        });"
-"        if (resp.ok) { showToast('配置已保存', 'success'); }"
-"        else { showToast('保存失败', 'error'); }"
-"      } catch(e) { showToast('保存失败: ' + e, 'error'); }"
+"        if (resp.ok) { showToast('驟咲ｽｮ蟾ｲ菫晏ｭ・, 'success'); }"
+"        else { showToast('菫晏ｭ伜､ｱ雍･', 'error'); }"
+"      } catch(e) { showToast('菫晏ｭ伜､ｱ雍･: ' + e, 'error'); }"
 "    }"
 ""
 "    async function reboot() {"
-"      if (!confirm('确定要重启设备吗？')) return;"
+"      if (!confirm('遑ｮ螳夊ｦ・㍾蜷ｯ隶ｾ螟・雛・・)) return;"
 "      try {"
 "        await fetch('/api/reboot', {method: 'POST'});"
-"        showToast('正在重启...', 'warning');"
-"      } catch(e) { showToast('重启失败', 'error'); }"
+"        showToast('豁｣蝨ｨ驥榊星...', 'warning');"
+"      } catch(e) { showToast('驥榊星螟ｱ雍･', 'error'); }"
 "    }"
 ""
 "    /* Update send button text */"
 "    function updateSendBtn() {"
 "      var btn = document.getElementById('sendBtn');"
 "      if (pending > 0) {"
-"        btn.textContent = '思考中(' + pending + ')';"
+"        btn.textContent = '諤晁・ｸｭ(' + pending + ')';"
 "      } else {"
-"        btn.textContent = '发送';"
+"        btn.textContent = '蜿鷹・;"
 "      }"
 "    }"
 ""
@@ -515,7 +590,7 @@ static const char *HTML_PAGE =
 "      ws.onopen = function() {"
 "        connected = true;"
 "        document.getElementById('wsDot').classList.add('connected');"
-"        document.getElementById('wsText').textContent = '已连接';"
+"        document.getElementById('wsText').textContent = '蟾ｲ霑樊磁';"
 "      };"
 ""
 "      ws.onmessage = function(event) {"
@@ -579,13 +654,13 @@ static const char *HTML_PAGE =
 "      ws.onclose = function() {"
 "        connected = false;"
 "        document.getElementById('wsDot').classList.remove('connected');"
-"        document.getElementById('wsText').textContent = '重连中...';"
+"        document.getElementById('wsText').textContent = '驥崎ｿ樔ｸｭ...';"
 "        pending = 0; updateSendBtn();"
 "        setTimeout(connectWS, 3000);"
 "      };"
 ""
 "      ws.onerror = function() {"
-"        document.getElementById('wsText').textContent = '连接错误';"
+"        document.getElementById('wsText').textContent = '霑樊磁髞呵ｯｯ';"
 "      };"
 "    }"
 ""
@@ -604,7 +679,7 @@ static const char *HTML_PAGE =
 "    }"
 ""
 "    function sendChat() {"
-"      if (!connected) { showToast('未连接到设备', 'error'); return; }"
+"      if (!connected) { showToast('譛ｪ霑樊磁蛻ｰ隶ｾ螟・, 'error'); return; }"
 "      const msg = document.getElementById('chatInput').value.trim();"
 "      if (!msg) return;"
 ""
@@ -618,7 +693,7 @@ static const char *HTML_PAGE =
 "      currentStreamDiv = addChatMessage('assistant', thinkingHtml, false);"
 ""
 "      if (pendingTimer) clearTimeout(pendingTimer);"
-"      pendingTimer = setTimeout(function() { pending = 0; updateSendBtn(); addChatMessage('error', '响应超时，请重试'); }, 120000);"
+"      pendingTimer = setTimeout(function() { pending = 0; updateSendBtn(); addChatMessage('error', '蜩榊ｺ碑ｶ・慮・瑚ｯｷ驥崎ｯ・); }, 120000);"
 ""
 "      const model = document.getElementById('modelSelect').value;"
 "      let payload = {type: 'message', content: msg, chat_id: myChatId};"
@@ -658,9 +733,9 @@ static const char *HTML_PAGE =
 "          headers: {'Content-Type': 'application/json'},"
 "          body: JSON.stringify(body)"
 "        });"
-"        if (resp.ok) { showToast('Agent 配置已保存', 'success'); }"
-"        else { showToast('保存失败', 'error'); }"
-"      } catch(e) { showToast('保存失败: ' + e, 'error'); }"
+"        if (resp.ok) { showToast('Agent 驟咲ｽｮ蟾ｲ菫晏ｭ・, 'success'); }"
+"        else { showToast('菫晏ｭ伜､ｱ雍･', 'error'); }"
+"      } catch(e) { showToast('菫晏ｭ伜､ｱ雍･: ' + e, 'error'); }"
 "    }"
 ""
 "    /* Tools - Search Key */"
@@ -674,16 +749,16 @@ static const char *HTML_PAGE =
 ""
 "    async function saveSearchKey() {"
 "      const key = document.getElementById('searchKey').value.trim();"
-"      if (!key) { showToast('请输入 API Key', 'error'); return; }"
+"      if (!key) { showToast('隸ｷ霎灘・ API Key', 'error'); return; }"
 "      try {"
 "        const resp = await fetch('/api/tools/search_key', {"
 "          method: 'POST',"
 "          headers: {'Content-Type': 'application/json'},"
 "          body: JSON.stringify({key: key})"
 "        });"
-"        if (resp.ok) { showToast('搜索 Key 已保存', 'success'); }"
-"        else { showToast('保存失败', 'error'); }"
-"      } catch(e) { showToast('保存失败: ' + e, 'error'); }"
+"        if (resp.ok) { showToast('謳懃ｴ｢ Key 蟾ｲ菫晏ｭ・, 'success'); }"
+"        else { showToast('菫晏ｭ伜､ｱ雍･', 'error'); }"
+"      } catch(e) { showToast('菫晏ｭ伜､ｱ雍･: ' + e, 'error'); }"
 "    }"
 ""
 "    /* Tools - Cron Jobs */\n"
@@ -693,28 +768,28 @@ static const char *HTML_PAGE =
 "        const data = await resp.json();\n"
 "        const el = document.getElementById('cronList');\n"
 "        if (!data.jobs || data.jobs.length === 0) {\n"
-"          el.innerHTML = '<div style=\"color:#888\">没有活动的定时任务</div>';\n"
+"          el.innerHTML = '<div style=\"color:#888\">豐｡譛画ｴｻ蜉ｨ逧・ｮ壽慮莉ｻ蜉｡</div>';\n"
 "          return;\n"
 "        }\n"
 "        let html = '';\n"
 "        data.jobs.forEach(function(j) {\n"
-"          var sched = j.kind === 'every' ? '每 ' + j.interval_s + ' 秒' : '在 ' + new Date(j.at_epoch * 1000).toLocaleString();\n"
+"          var sched = j.kind === 'every' ? '豈・' + j.interval_s + ' 遘・ : '蝨ｨ ' + new Date(j.at_epoch * 1000).toLocaleString();\n"
 "          html += '<div style=\"display:flex;align-items:center;justify-content:space-between;padding:8px;margin:4px 0;background:#1a1a2e;border-radius:6px\">';\n"
-"          html += '<div><b>' + j.name + '</b><br><span style=\"font-size:11px;color:#888\">' + sched + ' | ' + (j.enabled ? '✅ 启用' : '❌ 禁用') + ' | ID: ' + j.id + '</span></div>';\n"
-"          html += '<button class=\"btn btn-sm btn-danger\" onclick=\\'deleteCronJob(\"' + j.id + '\")\\'>删除</button>';\n"
+"          html += '<div><b>' + j.name + '</b><br><span style=\"font-size:11px;color:#888\">' + sched + ' | ' + (j.enabled ? '笨・蜷ｯ逕ｨ' : '笶・遖∫畑') + ' | ID: ' + j.id + '</span></div>';\n"
+"          html += '<button class=\"btn btn-sm btn-danger\" onclick=\\'deleteCronJob(\"' + j.id + '\")\\'>蛻髯､</button>';\n"
 "          html += '</div>';\n"
 "        });\n"
 "        el.innerHTML = html;\n"
-"      } catch(e) { document.getElementById('cronList').innerHTML = '加载失败'; }\n"
+"      } catch(e) { document.getElementById('cronList').innerHTML = '蜉霓ｽ螟ｱ雍･'; }\n"
 "    }\n"
 "\n"
 "    async function deleteCronJob(id) {\n"
-"      if (!confirm('确定删除任务 ' + id + ' 吗？')) return;\n"
+"      if (!confirm('遑ｮ螳壼唖髯､莉ｻ蜉｡ ' + id + ' 蜷暦ｼ・)) return;\n"
 "      try {\n"
 "        const resp = await fetch('/api/tools/cron?id=' + id, { method: 'DELETE' });\n"
-"        if (resp.ok) { showToast('已删除', 'success'); loadCronJobs(); }\n"
-"        else { showToast('删除失败', 'error'); }\n"
-"      } catch(e) { showToast('删除失败: ' + e, 'error'); }\n"
+"        if (resp.ok) { showToast('蟾ｲ蛻髯､', 'success'); loadCronJobs(); }\n"
+"        else { showToast('蛻髯､螟ｱ雍･', 'error'); }\n"
+"      } catch(e) { showToast('蛻髯､螟ｱ雍･: ' + e, 'error'); }\n"
 "    }\n"
 ""
 "    async function loadHardwareStatus() {\n"
@@ -723,7 +798,7 @@ static const char *HTML_PAGE =
 "        const data = await resp.json();\n"
 "        let html = '<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:8px;color:#1e293b;font-weight:600\">';\n"
 "        html += '<div>CPU: ' + data.cpu_freq_mhz + ' MHz</div>';\n"
-"        html += '<div>Temp: ' + data.cpu_temp_c.toFixed(1) + ' °C</div>';\n"
+"        html += '<div>Temp: ' + data.cpu_temp_c.toFixed(1) + ' ﾂｰC</div>';\n"
 "        html += '<div>Heap (Int): ' + (data.free_heap_internal/1024).toFixed(1) + ' KB</div>';\n"
 "        html += '<div>Heap (PSRAM): ' + (data.free_heap_psram/1024).toFixed(1) + ' KB</div>';\n"
 "        html += '<div>Uptime: ' + data.uptime_s + ' s</div></div>';\n"
@@ -780,6 +855,105 @@ static const char *HTML_PAGE =
 "      } catch(e) { showToast('Error: ' + e, 'error'); }\n"
 "    }\n"
 "\n"
+"    function marketPretty(v) {\n"
+"      return JSON.stringify(v, null, 2);\n"
+"    }\n"
+"\n"
+"    function marketPayload() {\n"
+"      return {\n"
+"        url: document.getElementById('marketUrl').value.trim(),\n"
+"        checksum: document.getElementById('marketChecksum').value.trim(),\n"
+"        source_id: document.getElementById('marketSourceId').value.trim(),\n"
+"        version: document.getElementById('marketVersion').value.trim()\n"
+"      };\n"
+"    }\n"
+"\n"
+"    async function loadMarketInstalled() {\n"
+"      try {\n"
+"        const resp = await fetch('/api/skills');\n"
+"        const data = await resp.json();\n"
+"        document.getElementById('marketInstalled').textContent = marketPretty(data);\n"
+"      } catch (e) {\n"
+"        document.getElementById('marketInstalled').textContent = 'Error: ' + e;\n"
+"      }\n"
+"    }\n"
+"\n"
+"    async function loadMarketStatus() {\n"
+"      try {\n"
+"        const resp = await fetch('/api/skills/install_status');\n"
+"        const data = await resp.json();\n"
+"        document.getElementById('marketStatus').textContent = marketPretty(data);\n"
+"      } catch (e) {\n"
+"        document.getElementById('marketStatus').textContent = 'Error: ' + e;\n"
+"      }\n"
+"    }\n"
+"\n"
+"    async function loadMarketFramework() {\n"
+"      try {\n"
+"        const resp = await fetch('/api/skills/framework_status');\n"
+"        const data = await resp.json();\n"
+"        document.getElementById('marketFramework').textContent = marketPretty(data);\n"
+"      } catch (e) {\n"
+"        document.getElementById('marketFramework').textContent = 'Error: ' + e;\n"
+"      }\n"
+"    }\n"
+"\n"
+"    async function marketInstall() {\n"
+"      const body = marketPayload();\n"
+"      if (!body.url) {\n"
+"        showToast('Please input package URL', 'error');\n"
+"        return;\n"
+"      }\n"
+"      try {\n"
+"        const resp = await fetch('/api/skills/install', {\n"
+"          method: 'POST',\n"
+"          headers: {'Content-Type': 'application/json'},\n"
+"          body: JSON.stringify(body)\n"
+"        });\n"
+"        const data = await resp.json();\n"
+"        document.getElementById('marketStatus').textContent = marketPretty(data);\n"
+"        await loadMarketInstalled();\n"
+"      } catch (e) {\n"
+"        showToast('Install failed: ' + e, 'error');\n"
+"      }\n"
+"    }\n"
+"\n"
+"    async function marketUpgrade() {\n"
+"      const body = marketPayload();\n"
+"      if (!body.url) {\n"
+"        showToast('Please input package URL', 'error');\n"
+"        return;\n"
+"      }\n"
+"      try {\n"
+"        const resp = await fetch('/api/skills/upgrade', {\n"
+"          method: 'POST',\n"
+"          headers: {'Content-Type': 'application/json'},\n"
+"          body: JSON.stringify(body)\n"
+"        });\n"
+"        const data = await resp.json();\n"
+"        document.getElementById('marketStatus').textContent = marketPretty(data);\n"
+"        await loadMarketInstalled();\n"
+"      } catch (e) {\n"
+"        showToast('Upgrade failed: ' + e, 'error');\n"
+"      }\n"
+"    }\n"
+"\n"
+"    async function marketCheckUpdates() {\n"
+"      try {\n"
+"        const raw = document.getElementById('marketOffers').value.trim();\n"
+"        const body = raw ? JSON.parse(raw) : { items: [] };\n"
+"        const resp = await fetch('/api/skills/check_updates', {\n"
+"          method: 'POST',\n"
+"          headers: {'Content-Type': 'application/json'},\n"
+"          body: JSON.stringify(body)\n"
+"        });\n"
+"        const data = await resp.json();\n"
+"        document.getElementById('marketUpdates').textContent = marketPretty(data);\n"
+"      } catch (e) {\n"
+"        document.getElementById('marketUpdates').textContent = 'Invalid offers JSON: ' + e;\n"
+"      }\n"
+"    }\n"
+"\n"
 "    function initGPIO() {\n"
 "      // Safe pins per backend logic (2,4,5,12-18,21,38)\n"
 "      const safe = [2, 4, 5, 12, 13, 14, 15, 16, 17, 18, 21, 38];\n"
@@ -830,12 +1004,16 @@ static const char *HTML_PAGE =
 "    loadAgent();"
 "    loadSearchKey();"
 "    loadCronJobs();"
+"    loadMarketInstalled();"
+"    loadMarketStatus();"
+"    loadMarketFramework();"
 "    connectWS();"
 "  </script>"
 "</body>"
 "</html>";
 
-/* ── HTTP Handlers ─────────────────────────────────────────────── */
+
+/* 笏笏 HTTP Handlers 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏 */
 
 static esp_err_t index_handler(httpd_req_t *req)
 {
@@ -843,6 +1021,7 @@ static esp_err_t index_handler(httpd_req_t *req)
     httpd_resp_send(req, HTML_PAGE, strlen(HTML_PAGE));
     return ESP_OK;
 }
+
 
 static esp_err_t status_handler(httpd_req_t *req)
 {
@@ -938,7 +1117,7 @@ static esp_err_t reboot_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* ── Agent file helpers ───────────────────────────────────────── */
+/* 笏笏 Agent file helpers 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏 */
 
 static int read_spiffs_file(const char *path, char *buf, size_t size)
 {
@@ -977,7 +1156,7 @@ static int json_escape(const char *src, char *buf, size_t size)
 
 static esp_err_t agent_get_handler(httpd_req_t *req)
 {
-    /* Read each file — use PSRAM if available */
+    /* Read each file 窶・use PSRAM if available */
     char *fbuf = heap_caps_malloc(4096, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     char *ebuf = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     char *resp = heap_caps_malloc(40960, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -1091,7 +1270,7 @@ static esp_err_t agent_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* ── Tools API handlers ─────────────────────────────────────── */
+/* 笏笏 Tools API handlers 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏 */
 
 static esp_err_t search_key_get_handler(httpd_req_t *req)
 {
@@ -1280,6 +1459,19 @@ static esp_err_t skills_install_history_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t skills_framework_status_handler(httpd_req_t *req)
+{
+    char *json = skill_engine_framework_status_json();
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+    free(json);
+    return ESP_OK;
+}
+
 static esp_err_t skills_install_handler(httpd_req_t *req)
 {
     if (req->content_len <= 0 || req->content_len > 1024) {
@@ -1304,6 +1496,8 @@ static esp_err_t skills_install_handler(httpd_req_t *req)
 
     cJSON *url = cJSON_GetObjectItem(root, "url");
     cJSON *checksum = cJSON_GetObjectItem(root, "checksum");
+    cJSON *source_id = cJSON_GetObjectItem(root, "source_id");
+    cJSON *source_version = cJSON_GetObjectItem(root, "version");
     if (!cJSON_IsString(url) || !url->valuestring || !url->valuestring[0]) {
         cJSON_Delete(root);
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing url");
@@ -1315,34 +1509,127 @@ static esp_err_t skills_install_handler(httpd_req_t *req)
         checksum_str = checksum->valuestring;
     }
 
-    esp_err_t err = skill_engine_install_with_checksum(url->valuestring, checksum_str);
+    const char *source_id_str = (cJSON_IsString(source_id) && source_id->valuestring) ? source_id->valuestring : NULL;
+    const char *source_ver_str = (cJSON_IsString(source_version) && source_version->valuestring) ? source_version->valuestring : NULL;
+    esp_err_t err = skill_engine_install_from_market(url->valuestring, checksum_str, source_id_str, source_ver_str);
     cJSON_Delete(root);
     char *status = skill_engine_install_status_json();
     if (err != ESP_OK) {
-        char resp[512];
+        cJSON *resp = cJSON_CreateObject();
+        cJSON_AddBoolToObject(resp, "success", false);
+        cJSON_AddStringToObject(resp, "error", esp_err_to_name(err));
         if (status) {
-            snprintf(resp, sizeof(resp),
-                     "{\"success\":false,\"error\":\"%s\",\"install_status\":%s}",
-                     esp_err_to_name(err), status);
+            cJSON *st = cJSON_Parse(status);
+            if (st) cJSON_AddItemToObject(resp, "install_status", st);
             free(status);
-        } else {
-            snprintf(resp, sizeof(resp), "{\"success\":false,\"error\":\"%s\"}", esp_err_to_name(err));
         }
+        char *json = cJSON_PrintUnformatted(resp);
+        cJSON_Delete(resp);
         httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send(req, json ? json : "{\"success\":false}", HTTPD_RESP_USE_STRLEN);
+        free(json);
         return ESP_OK;
     }
 
     if (status) {
-        char resp[512];
-        snprintf(resp, sizeof(resp), "{\"success\":true,\"install_status\":%s}", status);
+        cJSON *resp = cJSON_CreateObject();
+        cJSON_AddBoolToObject(resp, "success", true);
+        cJSON *st = cJSON_Parse(status);
+        if (st) cJSON_AddItemToObject(resp, "install_status", st);
+        char *json = cJSON_PrintUnformatted(resp);
+        cJSON_Delete(resp);
         free(status);
         httpd_resp_set_type(req, "application/json");
-        httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send(req, json ? json : "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+        free(json);
         return ESP_OK;
     }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t skills_check_updates_handler(httpd_req_t *req)
+{
+    if (req->content_len <= 0 || req->content_len > 4096) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid body size");
+        return ESP_FAIL;
+    }
+    char *body = heap_caps_malloc(req->content_len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!body) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+    int received = 0;
+    while (received < req->content_len) {
+        int n = httpd_req_recv(req, body + received, req->content_len - received);
+        if (n <= 0) { free(body); return ESP_FAIL; }
+        received += n;
+    }
+    body[received] = '\0';
+
+    char *resp = skill_engine_check_updates_json(body);
+    free(body);
+    if (!resp) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid updates manifest");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    free(resp);
+    return ESP_OK;
+}
+
+static esp_err_t skills_upgrade_handler(httpd_req_t *req)
+{
+    if (req->content_len <= 0 || req->content_len > 2048) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid body size");
+        return ESP_FAIL;
+    }
+    char body[2049];
+    int received = 0;
+    while (received < req->content_len) {
+        int n = httpd_req_recv(req, body + received, req->content_len - received);
+        if (n <= 0) return ESP_FAIL;
+        received += n;
+    }
+    body[received] = '\0';
+
+    cJSON *root = cJSON_Parse(body);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+    cJSON *url = cJSON_GetObjectItem(root, "url");
+    cJSON *checksum = cJSON_GetObjectItem(root, "checksum");
+    cJSON *source_id = cJSON_GetObjectItem(root, "source_id");
+    cJSON *version = cJSON_GetObjectItem(root, "version");
+    if (!cJSON_IsString(url) || !cJSON_IsString(source_id) || !cJSON_IsString(version) ||
+        !url->valuestring || !source_id->valuestring || !version->valuestring ||
+        !url->valuestring[0] || !source_id->valuestring[0] || !version->valuestring[0]) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing required fields");
+        return ESP_FAIL;
+    }
+    const char *checksum_str = (cJSON_IsString(checksum) && checksum->valuestring) ? checksum->valuestring : NULL;
+    esp_err_t err = skill_engine_upgrade_from_market_offer(url->valuestring, checksum_str,
+                                                            source_id->valuestring, version->valuestring);
+    cJSON_Delete(root);
+
+    char *status = skill_engine_install_status_json();
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", err == ESP_OK);
+    cJSON_AddStringToObject(resp, "error", esp_err_to_name(err));
+    if (status) {
+        cJSON *st = cJSON_Parse(status);
+        if (st) cJSON_AddItemToObject(resp, "install_status", st);
+        free(status);
+    }
+    char *json = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json ? json : "{\"success\":false}", HTTPD_RESP_USE_STRLEN);
+    free(json);
     return ESP_OK;
 }
 
@@ -1383,14 +1670,14 @@ static esp_err_t skills_install_history_delete_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* ── Server Init ───────────────────────────────────────────────── */
+/* 笏笏 Server Init 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏 */
 
 esp_err_t web_ui_init(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
     config.ctrl_port = 32768;
-    config.max_open_sockets = 3;  /* keep low — only serves HTML/JSON */
+    config.max_open_sockets = 3;  /* keep low 窶・only serves HTML/JSON */
     config.max_uri_handlers = 32;
 
     httpd_handle_t server = NULL;
@@ -1512,6 +1799,13 @@ esp_err_t web_ui_init(void)
     };
     httpd_register_uri_handler(server, &api_skills_install_history);
 
+    httpd_uri_t api_skills_framework_status = {
+        .uri = "/api/skills/framework_status",
+        .method = HTTP_GET,
+        .handler = skills_framework_status_handler,
+    };
+    httpd_register_uri_handler(server, &api_skills_framework_status);
+
     httpd_uri_t api_skills_install_history_delete = {
         .uri = "/api/skills/install_history",
         .method = HTTP_DELETE,
@@ -1525,6 +1819,20 @@ esp_err_t web_ui_init(void)
         .handler = skills_install_handler,
     };
     httpd_register_uri_handler(server, &api_skills_install);
+
+    httpd_uri_t api_skills_check_updates = {
+        .uri = "/api/skills/check_updates",
+        .method = HTTP_POST,
+        .handler = skills_check_updates_handler,
+    };
+    httpd_register_uri_handler(server, &api_skills_check_updates);
+
+    httpd_uri_t api_skills_upgrade = {
+        .uri = "/api/skills/upgrade",
+        .method = HTTP_POST,
+        .handler = skills_upgrade_handler,
+    };
+    httpd_register_uri_handler(server, &api_skills_upgrade);
 
     httpd_uri_t api_skills_delete = {
         .uri = "/api/skills",
