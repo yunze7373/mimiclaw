@@ -12,6 +12,7 @@
 #include "esp_http_client.h"
 #include "esp_timer.h"
 #include "cJSON.h"
+#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -35,6 +36,7 @@ static const char *TAG = "skill_engine";
 #define SKILL_EXEC_TIME_BUDGET_MS 200
 #define LUA_HOOK_STRIDE           1000
 #define SKILL_MAX_TIMERS          24
+#define SKILL_MAX_GPIO_INTR       16
 #define SKILL_CB_QUEUE_DEPTH      32
 
 typedef struct {
@@ -94,11 +96,24 @@ typedef struct {
 } skill_timer_t;
 
 typedef struct {
+    int type;
     int timer_id;
+    int intr_id;
+    int pin;
 } skill_cb_event_t;
 
+typedef struct {
+    bool used;
+    int intr_id;
+    int skill_id;
+    int pin;
+    int lua_cb_ref;
+} skill_gpio_intr_t;
+
 static skill_timer_t s_timers[SKILL_MAX_TIMERS];
+static skill_gpio_intr_t s_gpio_intr[SKILL_MAX_GPIO_INTR];
 static int s_next_timer_id = 1;
+static int s_next_intr_id = 1;
 static QueueHandle_t s_cb_queue = NULL;
 static TaskHandle_t s_cb_task = NULL;
 
@@ -415,12 +430,38 @@ static skill_timer_t *find_timer_by_id(int timer_id)
     return NULL;
 }
 
+static skill_gpio_intr_t *find_intr_by_id(int intr_id)
+{
+    for (int i = 0; i < SKILL_MAX_GPIO_INTR; i++) {
+        if (s_gpio_intr[i].used && s_gpio_intr[i].intr_id == intr_id) return &s_gpio_intr[i];
+    }
+    return NULL;
+}
+
+static skill_gpio_intr_t *find_intr_by_skill_pin(int skill_id, int pin)
+{
+    for (int i = 0; i < SKILL_MAX_GPIO_INTR; i++) {
+        if (s_gpio_intr[i].used && s_gpio_intr[i].skill_id == skill_id && s_gpio_intr[i].pin == pin) return &s_gpio_intr[i];
+    }
+    return NULL;
+}
+
 static void timer_fire_isr(void *arg)
 {
     int timer_id = (int)(intptr_t)arg;
     if (!s_cb_queue) return;
-    skill_cb_event_t evt = {.timer_id = timer_id};
+    skill_cb_event_t evt = {.type = 1, .timer_id = timer_id};
     xQueueSend(s_cb_queue, &evt, 0);
+}
+
+static void gpio_isr_handler(void *arg)
+{
+    int intr_id = (int)(intptr_t)arg;
+    if (!s_cb_queue) return;
+    skill_gpio_intr_t *intr = find_intr_by_id(intr_id);
+    if (!intr || !intr->used) return;
+    skill_cb_event_t evt = {.type = 2, .intr_id = intr_id, .pin = intr->pin};
+    xQueueSendFromISR(s_cb_queue, &evt, NULL);
 }
 
 static void timer_cleanup_locked(skill_timer_t *t)
@@ -438,6 +479,17 @@ static void timer_cleanup_locked(skill_timer_t *t)
     memset(t, 0, sizeof(*t));
 }
 
+static void intr_cleanup_locked(skill_gpio_intr_t *intr)
+{
+    if (!intr || !intr->used) return;
+    gpio_isr_handler_remove(intr->pin);
+    if (intr->lua_cb_ref != LUA_NOREF && s_L) {
+        luaL_unref(s_L, LUA_REGISTRYINDEX, intr->lua_cb_ref);
+        intr->lua_cb_ref = LUA_NOREF;
+    }
+    memset(intr, 0, sizeof(*intr));
+}
+
 static void callback_worker_task(void *arg)
 {
     (void)arg;
@@ -446,31 +498,54 @@ static void callback_worker_task(void *arg)
         if (xQueueReceive(s_cb_queue, &evt, portMAX_DELAY) != pdTRUE) continue;
 
         if (!lua_lock_take(pdMS_TO_TICKS(200))) continue;
-        skill_timer_t *t = find_timer_by_id(evt.timer_id);
-        if (!t || !t->used || t->lua_cb_ref == LUA_NOREF) {
-            lua_lock_give();
-            continue;
-        }
-
-        lua_rawgeti(s_L, LUA_REGISTRYINDEX, t->lua_cb_ref);
-        guard_begin();
-        int rc = lua_pcall(s_L, 0, 0, 0);
-        guard_end();
-        if (rc != LUA_OK) {
-            const char *err = lua_tostring(s_L, -1);
-            ESP_LOGE(TAG, "Timer callback failed (skill=%d,timer=%d): %s",
-                     t->skill_id, t->timer_id, err ? err : "unknown");
-            lua_pop(s_L, 1);
-            if (t->skill_id >= 0 && t->skill_id < SKILL_MAX_SLOTS && s_slots[t->skill_id].used) {
-                s_slots[t->skill_id].state = SKILL_STATE_ERROR;
+        if (evt.type == 1) {
+            skill_timer_t *t = find_timer_by_id(evt.timer_id);
+            if (!t || !t->used || t->lua_cb_ref == LUA_NOREF) {
+                lua_lock_give();
+                continue;
             }
-            timer_cleanup_locked(t);
-            lua_lock_give();
-            continue;
-        }
 
-        if (!t->periodic) {
-            timer_cleanup_locked(t);
+            lua_rawgeti(s_L, LUA_REGISTRYINDEX, t->lua_cb_ref);
+            guard_begin();
+            int rc = lua_pcall(s_L, 0, 0, 0);
+            guard_end();
+            if (rc != LUA_OK) {
+                const char *err = lua_tostring(s_L, -1);
+                ESP_LOGE(TAG, "Timer callback failed (skill=%d,timer=%d): %s",
+                         t->skill_id, t->timer_id, err ? err : "unknown");
+                lua_pop(s_L, 1);
+                if (t->skill_id >= 0 && t->skill_id < SKILL_MAX_SLOTS && s_slots[t->skill_id].used) {
+                    s_slots[t->skill_id].state = SKILL_STATE_ERROR;
+                }
+                timer_cleanup_locked(t);
+                lua_lock_give();
+                continue;
+            }
+
+            if (!t->periodic) {
+                timer_cleanup_locked(t);
+            }
+        } else if (evt.type == 2) {
+            skill_gpio_intr_t *intr = find_intr_by_id(evt.intr_id);
+            if (!intr || !intr->used || intr->lua_cb_ref == LUA_NOREF) {
+                lua_lock_give();
+                continue;
+            }
+            lua_rawgeti(s_L, LUA_REGISTRYINDEX, intr->lua_cb_ref);
+            lua_pushinteger(s_L, evt.pin);
+            guard_begin();
+            int rc = lua_pcall(s_L, 1, 0, 0);
+            guard_end();
+            if (rc != LUA_OK) {
+                const char *err = lua_tostring(s_L, -1);
+                ESP_LOGE(TAG, "GPIO callback failed (skill=%d,pin=%d): %s",
+                         intr->skill_id, intr->pin, err ? err : "unknown");
+                lua_pop(s_L, 1);
+                if (intr->skill_id >= 0 && intr->skill_id < SKILL_MAX_SLOTS && s_slots[intr->skill_id].used) {
+                    s_slots[intr->skill_id].state = SKILL_STATE_ERROR;
+                }
+                intr_cleanup_locked(intr);
+            }
         }
         lua_lock_give();
     }
@@ -555,6 +630,91 @@ esp_err_t skill_runtime_cancel_timer(int timer_id)
     return ESP_OK;
 }
 
+esp_err_t skill_runtime_register_gpio_interrupt(int skill_id, int pin, const char *edge, int lua_cb_ref)
+{
+    if (skill_id < 0 || skill_id >= SKILL_MAX_SLOTS || pin < 0 || !edge || !edge[0]) return ESP_ERR_INVALID_ARG;
+    if (!lua_lock_take(pdMS_TO_TICKS(300))) return ESP_ERR_TIMEOUT;
+
+    if (find_intr_by_skill_pin(skill_id, pin)) {
+        lua_lock_give();
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    int slot = -1;
+    for (int i = 0; i < SKILL_MAX_GPIO_INTR; i++) {
+        if (!s_gpio_intr[i].used) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        lua_lock_give();
+        return ESP_ERR_NO_MEM;
+    }
+
+    gpio_int_type_t intr_type = GPIO_INTR_ANYEDGE;
+    if (strcmp(edge, "rising") == 0) intr_type = GPIO_INTR_POSEDGE;
+    else if (strcmp(edge, "falling") == 0) intr_type = GPIO_INTR_NEGEDGE;
+    else if (strcmp(edge, "both") == 0) intr_type = GPIO_INTR_ANYEDGE;
+    else {
+        lua_lock_give();
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    gpio_config_t cfg = {
+        .pin_bit_mask = 1ULL << pin,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = intr_type,
+    };
+    esp_err_t ret = gpio_config(&cfg);
+    if (ret != ESP_OK) {
+        lua_lock_give();
+        return ret;
+    }
+
+    ret = gpio_install_isr_service(0);
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+        lua_lock_give();
+        return ret;
+    }
+
+    int intr_id = s_next_intr_id++;
+    if (s_next_intr_id <= 0) s_next_intr_id = 1;
+    skill_gpio_intr_t *intr = &s_gpio_intr[slot];
+    memset(intr, 0, sizeof(*intr));
+    intr->used = true;
+    intr->intr_id = intr_id;
+    intr->skill_id = skill_id;
+    intr->pin = pin;
+    intr->lua_cb_ref = lua_cb_ref;
+
+    ret = gpio_isr_handler_add(pin, gpio_isr_handler, (void *)(intptr_t)intr_id);
+    if (ret != ESP_OK) {
+        intr_cleanup_locked(intr);
+        lua_lock_give();
+        return ret;
+    }
+
+    lua_lock_give();
+    return ESP_OK;
+}
+
+esp_err_t skill_runtime_detach_gpio_interrupt(int skill_id, int pin)
+{
+    if (skill_id < 0 || skill_id >= SKILL_MAX_SLOTS || pin < 0) return ESP_ERR_INVALID_ARG;
+    if (!lua_lock_take(pdMS_TO_TICKS(300))) return ESP_ERR_TIMEOUT;
+    skill_gpio_intr_t *intr = find_intr_by_skill_pin(skill_id, pin);
+    if (!intr) {
+        lua_lock_give();
+        return ESP_ERR_NOT_FOUND;
+    }
+    intr_cleanup_locked(intr);
+    lua_lock_give();
+    return ESP_OK;
+}
+
 void skill_runtime_release_skill(int skill_id)
 {
     if (!lua_lock_take(pdMS_TO_TICKS(300))) return;
@@ -562,6 +722,11 @@ void skill_runtime_release_skill(int skill_id)
         if (!s_timers[i].used) continue;
         if (s_timers[i].skill_id != skill_id) continue;
         timer_cleanup_locked(&s_timers[i]);
+    }
+    for (int i = 0; i < SKILL_MAX_GPIO_INTR; i++) {
+        if (!s_gpio_intr[i].used) continue;
+        if (s_gpio_intr[i].skill_id != skill_id) continue;
+        intr_cleanup_locked(&s_gpio_intr[i]);
     }
     lua_lock_give();
 }
@@ -1141,7 +1306,9 @@ static esp_err_t skill_engine_init_impl(void)
     memset(s_slots, 0, sizeof(s_slots));
     memset(s_tool_ctx, 0, sizeof(s_tool_ctx));
     memset(s_timers, 0, sizeof(s_timers));
+    memset(s_gpio_intr, 0, sizeof(s_gpio_intr));
     s_next_timer_id = 1;
+    s_next_intr_id = 1;
     s_slot_count = 0;
     s_tool_ctx_count = 0;
     ESP_ERROR_CHECK(skill_resmgr_init());

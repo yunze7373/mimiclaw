@@ -354,10 +354,35 @@ static int l_timer_cancel(lua_State *L)
     return 1;
 }
 
-static int l_interrupt_stub(lua_State *L)
+static int l_gpio_attach_interrupt(lua_State *L)
 {
-    (void)L;
-    return luaL_error(L, "gpio interrupt callbacks are not enabled in this build yet");
+    int skill_id = up_skill_id(L);
+    int pin = (int)luaL_checkinteger(L, 1);
+    const char *edge = luaL_optstring(L, 2, "both");
+    luaL_checktype(L, 3, LUA_TFUNCTION);
+
+    if (!has_perm_gpio(skill_id, pin)) return luaL_error(L, "permission denied: gpio %d", pin);
+    if (skill_resmgr_acquire_gpio(skill_id, pin) != ESP_OK) return luaL_error(L, "gpio conflict: %d", pin);
+
+    lua_pushvalue(L, 3);
+    int cb_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    esp_err_t ret = skill_runtime_register_gpio_interrupt(skill_id, pin, edge, cb_ref);
+    if (ret != ESP_OK) {
+        luaL_unref(L, LUA_REGISTRYINDEX, cb_ref);
+        return luaL_error(L, "gpio_attach_interrupt failed: %s", esp_err_to_name(ret));
+    }
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+static int l_gpio_detach_interrupt(lua_State *L)
+{
+    int skill_id = up_skill_id(L);
+    int pin = (int)luaL_checkinteger(L, 1);
+    if (!has_perm_gpio(skill_id, pin)) return luaL_error(L, "permission denied: gpio %d", pin);
+    esp_err_t ret = skill_runtime_detach_gpio_interrupt(skill_id, pin);
+    lua_pushboolean(L, ret == ESP_OK);
+    return 1;
 }
 
 typedef struct {
@@ -388,8 +413,8 @@ void skill_hw_api_push_table(lua_State *L, int skill_id, const skill_permissions
         {"timer_every", l_timer_every},
         {"timer_once", l_timer_once},
         {"timer_cancel", l_timer_cancel},
-        {"gpio_attach_interrupt", l_interrupt_stub},
-        {"gpio_detach_interrupt", l_interrupt_stub},
+        {"gpio_attach_interrupt", l_gpio_attach_interrupt},
+        {"gpio_detach_interrupt", l_gpio_detach_interrupt},
     };
 
     lua_newtable(L);
