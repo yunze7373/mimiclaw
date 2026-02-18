@@ -647,7 +647,7 @@ static esp_err_t hw_scan_handler(httpd_req_t *req) {
         };
         esp_err_t ret = i2c_param_config(I2C_NUM_0, &conf);
         if (ret == ESP_OK) {
-            ret = i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, NULL, 0);
+            ret = i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0);
             /* ESP_ERR_INVALID_STATE means driver already installed */
             if (ret == ESP_OK || ret == ESP_ERR_INVALID_STATE) {
                 i2c_inited = true;
