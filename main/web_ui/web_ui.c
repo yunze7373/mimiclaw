@@ -880,68 +880,28 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     }
     buf[ret] = '\0';
 
-    // Simple parse - look for key fields
-    char *p = buf;
-
-    // Extract provider
-    char *provider_start = strstr(p, "\"provider\"");
-    if (provider_start) {
-        char *colon = strchr(provider_start, ':');
-        char *quote = strchr(colon + 1, '\"');
-        char *end_quote = strchr(quote + 1, '\"');
-        if (colon && quote && end_quote) {
-            *end_quote = '\0';
-            llm_set_provider(quote + 1);
-        }
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
     }
 
-    // Extract model
-    char *model_start = strstr(p, "\"model\"");
-    if (model_start) {
-        char *colon = strchr(model_start, ':');
-        char *quote = strchr(colon + 1, '\"');
-        char *end_quote = strchr(quote + 1, '\"');
-        if (colon && quote && end_quote) {
-            *end_quote = '\0';
-            llm_set_model(quote + 1);
-        }
-    }
+    cJSON *provider = cJSON_GetObjectItem(root, "provider");
+    if (provider && cJSON_IsString(provider)) llm_set_provider(provider->valuestring);
 
-    // Extract api_key
-    char *key_start = strstr(p, "\"api_key\"");
-    if (key_start) {
-        char *colon = strchr(key_start, ':');
-        char *quote = strchr(colon + 1, '\"');
-        char *end_quote = strchr(quote + 1, '\"');
-        if (colon && quote && end_quote) {
-            *end_quote = '\0';
-            llm_set_api_key(quote + 1);
-        }
-    }
+    cJSON *model = cJSON_GetObjectItem(root, "model");
+    if (model && cJSON_IsString(model)) llm_set_model(model->valuestring);
 
-    // Extract ollama_host
-    char *host_start = strstr(p, "\"ollama_host\"");
-    if (host_start) {
-        char *colon = strchr(host_start, ':');
-        char *quote = strchr(colon + 1, '\"');
-        char *end_quote = strchr(quote + 1, '\"');
-        if (colon && quote && end_quote) {
-            *end_quote = '\0';
-            llm_set_ollama_host(quote + 1);
-        }
-    }
+    cJSON *api_key = cJSON_GetObjectItem(root, "api_key");
+    if (api_key && cJSON_IsString(api_key)) llm_set_api_key(api_key->valuestring);
 
-    // Extract ollama_port
-    char *port_start = strstr(p, "\"ollama_port\"");
-    if (port_start) {
-        char *colon = strchr(port_start, ':');
-        char *quote = strchr(colon + 1, '\"');
-        char *end_quote = strchr(quote + 1, '\"');
-        if (colon && quote && end_quote) {
-            *end_quote = '\0';
-            llm_set_ollama_port(quote + 1);
-        }
-    }
+    cJSON *ollama_host = cJSON_GetObjectItem(root, "ollama_host");
+    if (ollama_host && cJSON_IsString(ollama_host)) llm_set_ollama_host(ollama_host->valuestring);
+
+    cJSON *ollama_port = cJSON_GetObjectItem(root, "ollama_port");
+    if (ollama_port && cJSON_IsString(ollama_port)) llm_set_ollama_port(ollama_port->valuestring);
+
+    cJSON_Delete(root);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"success\":true}", 16);
