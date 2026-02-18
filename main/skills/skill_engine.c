@@ -1545,14 +1545,14 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
     char sha_hex[65] = {0};
     if (verify_checksum) {
         mbedtls_sha256_init(&sha_ctx);
-        mbedtls_sha256_starts_ret(&sha_ctx, 0);
+        mbedtls_sha256_starts(&sha_ctx, 0);
     }
     char buf[512];
     int n = 0;
     while ((n = esp_http_client_read(client, buf, sizeof(buf))) > 0) {
         fwrite(buf, 1, n, f);
         if (verify_checksum) {
-            mbedtls_sha256_update_ret(&sha_ctx, (const unsigned char *)buf, (size_t)n);
+            mbedtls_sha256_update(&sha_ctx, (const unsigned char *)buf, (size_t)n);
         }
     }
     fclose(f);
@@ -1564,7 +1564,7 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
         return ESP_FAIL;
     }
     if (verify_checksum) {
-        mbedtls_sha256_finish_ret(&sha_ctx, sha_bin);
+        mbedtls_sha256_finish(&sha_ctx, sha_bin);
         mbedtls_sha256_free(&sha_ctx);
         bytes_to_hex_lower(sha_bin, sizeof(sha_bin), sha_hex, sizeof(sha_hex));
         if (strcmp(sha_hex, expected_sha256) != 0) {
