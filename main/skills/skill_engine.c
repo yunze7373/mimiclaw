@@ -2733,7 +2733,7 @@ bool skill_engine_signature_verification_enabled(void)
  * Note: Full Ed25519 requires mbedtls with MBEDTLS_PK_ED25519 support
  * This is a placeholder that validates the signature format but always passes
  * For production, either enable Ed25519 in mbedtls or use a different approach */
-static esp_err_t verify_ed25519_signature(const uint8_t *data, size_t data_len,
+static esp_err_t __attribute__((unused)) verify_ed25519_signature(const uint8_t *data, size_t data_len,
                                            const char *signature_hex)
 {
     if (!data || !signature_hex) {
