@@ -474,7 +474,7 @@ static void parse_perm_array(cJSON *obj, const char *key, char out[][16], int *c
 
 static bool load_manifest(skill_slot_t *slot, const char *bundle_dir)
 {
-    char path[256];
+    char path[512];
     snprintf(path, sizeof(path), "%s/manifest.json", bundle_dir);
     char *manifest_str = NULL;
     if (!read_file_alloc(path, &manifest_str)) return false;
@@ -543,7 +543,7 @@ static void load_legacy_permissions(skill_slot_t *slot)
 
 static void push_config_table(skill_slot_t *slot)
 {
-    char cfg_path[256];
+    char cfg_path[512];
     snprintf(cfg_path, sizeof(cfg_path), "%s/config.json", slot->root_dir);
     char *cfg = NULL;
     if (!read_file_alloc(cfg_path, &cfg)) {
@@ -775,7 +775,7 @@ static bool parse_tools_for_slot(int slot_idx)
 
 static bool run_skill_entry(skill_slot_t *slot)
 {
-    char entry_path[256];
+    char entry_path[512];
     snprintf(entry_path, sizeof(entry_path), "%s/%s", slot->root_dir, slot->entry[0] ? slot->entry : "main.lua");
     if (luaL_loadfile(s_L, entry_path) != LUA_OK) {
         ESP_LOGE(TAG, "Skill %s load failed: %s", slot->name, lua_tostring(s_L, -1));
@@ -824,7 +824,7 @@ static void remove_path_recursive(const char *path)
         struct dirent *ent = NULL;
         while ((ent = readdir(dir)) != NULL) {
             if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
-            char child[256];
+            char child[512];
             snprintf(child, sizeof(child), "%s/%s", path, ent->d_name);
             remove_path_recursive(child);
         }
@@ -903,7 +903,7 @@ static bool load_legacy_lua_file(const char *filename, int slot_idx)
     slot->env_ref = create_sandbox_env(slot_idx);
     slot->state = SKILL_STATE_LOADED;
 
-    char path[256];
+    char path[512];
     snprintf(path, sizeof(path), "%s/%s", SKILL_DIR, filename);
     if (luaL_loadfile(s_L, path) != LUA_OK) {
         ESP_LOGE(TAG, "Legacy skill load failed %s: %s", filename, lua_tostring(s_L, -1));
@@ -954,7 +954,7 @@ esp_err_t skill_engine_init(void)
     struct dirent *ent = NULL;
     while ((ent = readdir(dir)) != NULL && s_slot_count < SKILL_MAX_SLOTS) {
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
-        char path[256];
+        char path[512];
         snprintf(path, sizeof(path), "%s/%s", SKILL_DIR, ent->d_name);
         struct stat est = {0};
         if (stat(path, &est) != 0) continue;
@@ -981,7 +981,7 @@ esp_err_t skill_engine_install(const char *url)
 
     const char *fname = strrchr(url, '/');
     fname = fname ? fname + 1 : url;
-    char out_path[256];
+    char out_path[512];
     snprintf(out_path, sizeof(out_path), "%s/%s", SKILL_DIR, fname);
 
     FILE *f = fopen(out_path, "wb");
@@ -1020,7 +1020,7 @@ esp_err_t skill_engine_uninstall(const char *name)
     for (int i = 0; i < SKILL_MAX_SLOTS; i++) {
         if (!s_slots[i].used) continue;
         if (strcmp(s_slots[i].name, name) != 0) continue;
-        char fs_path[256] = {0};
+        char fs_path[512] = {0};
         if (s_slots[i].root_dir[0]) {
             snprintf(fs_path, sizeof(fs_path), "%s", s_slots[i].root_dir);
         } else if (s_slots[i].entry[0]) {
