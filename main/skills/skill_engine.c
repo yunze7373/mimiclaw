@@ -92,6 +92,8 @@ static lua_tool_ctx_t s_tool_ctx[SKILL_MAX_SLOTS * SKILL_MAX_TOOLS_PER_SKILL];
 static int s_tool_ctx_count = 0;
 static exec_guard_t s_guard = {0};
 static SemaphoreHandle_t s_lua_lock = NULL;
+static SemaphoreHandle_t s_install_lock = NULL;
+static uint32_t s_install_seq = 0;
 
 typedef struct {
     bool used;
@@ -860,6 +862,55 @@ static bool file_exists_dir(const char *path)
     return S_ISDIR(st.st_mode);
 }
 
+static bool join_path2(char *dst, size_t dst_size, const char *a, const char *b);
+
+static bool detect_bundle_root_dir(const char *extract_dir, char *out, size_t out_size)
+{
+    if (!extract_dir || !out || out_size == 0) return false;
+
+    char manifest_path[512];
+    if (join_path2(manifest_path, sizeof(manifest_path), extract_dir, "manifest.json") &&
+        file_exists_regular(manifest_path)) {
+        size_t n = strlen(extract_dir);
+        if (n + 1 > out_size) return false;
+        memcpy(out, extract_dir, n + 1);
+        return true;
+    }
+
+    DIR *dir = opendir(extract_dir);
+    if (!dir) return false;
+
+    int child_dirs = 0;
+    char only_dir[128] = {0};
+    struct dirent *ent = NULL;
+    while ((ent = readdir(dir)) != NULL) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+        char child_path[512];
+        if (!join_path2(child_path, sizeof(child_path), extract_dir, ent->d_name)) continue;
+        if (!file_exists_dir(child_path)) continue;
+        child_dirs++;
+        if (child_dirs == 1) {
+            size_t dlen = strlen(ent->d_name);
+            if (dlen >= sizeof(only_dir)) dlen = sizeof(only_dir) - 1;
+            memcpy(only_dir, ent->d_name, dlen);
+            only_dir[dlen] = '\0';
+        }
+        if (child_dirs > 1) break;
+    }
+    closedir(dir);
+    if (child_dirs != 1) return false;
+
+    char nested_root[512];
+    if (!join_path2(nested_root, sizeof(nested_root), extract_dir, only_dir)) return false;
+    if (!join_path2(manifest_path, sizeof(manifest_path), nested_root, "manifest.json")) return false;
+    if (!file_exists_regular(manifest_path)) return false;
+
+    size_t n = strlen(nested_root);
+    if (n + 1 > out_size) return false;
+    memcpy(out, nested_root, n + 1);
+    return true;
+}
+
 static bool ensure_dir_recursive(const char *path)
 {
     if (!path || !path[0]) return false;
@@ -914,6 +965,32 @@ static bool join_path2(char *dst, size_t dst_size, const char *a, const char *b)
     dst[la] = '/';
     memcpy(dst + la + 1, b, lb);
     dst[la + 1 + lb] = '\0';
+    return true;
+}
+
+static bool build_staging_file_path(char *out, size_t out_size,
+                                    const char *staging_dir,
+                                    const char *fname,
+                                    const char *tag,
+                                    const char *suffix_with_dot)
+{
+    if (!out || out_size == 0 || !staging_dir || !fname || !tag || !suffix_with_dot) return false;
+    size_t ls = strlen(staging_dir);
+    size_t lf = strlen(fname);
+    size_t lt = strlen(tag);
+    size_t lx = strlen(suffix_with_dot);
+    if (ls == 0 || lf == 0 || lt == 0 || lx == 0) return false;
+    size_t need = ls + 1 + lf + 1 + lt + lx + 1;
+    if (need > out_size) return false;
+
+    size_t p = 0;
+    memcpy(out + p, staging_dir, ls); p += ls;
+    out[p++] = '/';
+    memcpy(out + p, fname, lf); p += lf;
+    out[p++] = '.';
+    memcpy(out + p, tag, lt); p += lt;
+    memcpy(out + p, suffix_with_dot, lx); p += lx;
+    out[p] = '\0';
     return true;
 }
 
@@ -1622,6 +1699,10 @@ static esp_err_t skill_engine_init_impl(void)
         s_lua_lock = xSemaphoreCreateRecursiveMutex();
         if (!s_lua_lock) return ESP_ERR_NO_MEM;
     }
+    if (!s_install_lock) {
+        s_install_lock = xSemaphoreCreateMutex();
+        if (!s_install_lock) return ESP_ERR_NO_MEM;
+    }
 
     if (!lua_lock_take(pdMS_TO_TICKS(500))) return ESP_ERR_TIMEOUT;
 
@@ -1736,7 +1817,7 @@ static void bytes_to_hex_lower(const uint8_t *bytes, size_t n, char *out, size_t
     out[n * 2] = '\0';
 }
 
-esp_err_t skill_engine_install_with_checksum(const char *url, const char *checksum_hex)
+static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const char *checksum_hex)
 {
     if (!url || !url[0]) return ESP_ERR_INVALID_ARG;
     int free_slot_idx = find_free_slot_idx();
@@ -1776,21 +1857,22 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
     char staging_path[512];
     char out_path[512];
     char backup_path[512];
+    char install_tag[24];
     size_t skill_dir_len = strlen(SKILL_DIR);
-    size_t staging_dir_len = strlen(staging_dir);
     size_t out_need = skill_dir_len + 1 + fname_len + 1;
-    size_t staging_need = staging_dir_len + 1 + fname_len + 5 + 1; /* "/"+fname+".part"+NUL */
-    size_t backup_need = staging_dir_len + 1 + fname_len + 4 + 1;  /* "/"+fname+".bak"+NUL */
+    snprintf(install_tag, sizeof(install_tag), "%08lx%08lx",
+             (unsigned long)(esp_timer_get_time() & 0xffffffff),
+             (unsigned long)(++s_install_seq));
 
     if (out_need > sizeof(out_path)) {
         ESP_LOGE(TAG, "Output path too long");
         return ESP_ERR_INVALID_ARG;
     }
-    if (staging_need > sizeof(staging_path)) {
+    if (!build_staging_file_path(staging_path, sizeof(staging_path), staging_dir, fname, install_tag, ".part")) {
         ESP_LOGE(TAG, "Staging path too long");
         return ESP_ERR_INVALID_ARG;
     }
-    if (backup_need > sizeof(backup_path)) {
+    if (!build_staging_file_path(backup_path, sizeof(backup_path), staging_dir, fname, install_tag, ".bak")) {
         ESP_LOGE(TAG, "Backup path too long");
         return ESP_ERR_INVALID_ARG;
     }
@@ -1799,18 +1881,6 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
     out_path[skill_dir_len] = '/';
     memcpy(out_path + skill_dir_len + 1, fname, fname_len);
     out_path[skill_dir_len + 1 + fname_len] = '\0';
-
-    memcpy(staging_path, staging_dir, staging_dir_len);
-    staging_path[staging_dir_len] = '/';
-    memcpy(staging_path + staging_dir_len + 1, fname, fname_len);
-    memcpy(staging_path + staging_dir_len + 1 + fname_len, ".part", 5);
-    staging_path[staging_dir_len + 1 + fname_len + 5] = '\0';
-
-    memcpy(backup_path, staging_dir, staging_dir_len);
-    backup_path[staging_dir_len] = '/';
-    memcpy(backup_path + staging_dir_len + 1, fname, fname_len);
-    memcpy(backup_path + staging_dir_len + 1 + fname_len, ".bak", 4);
-    backup_path[staging_dir_len + 1 + fname_len + 4] = '\0';
 
     FILE *f = fopen(staging_path, "wb");
     if (!f) return ESP_FAIL;
@@ -1929,8 +1999,7 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
 
     if (has_suffix(fname, ".tar")) {
         char extract_dir[512];
-        if (snprintf(extract_dir, sizeof(extract_dir), "%s/.extract_%s", staging_dir, fname) <= 0 ||
-            strlen(extract_dir) >= sizeof(extract_dir)) {
+        if (!build_staging_file_path(extract_dir, sizeof(extract_dir), staging_dir, "extract", install_tag, ".dir")) {
             remove(staging_path);
             return ESP_ERR_INVALID_ARG;
         }
@@ -1943,9 +2012,16 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
         }
         remove(staging_path);
 
+        char bundle_root[512];
+        if (!detect_bundle_root_dir(extract_dir, bundle_root, sizeof(bundle_root))) {
+            remove_path_recursive(extract_dir);
+            ESP_LOGE(TAG, "Cannot locate bundle root/manifest in tar");
+            return ESP_ERR_INVALID_ARG;
+        }
+
         skill_slot_t meta = {0};
         meta.env_ref = LUA_NOREF;
-        if (!load_manifest(&meta, extract_dir)) {
+        if (!load_manifest(&meta, bundle_root)) {
             remove_path_recursive(extract_dir);
             ESP_LOGE(TAG, "Invalid bundle manifest in tar");
             return ESP_ERR_INVALID_ARG;
@@ -1959,8 +2035,7 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
         }
 
         char dir_backup[512];
-        if (snprintf(dir_backup, sizeof(dir_backup), "%s/%s.bakdir", staging_dir, meta.name) <= 0 ||
-            strlen(dir_backup) >= sizeof(dir_backup)) {
+        if (!build_staging_file_path(dir_backup, sizeof(dir_backup), staging_dir, meta.name, install_tag, ".bakdir")) {
             remove_path_recursive(extract_dir);
             return ESP_ERR_INVALID_ARG;
         }
@@ -1972,11 +2047,14 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
             ESP_LOGE(TAG, "Failed to backup existing bundle directory");
             return ESP_FAIL;
         }
-        if (rename(extract_dir, final_dir) != 0) {
+        if (rename(bundle_root, final_dir) != 0) {
             if (had_old_dir) (void)rename(dir_backup, final_dir);
             remove_path_recursive(extract_dir);
             ESP_LOGE(TAG, "Failed to place extracted bundle");
             return ESP_FAIL;
+        }
+        if (strcmp(bundle_root, extract_dir) != 0) {
+            remove_path_recursive(extract_dir);
         }
 
         int existing_slot = find_slot_by_skill_name(meta.name);
@@ -2027,6 +2105,17 @@ esp_err_t skill_engine_install_with_checksum(const char *url, const char *checks
     return ESP_ERR_NOT_SUPPORTED;
 }
 
+esp_err_t skill_engine_install_with_checksum(const char *url, const char *checksum_hex)
+{
+    if (!s_install_lock) return ESP_ERR_INVALID_STATE;
+    if (xSemaphoreTake(s_install_lock, pdMS_TO_TICKS(15000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_err_t ret = skill_engine_install_with_checksum_impl(url, checksum_hex);
+    xSemaphoreGive(s_install_lock);
+    return ret;
+}
+
 esp_err_t skill_engine_install(const char *url)
 {
     return skill_engine_install_with_checksum(url, NULL);
@@ -2035,6 +2124,10 @@ esp_err_t skill_engine_install(const char *url)
 esp_err_t skill_engine_uninstall(const char *name)
 {
     if (!name || !name[0]) return ESP_ERR_INVALID_ARG;
+    if (!s_install_lock) return ESP_ERR_INVALID_STATE;
+    if (xSemaphoreTake(s_install_lock, pdMS_TO_TICKS(15000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
     for (int i = 0; i < SKILL_MAX_SLOTS; i++) {
         if (!s_slots[i].used) continue;
         if (strcmp(s_slots[i].name, name) != 0) continue;
@@ -2049,8 +2142,10 @@ esp_err_t skill_engine_uninstall(const char *name)
         s_slot_count = count_used_slots();
         tool_registry_rebuild_json();
         ESP_LOGI(TAG, "Skill uninstalled: %s", name);
+        xSemaphoreGive(s_install_lock);
         return ESP_OK;
     }
+    xSemaphoreGive(s_install_lock);
     return ESP_ERR_NOT_FOUND;
 }
 
