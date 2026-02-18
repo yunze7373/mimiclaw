@@ -4,12 +4,14 @@
 #include "../wifi/wifi_manager.h"
 #include "../tools/tool_web_search.h"
 #include "../cron/cron_service.h"
+#include "../skills/skill_engine.h"
 #include "nvs.h"
 
 #include <string.h>
 #include <stdio.h>
 #include "esp_log.h"
 #include "esp_http_server.h"
+#include "cJSON.h"
 #include "tools/tool_hardware.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
@@ -1206,6 +1208,117 @@ static esp_err_t cron_delete_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t skills_get_handler(httpd_req_t *req)
+{
+    char *skills = skill_engine_list_json();
+    if (!skills) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON *arr = cJSON_Parse(skills);
+    free(skills);
+    if (!root || !arr) {
+        if (root) cJSON_Delete(root);
+        if (arr) cJSON_Delete(arr);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to build response");
+        return ESP_FAIL;
+    }
+
+    cJSON_AddItemToObject(root, "skills", arr);
+    cJSON_AddNumberToObject(root, "count", skill_engine_get_count());
+    char *resp = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!resp) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    free(resp);
+    return ESP_OK;
+}
+
+static esp_err_t skills_install_handler(httpd_req_t *req)
+{
+    if (req->content_len <= 0 || req->content_len > 1024) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid body size");
+        return ESP_FAIL;
+    }
+
+    char body[1025];
+    int received = 0;
+    while (received < req->content_len) {
+        int n = httpd_req_recv(req, body + received, req->content_len - received);
+        if (n <= 0) return ESP_FAIL;
+        received += n;
+    }
+    body[received] = '\0';
+
+    cJSON *root = cJSON_Parse(body);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *url = cJSON_GetObjectItem(root, "url");
+    cJSON *checksum = cJSON_GetObjectItem(root, "checksum");
+    if (!cJSON_IsString(url) || !url->valuestring || !url->valuestring[0]) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing url");
+        return ESP_FAIL;
+    }
+
+    const char *checksum_str = NULL;
+    if (cJSON_IsString(checksum) && checksum->valuestring && checksum->valuestring[0]) {
+        checksum_str = checksum->valuestring;
+    }
+
+    esp_err_t err = skill_engine_install_with_checksum(url->valuestring, checksum_str);
+    cJSON_Delete(root);
+    if (err != ESP_OK) {
+        char resp[128];
+        snprintf(resp, sizeof(resp), "{\"success\":false,\"error\":\"%s\"}", esp_err_to_name(err));
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t skills_delete_handler(httpd_req_t *req)
+{
+    char query[128] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing query");
+        return ESP_FAIL;
+    }
+
+    char name[64] = {0};
+    if (httpd_query_key_value(query, "name", name, sizeof(name)) != ESP_OK || !name[0]) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing name");
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = skill_engine_uninstall(name);
+    if (err != ESP_OK) {
+        char resp[128];
+        snprintf(resp, sizeof(resp), "{\"success\":false,\"error\":\"%s\"}", esp_err_to_name(err));
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 /* ── Server Init ───────────────────────────────────────────────── */
 
 esp_err_t web_ui_init(void)
@@ -1214,7 +1327,7 @@ esp_err_t web_ui_init(void)
     config.server_port = 80;
     config.ctrl_port = 32768;
     config.max_open_sockets = 3;  /* keep low — only serves HTML/JSON */
-    config.max_uri_handlers = 16;
+    config.max_uri_handlers = 32;
 
     httpd_handle_t server = NULL;
     esp_err_t ret = httpd_start(&server, &config);
@@ -1306,6 +1419,27 @@ esp_err_t web_ui_init(void)
         .handler = cron_delete_handler,
     };
     httpd_register_uri_handler(server, &api_cron_del);
+
+    httpd_uri_t api_skills_get = {
+        .uri = "/api/skills",
+        .method = HTTP_GET,
+        .handler = skills_get_handler,
+    };
+    httpd_register_uri_handler(server, &api_skills_get);
+
+    httpd_uri_t api_skills_install = {
+        .uri = "/api/skills/install",
+        .method = HTTP_POST,
+        .handler = skills_install_handler,
+    };
+    httpd_register_uri_handler(server, &api_skills_install);
+
+    httpd_uri_t api_skills_delete = {
+        .uri = "/api/skills",
+        .method = HTTP_DELETE,
+        .handler = skills_delete_handler,
+    };
+    httpd_register_uri_handler(server, &api_skills_delete);
 
     tool_hardware_register_handlers(server);
 

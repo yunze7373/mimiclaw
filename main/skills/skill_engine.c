@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <ctype.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -12,6 +13,7 @@
 #include "esp_http_client.h"
 #include "esp_timer.h"
 #include "cJSON.h"
+#include "mbedtls/sha256.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -1446,10 +1448,45 @@ esp_err_t skill_engine_init(void)
     return ctx.ret;
 }
 
-esp_err_t skill_engine_install(const char *url)
+static bool normalize_checksum_hex(const char *in, char out[65])
+{
+    if (!in || !out) return false;
+    size_t n = strlen(in);
+    if (n != 64) return false;
+    for (size_t i = 0; i < 64; i++) {
+        unsigned char c = (unsigned char)in[i];
+        if (!isxdigit(c)) return false;
+        out[i] = (char)tolower(c);
+    }
+    out[64] = '\0';
+    return true;
+}
+
+static void bytes_to_hex_lower(const uint8_t *bytes, size_t n, char *out, size_t out_size)
+{
+    static const char hex[] = "0123456789abcdef";
+    if (!bytes || !out || out_size < (n * 2 + 1)) return;
+    for (size_t i = 0; i < n; i++) {
+        out[i * 2] = hex[(bytes[i] >> 4) & 0xF];
+        out[i * 2 + 1] = hex[bytes[i] & 0xF];
+    }
+    out[n * 2] = '\0';
+}
+
+esp_err_t skill_engine_install_with_checksum(const char *url, const char *checksum_hex)
 {
     if (!url || !url[0]) return ESP_ERR_INVALID_ARG;
     if (s_slot_count >= SKILL_MAX_SLOTS) return ESP_ERR_NO_MEM;
+
+    char expected_sha256[65] = {0};
+    bool verify_checksum = false;
+    if (checksum_hex && checksum_hex[0]) {
+        if (!normalize_checksum_hex(checksum_hex, expected_sha256)) {
+            ESP_LOGE(TAG, "Invalid checksum format (expect 64 hex chars)");
+            return ESP_ERR_INVALID_ARG;
+        }
+        verify_checksum = true;
+    }
 
     const char *fname = strrchr(url, '/');
     fname = fname ? fname + 1 : url;
@@ -1503,14 +1540,41 @@ esp_err_t skill_engine_install(const char *url)
         esp_http_client_cleanup(client);
         return ret;
     }
+    mbedtls_sha256_context sha_ctx;
+    uint8_t sha_bin[32] = {0};
+    char sha_hex[65] = {0};
+    if (verify_checksum) {
+        mbedtls_sha256_init(&sha_ctx);
+        mbedtls_sha256_starts_ret(&sha_ctx, 0);
+    }
     char buf[512];
     int n = 0;
     while ((n = esp_http_client_read(client, buf, sizeof(buf))) > 0) {
         fwrite(buf, 1, n, f);
+        if (verify_checksum) {
+            mbedtls_sha256_update_ret(&sha_ctx, (const unsigned char *)buf, (size_t)n);
+        }
     }
     fclose(f);
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
+    if (n < 0) {
+        if (verify_checksum) mbedtls_sha256_free(&sha_ctx);
+        remove(staging_path);
+        return ESP_FAIL;
+    }
+    if (verify_checksum) {
+        mbedtls_sha256_finish_ret(&sha_ctx, sha_bin);
+        mbedtls_sha256_free(&sha_ctx);
+        bytes_to_hex_lower(sha_bin, sizeof(sha_bin), sha_hex, sizeof(sha_hex));
+        if (strcmp(sha_hex, expected_sha256) != 0) {
+            ESP_LOGE(TAG, "Skill checksum mismatch");
+            ESP_LOGE(TAG, " expected=%s", expected_sha256);
+            ESP_LOGE(TAG, " actual  =%s", sha_hex);
+            remove(staging_path);
+            return ESP_ERR_INVALID_CRC;
+        }
+    }
     remove(out_path);
     if (rename(staging_path, out_path) != 0) {
         remove(staging_path);
@@ -1529,6 +1593,11 @@ esp_err_t skill_engine_install(const char *url)
         remove(out_path);
     }
     return ESP_FAIL;
+}
+
+esp_err_t skill_engine_install(const char *url)
+{
+    return skill_engine_install_with_checksum(url, NULL);
 }
 
 esp_err_t skill_engine_uninstall(const char *name)

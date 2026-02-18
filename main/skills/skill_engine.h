@@ -11,6 +11,7 @@ esp_err_t skill_engine_init(void);
  * Install skill bundle from URL (placeholder API; currently supports direct .lua download).
  */
 esp_err_t skill_engine_install(const char *url);
+esp_err_t skill_engine_install_with_checksum(const char *url, const char *checksum_hex);
 
 /**
  * Uninstall a skill by name.
@@ -27,4 +28,3 @@ char *skill_engine_list_json(void);
  * Number of active skill slots.
  */
 int skill_engine_get_count(void);
-
