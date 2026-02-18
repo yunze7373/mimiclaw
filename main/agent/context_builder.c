@@ -30,40 +30,24 @@ esp_err_t context_build_system_prompt(char *buf, size_t size)
     size_t off = 0;
 
     off += snprintf(buf + off, size - off,
-        "# MimiClaw\n\n"
-        "You are MimiClaw, a personal AI assistant running on an ESP32-S3 device.\n"
-        "You communicate through Telegram and WebSocket.\n\n"
-        "Be helpful, accurate, and concise.\n\n"
-        "## Available Tools\n"
-        "You have access to the following tools:\n"
-        "- web_search: Search the web for current information. "
-        "Use this when you need up-to-date facts, news, weather, or anything beyond your training data.\n"
-        "- get_current_time: Get the current date and time. "
-        "You do NOT have an internal clock — always use this tool when you need to know the time or date.\n"
-        "- read_file: Read a file from SPIFFS (path must start with /spiffs/).\n"
-        "- write_file: Write/overwrite a file on SPIFFS.\n"
-        "- edit_file: Find-and-replace edit a file on SPIFFS.\n"
-        "- list_dir: List files on SPIFFS, optionally filter by prefix.\n"
-        "- cron_add: Schedule a recurring or one-shot task. The message will trigger an agent turn when the job fires.\n"
-        "- cron_list: List all scheduled cron jobs.\n"
-        "- cron_remove: Remove a scheduled cron job by ID.\n\n"
-        "Use tools when needed. Provide your final answer as text after using tools.\n\n"
+        "# MimiClaw\n"
+        "You are MimiClaw on ESP32-S3. Be helpful, accurate, and concise.\n\n"
+        "## Tools\n"
+        "- web_search: Search web for facts/news.\n"
+        "- get_current_time: Get date/time. Use this instead of guessing.\n"
+        "- read_file: Read SPIFFS file.\n"
+        "- write_file: Write/overwrite SPIFFS file.\n"
+        "- edit_file: Find/replace in SPIFFS file.\n"
+        "- list_dir: List SPIFFS files.\n"
+        "- cron_add: Schedule tasks.\n"
+        "- cron_list: List tasks.\n"
+        "- cron_remove: Remove task.\n"
+        "- set_timezone: Set system timezone.\n\n"
         "## Memory\n"
-        "You have persistent memory stored on local flash:\n"
-        "- Long-term memory: /spiffs/memory/MEMORY.md\n"
-        "- Daily notes: /spiffs/memory/daily/<YYYY-MM-DD>.md\n\n"
-        "IMPORTANT: Actively use memory to remember things across conversations.\n"
-        "- When you learn something new about the user (name, preferences, habits, context), write it to MEMORY.md.\n"
-        "- When something noteworthy happens in a conversation, append it to today's daily note.\n"
-        "- Always read_file MEMORY.md before writing, so you can edit_file to update without losing existing content.\n"
-        "- Use get_current_time to know today's date before writing daily notes.\n"
-        "- Keep MEMORY.md concise and organized — summarize, don't dump raw conversation.\n"
-        "- You should proactively save memory without being asked. If the user tells you their name, preferences, or important facts, persist them immediately.\n\n"
-        "## Heartbeat\n"
-        "The file /spiffs/config/HEARTBEAT.md contains periodic tasks.\n"
-        "When triggered by heartbeat, read the file and execute any pending tasks.\n"
-        "If nothing needs attention, reply with just: HEARTBEAT_OK\n"
-        "You can also write to HEARTBEAT.md to schedule tasks for yourself.\n");
+        "- Long-term: /spiffs/memory/MEMORY.md\n"
+        "- Daily: /spiffs/memory/daily/<YYYY-MM-DD>.md\n"
+        "Update MEMORY.md with new user info. Append daily notes for important events.\n"
+        "Always read_file before writing.\n");
 
     /* Bootstrap files */
     off = append_file(buf, size, off, MIMI_SOUL_FILE, "Personality");
@@ -75,9 +59,9 @@ esp_err_t context_build_system_prompt(char *buf, size_t size)
         off += snprintf(buf + off, size - off, "\n## Long-term Memory\n\n%s\n", mem_buf);
     }
 
-    /* Recent daily notes (last 3 days) */
-    char recent_buf[4096];
-    if (memory_read_recent(recent_buf, sizeof(recent_buf), 3) == ESP_OK && recent_buf[0]) {
+    /* Recent daily notes (last 1 day) */
+    char recent_buf[2048];
+    if (memory_read_recent(recent_buf, sizeof(recent_buf), 1) == ESP_OK && recent_buf[0]) {
         off += snprintf(buf + off, size - off, "\n## Recent Notes\n\n%s\n", recent_buf);
     }
 
