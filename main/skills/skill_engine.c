@@ -1485,7 +1485,10 @@ static void apply_market_meta_to_slot(int slot_idx, const char *source_id, const
     if (source_version && source_version[0]) {
         snprintf(slot->market_version, sizeof(slot->market_version), "%s", source_version);
     } else {
-        snprintf(slot->market_version, sizeof(slot->market_version), "%s", slot->version);
+        size_t n = strnlen(slot->version, sizeof(slot->version));
+        if (n >= sizeof(slot->market_version)) n = sizeof(slot->market_version) - 1;
+        memmove(slot->market_version, slot->version, n);
+        slot->market_version[n] = '\0';
     }
 }
 
