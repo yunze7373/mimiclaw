@@ -107,6 +107,21 @@ typedef struct {
 static install_status_t s_install_status = {0};
 
 typedef struct {
+    uint32_t seq;
+    int64_t started_us;
+    int64_t finished_us;
+    char stage[32];
+    char url[256];
+    char error[64];
+    bool success;
+} install_history_entry_t;
+
+#define INSTALL_HISTORY_MAX 8
+static install_history_entry_t s_install_history[INSTALL_HISTORY_MAX];
+static int s_install_history_count = 0;
+static int s_install_history_next = 0;
+
+typedef struct {
     bool used;
     int timer_id;
     int skill_id;
@@ -177,6 +192,19 @@ static void install_status_finish(esp_err_t err)
         snprintf(s_install_status.stage, sizeof(s_install_status.stage), "%s", "failed");
         snprintf(s_install_status.last_error, sizeof(s_install_status.last_error), "%s", esp_err_to_name(err));
     }
+
+    install_history_entry_t *e = &s_install_history[s_install_history_next];
+    memset(e, 0, sizeof(*e));
+    e->seq = s_install_status.seq;
+    e->started_us = s_install_status.started_us;
+    e->finished_us = s_install_status.finished_us;
+    snprintf(e->stage, sizeof(e->stage), "%s", s_install_status.stage);
+    snprintf(e->url, sizeof(e->url), "%s", s_install_status.url);
+    snprintf(e->error, sizeof(e->error), "%s", s_install_status.last_error);
+    e->success = (err == ESP_OK);
+
+    s_install_history_next = (s_install_history_next + 1) % INSTALL_HISTORY_MAX;
+    if (s_install_history_count < INSTALL_HISTORY_MAX) s_install_history_count++;
 }
 
 static cJSON *lua_value_to_cjson(lua_State *L, int idx);
@@ -1185,6 +1213,116 @@ static bool extract_tar_to_dir(const char *tar_path, const char *out_dir)
     return ok;
 }
 
+static uint16_t rd_le16(const uint8_t *p)
+{
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+
+static uint32_t rd_le32(const uint8_t *p)
+{
+    return (uint32_t)p[0] |
+           ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) |
+           ((uint32_t)p[3] << 24);
+}
+
+typedef enum {
+    ZIP_EXTRACT_ERR_NONE = 0,
+    ZIP_EXTRACT_ERR_GENERIC = 1,
+    ZIP_EXTRACT_ERR_DATA_DESCRIPTOR = 2,
+    ZIP_EXTRACT_ERR_METHOD_UNSUPPORTED = 3,
+} zip_extract_err_t;
+
+/* Minimal ZIP extractor: supports local-file stream with method=stored(0), no data descriptor(bit3). */
+static bool extract_zip_to_dir(const char *zip_path, const char *out_dir, zip_extract_err_t *out_err)
+{
+    if (out_err) *out_err = ZIP_EXTRACT_ERR_NONE;
+    if (!zip_path || !out_dir) return false;
+    if (!ensure_dir_recursive(out_dir)) return false;
+
+    FILE *f = fopen(zip_path, "rb");
+    if (!f) return false;
+
+    uint8_t hdr[30];
+    uint8_t io_buf[512];
+    bool ok = true;
+
+    while (ok) {
+        size_t r = fread(hdr, 1, sizeof(hdr), f);
+        if (r == 0) break; /* EOF */
+        if (r != sizeof(hdr)) { ok = false; break; }
+
+        uint32_t sig = rd_le32(hdr);
+        if (sig == 0x02014b50U || sig == 0x06054b50U) {
+            break; /* central directory or end-of-central-dir */
+        }
+        if (sig != 0x04034b50U) { ok = false; break; }
+
+        uint16_t gp_flag = rd_le16(&hdr[6]);
+        uint16_t method = rd_le16(&hdr[8]);
+        uint32_t comp_size = rd_le32(&hdr[18]);
+        uint32_t uncomp_size = rd_le32(&hdr[22]);
+        uint16_t name_len = rd_le16(&hdr[26]);
+        uint16_t extra_len = rd_le16(&hdr[28]);
+
+        if (gp_flag & 0x0008) {
+            if (out_err) *out_err = ZIP_EXTRACT_ERR_DATA_DESCRIPTOR;
+            ok = false;
+            break;
+        }
+        if (method != 0) {
+            if (out_err) *out_err = ZIP_EXTRACT_ERR_METHOD_UNSUPPORTED;
+            ok = false;
+            break;
+        }
+        if (comp_size != uncomp_size) { ok = false; break; }
+        if (name_len == 0 || name_len > 300) { ok = false; break; }
+
+        char rel[320] = {0};
+        if (fread(rel, 1, name_len, f) != name_len) { ok = false; break; }
+        rel[name_len] = '\0';
+        if (extra_len > 0 && fseek(f, extra_len, SEEK_CUR) != 0) { ok = false; break; }
+
+        if (!is_safe_relpath(rel)) { ok = false; break; }
+
+        char full[512];
+        if (!join_path2(full, sizeof(full), out_dir, rel)) { ok = false; break; }
+
+        bool is_dir = false;
+        size_t rel_len = strlen(rel);
+        if (rel_len > 0 && rel[rel_len - 1] == '/') is_dir = true;
+
+        if (is_dir) {
+            if (!ensure_dir_recursive(full)) { ok = false; break; }
+            continue;
+        }
+
+        char *slash = strrchr(full, '/');
+        if (slash) {
+            *slash = '\0';
+            if (!ensure_dir_recursive(full)) { ok = false; break; }
+            *slash = '/';
+        }
+
+        FILE *out = fopen(full, "wb");
+        if (!out) { ok = false; break; }
+        uint32_t remain = comp_size;
+        while (remain > 0) {
+            uint32_t chunk = remain > sizeof(io_buf) ? (uint32_t)sizeof(io_buf) : remain;
+            size_t rr = fread(io_buf, 1, chunk, f);
+            if (rr != chunk) { ok = false; break; }
+            if (fwrite(io_buf, 1, rr, out) != rr) { ok = false; break; }
+            remain -= chunk;
+        }
+        fclose(out);
+        if (!ok) break;
+    }
+
+    fclose(f);
+    if (!ok && out_err && *out_err == ZIP_EXTRACT_ERR_NONE) *out_err = ZIP_EXTRACT_ERR_GENERIC;
+    return ok;
+}
+
 static int find_slot_by_skill_name(const char *name)
 {
     if (!name || !name[0]) return -1;
@@ -1210,6 +1348,32 @@ static int count_used_slots(void)
         if (s_slots[i].used) n++;
     }
     return n;
+}
+
+static bool parse_semver3(const char *s, int out[3])
+{
+    if (!s || !out) return false;
+    int a = 0, b = 0, c = 0;
+    char tail = '\0';
+    int n = sscanf(s, "%d.%d.%d%c", &a, &b, &c, &tail);
+    if (n < 3) return false;
+    if (a < 0 || b < 0 || c < 0) return false;
+    out[0] = a;
+    out[1] = b;
+    out[2] = c;
+    return true;
+}
+
+/* returns: -1 old<new, 0 equal/unknown, 1 old>new */
+static int compare_versions_old_vs_new(const char *old_v, const char *new_v)
+{
+    int ov[3] = {0}, nv[3] = {0};
+    if (!parse_semver3(old_v, ov) || !parse_semver3(new_v, nv)) return 0;
+    for (int i = 0; i < 3; i++) {
+        if (ov[i] < nv[i]) return -1;
+        if (ov[i] > nv[i]) return 1;
+    }
+    return 0;
 }
 
 static void parse_perm_array(cJSON *obj, const char *key, char out[][16], int *count)
@@ -1882,6 +2046,112 @@ static void bytes_to_hex_lower(const uint8_t *bytes, size_t n, char *out, size_t
     out[n * 2] = '\0';
 }
 
+static esp_err_t activate_bundle_from_extracted_dir(const char *extract_dir,
+                                                    const char *staging_dir,
+                                                    const char *install_tag,
+                                                    int free_slot_idx)
+{
+    char bundle_root[512];
+    if (!detect_bundle_root_dir(extract_dir, bundle_root, sizeof(bundle_root))) {
+        remove_path_recursive(extract_dir);
+        ESP_LOGE(TAG, "Cannot locate bundle root/manifest in package");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    skill_slot_t meta = {0};
+    meta.env_ref = LUA_NOREF;
+    if (!load_manifest(&meta, bundle_root)) {
+        remove_path_recursive(extract_dir);
+        ESP_LOGE(TAG, "Invalid bundle manifest in package");
+        return ESP_ERR_INVALID_ARG;
+    }
+    int existing_slot = find_slot_by_skill_name(meta.name);
+    if (existing_slot >= 0) {
+        int cmp = compare_versions_old_vs_new(s_slots[existing_slot].version, meta.version);
+        if (cmp > 0) {
+            remove_path_recursive(extract_dir);
+            ESP_LOGW(TAG, "Reject downgrade for %s: installed=%s incoming=%s",
+                     meta.name, s_slots[existing_slot].version, meta.version);
+            install_status_step("reject_downgrade");
+            return ESP_ERR_INVALID_VERSION;
+        }
+    }
+
+    install_status_step("activate_bundle");
+    char final_dir[512];
+    if (snprintf(final_dir, sizeof(final_dir), "%s/%s", SKILL_DIR, meta.name) <= 0 ||
+        strlen(final_dir) >= sizeof(final_dir)) {
+        remove_path_recursive(extract_dir);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char dir_backup[512];
+    if (!build_staging_file_path(dir_backup, sizeof(dir_backup), staging_dir, meta.name, install_tag, ".bakdir")) {
+        remove_path_recursive(extract_dir);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    bool had_old_dir = file_exists_dir(final_dir);
+    remove_path_recursive(dir_backup);
+    if (had_old_dir && rename(final_dir, dir_backup) != 0) {
+        remove_path_recursive(extract_dir);
+        ESP_LOGE(TAG, "Failed to backup existing bundle directory");
+        return ESP_FAIL;
+    }
+    if (rename(bundle_root, final_dir) != 0) {
+        if (had_old_dir) (void)rename(dir_backup, final_dir);
+        remove_path_recursive(extract_dir);
+        ESP_LOGE(TAG, "Failed to place extracted bundle");
+        return ESP_FAIL;
+    }
+    if (strcmp(bundle_root, extract_dir) != 0) {
+        remove_path_recursive(extract_dir);
+    }
+
+    existing_slot = find_slot_by_skill_name(meta.name);
+    int load_slot = free_slot_idx;
+    if (existing_slot < 0 && load_slot < 0) {
+        remove_path_recursive(final_dir);
+        if (had_old_dir) (void)rename(dir_backup, final_dir);
+        else remove_path_recursive(dir_backup);
+        return ESP_ERR_NO_MEM;
+    }
+    if (existing_slot >= 0) {
+        unload_slot(existing_slot);
+        load_slot = existing_slot;
+    }
+
+    if (!lua_lock_take(pdMS_TO_TICKS(500))) {
+        remove_path_recursive(final_dir);
+        if (had_old_dir) (void)rename(dir_backup, final_dir);
+        return ESP_ERR_TIMEOUT;
+    }
+    bool ok_load = load_bundle_dir(final_dir, load_slot);
+    lua_lock_give();
+
+    if (ok_load) {
+        remove_path_recursive(dir_backup);
+        s_slot_count = count_used_slots();
+        tool_registry_rebuild_json();
+        return ESP_OK;
+    }
+
+    remove_path_recursive(final_dir);
+    if (had_old_dir) {
+        (void)rename(dir_backup, final_dir);
+        if (!lua_lock_take(pdMS_TO_TICKS(500))) return ESP_ERR_TIMEOUT;
+        bool restored = load_bundle_dir(final_dir, load_slot);
+        lua_lock_give();
+        if (restored) {
+            s_slot_count = count_used_slots();
+            tool_registry_rebuild_json();
+        }
+    } else {
+        remove_path_recursive(dir_backup);
+    }
+    return ESP_FAIL;
+}
+
 static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const char *checksum_hex)
 {
     if (!url || !url[0]) return ESP_ERR_INVALID_ARG;
@@ -1909,8 +2179,8 @@ static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const 
         ESP_LOGE(TAG, "Invalid skill filename token");
         return ESP_ERR_INVALID_ARG;
     }
-    if (!has_suffix(fname, ".lua") && !has_suffix(fname, ".tar")) {
-        ESP_LOGE(TAG, "Unsupported skill format (only .lua/.tar)");
+    if (!has_suffix(fname, ".lua") && !has_suffix(fname, ".tar") && !has_suffix(fname, ".zip")) {
+        ESP_LOGE(TAG, "Unsupported skill format (only .lua/.tar/.zip)");
         return ESP_ERR_NOT_SUPPORTED;
     }
     char staging_dir[512];
@@ -2088,110 +2358,42 @@ static esp_err_t skill_engine_install_with_checksum_impl(const char *url, const 
         return ESP_FAIL;
     }
 
-    if (has_suffix(fname, ".tar")) {
-        install_status_step("extract_tar");
+    if (has_suffix(fname, ".tar") || has_suffix(fname, ".zip")) {
         char extract_dir[512];
         if (!build_staging_file_path(extract_dir, sizeof(extract_dir), staging_dir, "extract", install_tag, ".dir")) {
             remove(staging_path);
             return ESP_ERR_INVALID_ARG;
         }
         remove_path_recursive(extract_dir);
-        if (!extract_tar_to_dir(staging_path, extract_dir)) {
+        bool ok_extract = false;
+        zip_extract_err_t zip_err = ZIP_EXTRACT_ERR_NONE;
+        if (has_suffix(fname, ".tar")) {
+            install_status_step("extract_tar");
+            ok_extract = extract_tar_to_dir(staging_path, extract_dir);
+        } else {
+            install_status_step("extract_zip");
+            ok_extract = extract_zip_to_dir(staging_path, extract_dir, &zip_err);
+        }
+        if (!ok_extract) {
             remove(staging_path);
             remove_path_recursive(extract_dir);
-            ESP_LOGE(TAG, "Tar extract failed");
+            if (has_suffix(fname, ".zip")) {
+                if (zip_err == ZIP_EXTRACT_ERR_METHOD_UNSUPPORTED) {
+                    install_status_step("zip_method_unsupported");
+                    ESP_LOGE(TAG, "ZIP compression method unsupported (only stored method=0)");
+                    return ESP_ERR_NOT_SUPPORTED;
+                }
+                if (zip_err == ZIP_EXTRACT_ERR_DATA_DESCRIPTOR) {
+                    install_status_step("zip_data_descriptor_unsupported");
+                    ESP_LOGE(TAG, "ZIP data descriptor unsupported");
+                    return ESP_ERR_NOT_SUPPORTED;
+                }
+            }
+            ESP_LOGE(TAG, "Package extract failed");
             return ESP_FAIL;
         }
         remove(staging_path);
-
-        char bundle_root[512];
-        if (!detect_bundle_root_dir(extract_dir, bundle_root, sizeof(bundle_root))) {
-            remove_path_recursive(extract_dir);
-            ESP_LOGE(TAG, "Cannot locate bundle root/manifest in tar");
-            return ESP_ERR_INVALID_ARG;
-        }
-
-        skill_slot_t meta = {0};
-        meta.env_ref = LUA_NOREF;
-        if (!load_manifest(&meta, bundle_root)) {
-            remove_path_recursive(extract_dir);
-            ESP_LOGE(TAG, "Invalid bundle manifest in tar");
-            return ESP_ERR_INVALID_ARG;
-        }
-
-        install_status_step("activate_bundle");
-        char final_dir[512];
-        if (snprintf(final_dir, sizeof(final_dir), "%s/%s", SKILL_DIR, meta.name) <= 0 ||
-            strlen(final_dir) >= sizeof(final_dir)) {
-            remove_path_recursive(extract_dir);
-            return ESP_ERR_INVALID_ARG;
-        }
-
-        char dir_backup[512];
-        if (!build_staging_file_path(dir_backup, sizeof(dir_backup), staging_dir, meta.name, install_tag, ".bakdir")) {
-            remove_path_recursive(extract_dir);
-            return ESP_ERR_INVALID_ARG;
-        }
-
-        bool had_old_dir = file_exists_dir(final_dir);
-        remove_path_recursive(dir_backup);
-        if (had_old_dir && rename(final_dir, dir_backup) != 0) {
-            remove_path_recursive(extract_dir);
-            ESP_LOGE(TAG, "Failed to backup existing bundle directory");
-            return ESP_FAIL;
-        }
-        if (rename(bundle_root, final_dir) != 0) {
-            if (had_old_dir) (void)rename(dir_backup, final_dir);
-            remove_path_recursive(extract_dir);
-            ESP_LOGE(TAG, "Failed to place extracted bundle");
-            return ESP_FAIL;
-        }
-        if (strcmp(bundle_root, extract_dir) != 0) {
-            remove_path_recursive(extract_dir);
-        }
-
-        int existing_slot = find_slot_by_skill_name(meta.name);
-        int load_slot = free_slot_idx;
-        if (existing_slot < 0 && load_slot < 0) {
-            remove_path_recursive(final_dir);
-            if (had_old_dir) (void)rename(dir_backup, final_dir);
-            else remove_path_recursive(dir_backup);
-            return ESP_ERR_NO_MEM;
-        }
-        if (existing_slot >= 0) {
-            unload_slot(existing_slot);
-            load_slot = existing_slot;
-        }
-
-        if (!lua_lock_take(pdMS_TO_TICKS(500))) {
-            remove_path_recursive(final_dir);
-            if (had_old_dir) (void)rename(dir_backup, final_dir);
-            return ESP_ERR_TIMEOUT;
-        }
-        bool ok_load = load_bundle_dir(final_dir, load_slot);
-        lua_lock_give();
-
-        if (ok_load) {
-            remove_path_recursive(dir_backup);
-            s_slot_count = count_used_slots();
-            tool_registry_rebuild_json();
-            return ESP_OK;
-        }
-
-        remove_path_recursive(final_dir);
-        if (had_old_dir) {
-            (void)rename(dir_backup, final_dir);
-            if (!lua_lock_take(pdMS_TO_TICKS(500))) return ESP_ERR_TIMEOUT;
-            bool restored = load_bundle_dir(final_dir, load_slot);
-            lua_lock_give();
-            if (restored) {
-                s_slot_count = count_used_slots();
-                tool_registry_rebuild_json();
-            }
-        } else {
-            remove_path_recursive(dir_backup);
-        }
-        return ESP_FAIL;
+        return activate_bundle_from_extracted_dir(extract_dir, staging_dir, install_tag, free_slot_idx);
     }
 
     remove(staging_path);
@@ -2293,5 +2495,63 @@ char *skill_engine_install_status_json(void)
 
     char *json = cJSON_PrintUnformatted(obj);
     cJSON_Delete(obj);
+    return json;
+}
+
+char *skill_engine_install_capabilities_json(void)
+{
+    cJSON *obj = cJSON_CreateObject();
+    if (!obj) return NULL;
+
+    cJSON *ext = cJSON_CreateArray();
+    cJSON_AddItemToArray(ext, cJSON_CreateString("lua"));
+    cJSON_AddItemToArray(ext, cJSON_CreateString("tar"));
+    cJSON_AddItemToArray(ext, cJSON_CreateString("zip"));
+    cJSON_AddItemToObject(obj, "supported_extensions", ext);
+
+    cJSON *zip_methods = cJSON_CreateArray();
+    cJSON_AddItemToArray(zip_methods, cJSON_CreateString("stored"));
+    cJSON_AddItemToObject(obj, "zip_methods", zip_methods);
+
+    cJSON_AddStringToObject(obj, "checksum", "sha256");
+    cJSON_AddBoolToObject(obj, "signature_verification", false);
+    cJSON_AddStringToObject(obj, "downgrade_policy", "reject_if_installed_newer");
+    cJSON_AddNumberToObject(obj, "max_package_bytes", (double)SKILL_INSTALL_MAX_BYTES);
+
+    char *json = cJSON_PrintUnformatted(obj);
+    cJSON_Delete(obj);
+    return json;
+}
+
+char *skill_engine_install_history_json(void)
+{
+    cJSON *root = cJSON_CreateObject();
+    if (!root) return NULL;
+    cJSON_AddNumberToObject(root, "count", s_install_history_count);
+
+    cJSON *arr = cJSON_CreateArray();
+    cJSON_AddItemToObject(root, "items", arr);
+
+    for (int i = 0; i < s_install_history_count; i++) {
+        int idx = (s_install_history_next - 1 - i + INSTALL_HISTORY_MAX) % INSTALL_HISTORY_MAX;
+        install_history_entry_t *e = &s_install_history[idx];
+        cJSON *it = cJSON_CreateObject();
+        cJSON_AddNumberToObject(it, "seq", (double)e->seq);
+        cJSON_AddBoolToObject(it, "success", e->success);
+        cJSON_AddStringToObject(it, "stage", e->stage);
+        cJSON_AddStringToObject(it, "url", e->url);
+        cJSON_AddStringToObject(it, "error", e->error);
+        cJSON_AddNumberToObject(it, "started_us", (double)e->started_us);
+        cJSON_AddNumberToObject(it, "finished_us", (double)e->finished_us);
+        int64_t elapsed_ms = 0;
+        if (e->finished_us >= e->started_us && e->started_us > 0) {
+            elapsed_ms = (e->finished_us - e->started_us) / 1000;
+        }
+        cJSON_AddNumberToObject(it, "elapsed_ms", (double)elapsed_ms);
+        cJSON_AddItemToArray(arr, it);
+    }
+
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
     return json;
 }

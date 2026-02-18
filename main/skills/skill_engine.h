@@ -24,6 +24,8 @@ esp_err_t skill_engine_uninstall(const char *name);
  */
 char *skill_engine_list_json(void);
 char *skill_engine_install_status_json(void);
+char *skill_engine_install_capabilities_json(void);
+char *skill_engine_install_history_json(void);
 
 /**
  * Number of active skill slots.
