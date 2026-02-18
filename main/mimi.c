@@ -106,14 +106,18 @@ void app_main(void)
              (int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
     /* Display + input */
+#if MIMI_HAS_LCD
     ESP_ERROR_CHECK(display_init());
     display_show_banner();
+#endif
     ESP_ERROR_CHECK(rgb_init());
     rgb_set(255, 0, 0);
     button_Init();
+#if MIMI_HAS_LCD
     config_screen_init();
     imu_manager_init();
     imu_manager_set_shake_callback(config_screen_toggle);
+#endif
 
     /* Phase 1: Core infrastructure */
     ESP_ERROR_CHECK(init_nvs());

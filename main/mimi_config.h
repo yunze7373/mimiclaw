@@ -131,6 +131,11 @@
 #define MIMI_NVS_KEY_OLLAMA_PORT     "ollama_port"
 
 /* ========================================
+ * Hardware Feature Flags
+ * ======================================== */
+#define MIMI_HAS_LCD                 0    /* 1 = board has SPI LCD (ST7789T) */
+
+/* ========================================
  * Hardware Pin Map — ESP32-S3-N16R8 Board
  * ======================================== */
 #define MIMI_PIN_RGB_LED             38   /* WS2812 Data */
@@ -144,7 +149,7 @@
 #define MIMI_ADC_DEFAULT_BITWIDTH    ADC_BITWIDTH_12
 
 /* PWM (LEDC) Configuration */
-#define MIMI_PWM_TIMER               LEDC_TIMER_0
+#define MIMI_PWM_TIMER               LEDC_TIMER_1  /* TIMER_0 reserved for LCD backlight */
 #define MIMI_PWM_MODE                LEDC_LOW_SPEED_MODE
 #define MIMI_PWM_MAX_CHANNELS        4
 #define MIMI_PWM_DEFAULT_FREQ_HZ     5000
