@@ -407,7 +407,7 @@ esp_err_t skill_engine_init(void)
             continue;
         }
 
-        char path[128];
+        char path[300];
         snprintf(path, sizeof(path), "%s/%s", SKILL_DIR, ent->d_name);
 
         ESP_LOGI(TAG, "Loading skill: %s", ent->d_name);

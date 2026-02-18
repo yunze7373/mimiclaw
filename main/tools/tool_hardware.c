@@ -583,7 +583,13 @@ void tool_hardware_register_handlers(httpd_handle_t server) {
 
 esp_err_t tool_hardware_init(void) {
     /* Init Temperature Sensor */
-    temperature_sensor_config_t temp_sensor = TEMPERATURE_SENSOR_CONFIG_DEFAULT(20, 100);
+    /* Manual config to avoid missing TEMPERATURE_SENSOR_CLK_SRC_DEFAULT macro issue */
+    temperature_sensor_config_t temp_sensor = {
+        .range_min = 20,
+        .range_max = 100,
+        /* Leave clk_src to 0 (default) or attempt RC_FAST if needed */
+        .clk_src = 0, 
+    };
     if (temperature_sensor_install(&temp_sensor, &temp_handle) == ESP_OK) {
         temperature_sensor_enable(temp_handle);
         ESP_LOGI(TAG, "Temperature sensor initialized");
@@ -598,7 +604,7 @@ esp_err_t tool_hardware_init(void) {
     if (adc_oneshot_new_unit(&adc_init_cfg, &s_adc_handle) == ESP_OK) {
         ESP_LOGI(TAG, "ADC1 oneshot initialized");
 
-        /* Try to create calibration handle */
+        /* Use Curve Fitting (standard for ESP32-S3) */
         adc_cali_curve_fitting_config_t cali_cfg = {
             .unit_id = MIMI_ADC_UNIT,
             .atten = MIMI_ADC_DEFAULT_ATTEN,
