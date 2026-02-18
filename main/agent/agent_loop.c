@@ -52,13 +52,48 @@ static cJSON *build_assistant_content(const llm_response_t *resp)
     return content;
 }
 
+/* Send a status message to the frontend */
+static void send_status_msg(const char *channel, const char *chat_id, const char *text)
+{
+    /* Construct JSON manually: {"type":"status","content":"...","chat_id":"..."} */
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", "status");
+    cJSON_AddStringToObject(root, "content", text);
+    cJSON_AddStringToObject(root, "chat_id", chat_id);
+    
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+
+    if (json) {
+        mimi_msg_t out = {0};
+        strncpy(out.channel, channel, sizeof(out.channel) - 1);
+        strncpy(out.chat_id, chat_id, sizeof(out.chat_id) - 1);
+        
+        /* Prepend \x1F for raw JSON mode */
+        size_t jlen = strlen(json);
+        out.content = malloc(jlen + 2);
+        if (out.content) {
+            out.content[0] = '\x1F';
+            memcpy(out.content + 1, json, jlen);
+            out.content[jlen + 1] = '\0';
+            message_bus_push_outbound(&out);
+        }
+        free(json);
+    }
+}
+
 /* Build the user message with tool_result blocks */
-static cJSON *build_tool_results(const llm_response_t *resp, char *tool_output, size_t tool_output_size)
+static cJSON *build_tool_results(const llm_response_t *resp, char *tool_output, size_t tool_output_size, const char *channel, const char *chat_id)
 {
     cJSON *content = cJSON_CreateArray();
 
     for (int i = 0; i < resp->call_count; i++) {
         const llm_tool_call_t *call = &resp->calls[i];
+
+        /* Notify frontend */
+        char status_buf[64];
+        snprintf(status_buf, sizeof(status_buf), "Using tool: %s...", call->name);
+        send_status_msg(channel, chat_id, status_buf);
 
         /* Execute tool */
         tool_output[0] = '\0';
@@ -261,7 +296,7 @@ void agent_loop_task(void *pvParameters)
             cJSON_AddItemToArray(messages, asst_msg);
 
             /* Execute tools and append results */
-            cJSON *tool_results = build_tool_results(&resp, tool_output, TOOL_OUTPUT_SIZE);
+            cJSON *tool_results = build_tool_results(&resp, tool_output, TOOL_OUTPUT_SIZE, msg.channel, msg.chat_id);
             cJSON *result_msg = cJSON_CreateObject();
             cJSON_AddStringToObject(result_msg, "role", "user");
             cJSON_AddItemToObject(result_msg, "content", tool_results);
