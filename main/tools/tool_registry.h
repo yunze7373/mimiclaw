@@ -22,6 +22,12 @@ esp_err_t tool_registry_init(void);
 void tool_registry_register(const mimi_tool_t *tool);
 
 /**
+ * Unregister a tool by name.
+ * Safe to call repeatedly; no-op if tool does not exist.
+ */
+void tool_registry_unregister(const char *name);
+
+/**
  * Rebuild the cached tools JSON array.
  * Call after dynamically registering new tools.
  */

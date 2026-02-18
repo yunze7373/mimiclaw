@@ -36,12 +36,34 @@ static char *s_tools_json = NULL;  /* cached JSON array string */
 
 void tool_registry_register(const mimi_tool_t *tool)
 {
+    for (int i = 0; i < s_tool_count; i++) {
+        if (strcmp(s_tools[i].name, tool->name) == 0) {
+            ESP_LOGW(TAG, "Tool already exists, skip: %s", tool->name);
+            return;
+        }
+    }
     if (s_tool_count >= MAX_TOOLS) {
         ESP_LOGE(TAG, "Tool registry full");
         return;
     }
     s_tools[s_tool_count++] = *tool;
     ESP_LOGI(TAG, "Registered tool: %s", tool->name);
+}
+
+void tool_registry_unregister(const char *name)
+{
+    if (!name || !name[0]) return;
+
+    for (int i = 0; i < s_tool_count; i++) {
+        if (strcmp(s_tools[i].name, name) == 0) {
+            for (int j = i; j < s_tool_count - 1; j++) {
+                s_tools[j] = s_tools[j + 1];
+            }
+            s_tool_count--;
+            ESP_LOGI(TAG, "Unregistered tool: %s", name);
+            return;
+        }
+    }
 }
 
 void tool_registry_rebuild_json(void)

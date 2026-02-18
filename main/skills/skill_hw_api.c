@@ -1,215 +1,151 @@
-/*
- * skill_hw_api.c — Hardware API for Lua skills
- *
- * Exposes hw.* functions to Lua scripts so they can interact with
- * GPIO, ADC, I2C, SPI, PWM, UART, and more.
- */
-
 #include "skills/skill_hw_api.h"
 
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+
 #include "lua.h"
-#include "lualib.h"
 #include "lauxlib.h"
 
 #include "esp_log.h"
+#include "esp_err.h"
+#include "esp_system.h"
 #include "driver/gpio.h"
-#include "driver/ledc.h"
 #include "driver/i2c.h"
-#include "esp_adc/adc_oneshot.h"
-#include "esp_adc/adc_cali.h"
-#include "esp_adc/adc_cali_scheme.h"
 #include "driver/uart.h"
+#include "driver/ledc.h"
+#include "esp_adc/adc_oneshot.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "mimi_config.h"
+#include "skills/skill_resource_manager.h"
 
 static const char *TAG = "skill_hw";
 
-/* ── Shared I2C state (lazy init) ─────────────────────── */
+static skill_permissions_t s_permissions[SKILL_MAX_SLOTS];
 
-static bool s_i2c_initialized = false;
-static i2c_port_t s_i2c_port = I2C_NUM_0;
+typedef struct {
+    bool inited;
+    i2c_port_t port;
+    int sda;
+    int scl;
+    int freq_hz;
+    char bus[16];
+} i2c_ctx_t;
 
-/* ── GPIO ──────────────────────────────────────────────── */
+static i2c_ctx_t s_i2c_ctx[SKILL_MAX_SLOTS];
 
-/* hw.gpio_set_mode(pin, mode)
- * mode: "input", "output", "input_pullup", "input_pulldown" */
+static int up_skill_id(lua_State *L)
+{
+    return (int)lua_tointeger(L, lua_upvalueindex(1));
+}
+
+static bool has_perm_gpio(int skill_id, int pin)
+{
+    char key[16];
+    snprintf(key, sizeof(key), "%d", pin);
+    return skill_perm_contains(s_permissions[skill_id].gpio, s_permissions[skill_id].gpio_count, key);
+}
+
+static bool has_perm_i2c(int skill_id, const char *bus)
+{
+    return skill_perm_contains(s_permissions[skill_id].i2c, s_permissions[skill_id].i2c_count, bus);
+}
+
+static bool has_perm_uart(int skill_id, int uart_port)
+{
+    char key[16];
+    snprintf(key, sizeof(key), "uart%d", uart_port);
+    return skill_perm_contains(s_permissions[skill_id].uart, s_permissions[skill_id].uart_count, key);
+}
+
+static bool has_perm_pwm(int skill_id, int pin)
+{
+    char key[16];
+    snprintf(key, sizeof(key), "%d", pin);
+    return skill_perm_contains(s_permissions[skill_id].pwm, s_permissions[skill_id].pwm_count, key);
+}
+
+static bool has_perm_adc(int skill_id, int ch)
+{
+    char key[16];
+    snprintf(key, sizeof(key), "%d", ch);
+    return skill_perm_contains(s_permissions[skill_id].adc, s_permissions[skill_id].adc_count, key);
+}
+
 static int l_gpio_set_mode(lua_State *L)
 {
+    int skill_id = up_skill_id(L);
     int pin = (int)luaL_checkinteger(L, 1);
     const char *mode = luaL_checkstring(L, 2);
 
-    gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << pin),
+    if (!has_perm_gpio(skill_id, pin)) {
+        return luaL_error(L, "permission denied: gpio %d", pin);
+    }
+    if (skill_resmgr_acquire_gpio(skill_id, pin) != ESP_OK) {
+        return luaL_error(L, "gpio conflict: %d", pin);
+    }
+
+    gpio_config_t cfg = {
+        .pin_bit_mask = 1ULL << pin,
+        .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
+    if (strcmp(mode, "output") == 0) cfg.mode = GPIO_MODE_OUTPUT;
+    else if (strcmp(mode, "input_pullup") == 0) cfg.pull_up_en = GPIO_PULLUP_ENABLE;
+    else if (strcmp(mode, "input_pulldown") == 0) cfg.pull_down_en = GPIO_PULLDOWN_ENABLE;
 
-    if (strcmp(mode, "output") == 0) {
-        io_conf.mode = GPIO_MODE_OUTPUT;
-    } else if (strcmp(mode, "input_pullup") == 0) {
-        io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-    } else if (strcmp(mode, "input_pulldown") == 0) {
-        io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
-    } else {
-        io_conf.mode = GPIO_MODE_INPUT;
-    }
-
-    esp_err_t ret = gpio_config(&io_conf);
+    esp_err_t ret = gpio_config(&cfg);
     lua_pushboolean(L, ret == ESP_OK);
     return 1;
 }
 
-/* hw.gpio_read(pin) → 0 or 1 */
 static int l_gpio_read(lua_State *L)
 {
+    int skill_id = up_skill_id(L);
     int pin = (int)luaL_checkinteger(L, 1);
+    if (!has_perm_gpio(skill_id, pin)) return luaL_error(L, "permission denied: gpio %d", pin);
     lua_pushinteger(L, gpio_get_level(pin));
     return 1;
 }
 
-/* hw.gpio_write(pin, value) */
 static int l_gpio_write(lua_State *L)
 {
+    int skill_id = up_skill_id(L);
     int pin = (int)luaL_checkinteger(L, 1);
     int val = (int)luaL_checkinteger(L, 2);
+    if (!has_perm_gpio(skill_id, pin)) return luaL_error(L, "permission denied: gpio %d", pin);
+    if (skill_resmgr_acquire_gpio(skill_id, pin) != ESP_OK) return luaL_error(L, "gpio conflict: %d", pin);
     gpio_set_level(pin, val ? 1 : 0);
     return 0;
 }
 
-/* ── ADC ───────────────────────────────────────────────── */
-
-/* hw.adc_read(channel) → {raw=N, voltage_mv=N} */
-static int l_adc_read(lua_State *L)
-{
-    int channel = (int)luaL_checkinteger(L, 1);
-
-    if (channel < 0 || channel > 9) {
-        return luaL_error(L, "ADC channel must be 0-9");
-    }
-
-    /* One-shot ADC read */
-    adc_oneshot_unit_handle_t handle;
-    adc_oneshot_unit_init_cfg_t init_cfg = {
-        .unit_id = ADC_UNIT_1,
-    };
-    esp_err_t ret = adc_oneshot_new_unit(&init_cfg, &handle);
-    if (ret != ESP_OK) {
-        return luaL_error(L, "ADC unit init failed");
-    }
-
-    adc_oneshot_chan_cfg_t chan_cfg = {
-        .atten = ADC_ATTEN_DB_12,
-        .bitwidth = ADC_BITWIDTH_12,
-    };
-    adc_oneshot_config_channel(handle, channel, &chan_cfg);
-
-    int raw = 0;
-    adc_oneshot_read(handle, channel, &raw);
-
-    /* Simple voltage estimate: 3100mV range at 12-bit */
-    int voltage_mv = (raw * 3100) / 4095;
-
-    adc_oneshot_del_unit(handle);
-
-    lua_newtable(L);
-    lua_pushinteger(L, raw);
-    lua_setfield(L, -2, "raw");
-    lua_pushinteger(L, voltage_mv);
-    lua_setfield(L, -2, "voltage_mv");
-    return 1;
-}
-
-/* ── PWM ───────────────────────────────────────────────── */
-
-/* hw.pwm_set(pin, freq_hz, duty_percent) */
-static int l_pwm_set(lua_State *L)
-{
-    int pin = (int)luaL_checkinteger(L, 1);
-    int freq = (int)luaL_optinteger(L, 2, 5000);
-    lua_Number duty_pct = luaL_optnumber(L, 3, 50.0);
-
-    /* Use channels 4-7 for Lua skills (0-3 reserved for C tools) */
-    static int s_lua_pwm_pins[4] = {-1, -1, -1, -1};
-    int ch = -1;
-
-    /* Find existing or free channel */
-    for (int i = 0; i < 4; i++) {
-        if (s_lua_pwm_pins[i] == pin) { ch = i; break; }
-    }
-    if (ch < 0) {
-        for (int i = 0; i < 4; i++) {
-            if (s_lua_pwm_pins[i] < 0) { ch = i; break; }
-        }
-    }
-    if (ch < 0) {
-        return luaL_error(L, "No free Lua PWM channel (max 4)");
-    }
-
-    ledc_channel_t ledc_ch = LEDC_CHANNEL_4 + ch;
-
-    ledc_timer_config_t timer_cfg = {
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .timer_num = LEDC_TIMER_2, /* Separate timer for Lua skills */
-        .duty_resolution = LEDC_TIMER_13_BIT,
-        .freq_hz = freq,
-        .clk_cfg = LEDC_AUTO_CLK,
-    };
-    ledc_timer_config(&timer_cfg);
-
-    uint32_t duty_max = (1U << 13) - 1;
-    uint32_t duty = (uint32_t)(duty_max * duty_pct / 100.0);
-
-    ledc_channel_config_t ch_cfg = {
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .channel = ledc_ch,
-        .timer_sel = LEDC_TIMER_2,
-        .gpio_num = pin,
-        .duty = duty,
-        .hpoint = 0,
-    };
-    ledc_channel_config(&ch_cfg);
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, ledc_ch, duty);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, ledc_ch);
-
-    s_lua_pwm_pins[ch] = pin;
-    lua_pushboolean(L, 1);
-    return 1;
-}
-
-/* hw.pwm_stop(pin) */
-static int l_pwm_stop(lua_State *L)
-{
-    int pin = (int)luaL_checkinteger(L, 1);
-    static int s_lua_pwm_pins[4] = {-1, -1, -1, -1};
-
-    for (int i = 0; i < 4; i++) {
-        if (s_lua_pwm_pins[i] == pin) {
-            ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_4 + i, 0);
-            s_lua_pwm_pins[i] = -1;
-            break;
-        }
-    }
-    return 0;
-}
-
-/* ── I2C ───────────────────────────────────────────────── */
-
-/* hw.i2c_init(sda, scl, freq_hz) */
 static int l_i2c_init(lua_State *L)
 {
-    int sda = (int)luaL_checkinteger(L, 1);
-    int scl = (int)luaL_checkinteger(L, 2);
-    int freq = (int)luaL_optinteger(L, 3, 100000);
+    int skill_id = up_skill_id(L);
+    const char *bus = luaL_optstring(L, 1, "i2c0");
+    int sda = (int)luaL_optinteger(L, 2, 8);
+    int scl = (int)luaL_optinteger(L, 3, 9);
+    int freq_hz = (int)luaL_optinteger(L, 4, 100000);
 
-    if (s_i2c_initialized) {
-        i2c_driver_delete(s_i2c_port);
-        s_i2c_initialized = false;
+    if (!has_perm_i2c(skill_id, bus)) return luaL_error(L, "permission denied: i2c %s", bus);
+    if (skill_resmgr_acquire_i2c(skill_id, bus, freq_hz) != ESP_OK) {
+        return luaL_error(L, "i2c conflict: %s", bus);
     }
+
+    i2c_ctx_t *ctx = &s_i2c_ctx[skill_id];
+    if (ctx->inited) {
+        i2c_driver_delete(ctx->port);
+        ctx->inited = false;
+    }
+
+    ctx->port = I2C_NUM_0;
+    ctx->sda = sda;
+    ctx->scl = scl;
+    ctx->freq_hz = freq_hz;
+    snprintf(ctx->bus, sizeof(ctx->bus), "%s", bus);
 
     i2c_config_t conf = {
         .mode = I2C_MODE_MASTER,
@@ -217,169 +153,208 @@ static int l_i2c_init(lua_State *L)
         .scl_io_num = scl,
         .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = freq,
+        .master.clk_speed = freq_hz,
     };
-
-    esp_err_t ret = i2c_param_config(s_i2c_port, &conf);
-    if (ret != ESP_OK) {
-        return luaL_error(L, "I2C config failed");
+    esp_err_t ret = i2c_param_config(ctx->port, &conf);
+    if (ret == ESP_OK) {
+        ret = i2c_driver_install(ctx->port, I2C_MODE_MASTER, 0, 0, 0);
     }
-
-    ret = i2c_driver_install(s_i2c_port, I2C_MODE_MASTER, 0, 0, 0);
-    if (ret != ESP_OK) {
-        return luaL_error(L, "I2C driver install failed");
-    }
-
-    s_i2c_initialized = true;
+    if (ret != ESP_OK) return luaL_error(L, "i2c init failed: %s", esp_err_to_name(ret));
+    ctx->inited = true;
     lua_pushboolean(L, 1);
     return 1;
 }
 
-/* hw.i2c_read(addr, reg, len) → table of bytes */
 static int l_i2c_read(lua_State *L)
 {
-    if (!s_i2c_initialized) {
-        return luaL_error(L, "I2C not initialized, call hw.i2c_init() first");
-    }
+    int skill_id = up_skill_id(L);
+    const char *bus = luaL_optstring(L, 1, "i2c0");
+    int addr = (int)luaL_checkinteger(L, 2);
+    int reg = (int)luaL_checkinteger(L, 3);
+    int len = (int)luaL_checkinteger(L, 4);
+    if (!has_perm_i2c(skill_id, bus)) return luaL_error(L, "permission denied: i2c %s", bus);
+    i2c_ctx_t *ctx = &s_i2c_ctx[skill_id];
+    if (!ctx->inited || strcmp(ctx->bus, bus) != 0) return luaL_error(L, "i2c not initialized: %s", bus);
+    if (len <= 0 || len > 256) return luaL_error(L, "invalid i2c read len");
 
-    int addr = (int)luaL_checkinteger(L, 1);
-    int reg = (int)luaL_checkinteger(L, 2);
-    int len = (int)luaL_checkinteger(L, 3);
-
-    if (len <= 0 || len > 256) {
-        return luaL_error(L, "I2C read length must be 1-256");
-    }
-
-    uint8_t reg_byte = (uint8_t)reg;
+    uint8_t reg_b = (uint8_t)reg;
     uint8_t *buf = malloc(len);
-    if (!buf) {
-        return luaL_error(L, "Out of memory");
-    }
-
-    esp_err_t ret = i2c_master_write_read_device(
-        s_i2c_port, addr, &reg_byte, 1, buf, len, pdMS_TO_TICKS(100));
-
+    if (!buf) return luaL_error(L, "no memory");
+    esp_err_t ret = i2c_master_write_read_device(ctx->port, addr, &reg_b, 1, buf, len, pdMS_TO_TICKS(100));
     if (ret != ESP_OK) {
         free(buf);
-        return luaL_error(L, "I2C read failed: %s", esp_err_to_name(ret));
+        return luaL_error(L, "i2c read failed: %s", esp_err_to_name(ret));
     }
-
-    lua_newtable(L);
-    for (int i = 0; i < len; i++) {
-        lua_pushinteger(L, buf[i]);
-        lua_rawseti(L, -2, i + 1);
-    }
-
+    lua_pushlstring(L, (const char *)buf, len);
     free(buf);
     return 1;
 }
 
-/* hw.i2c_write(addr, reg, data_table) */
 static int l_i2c_write(lua_State *L)
 {
-    if (!s_i2c_initialized) {
-        return luaL_error(L, "I2C not initialized, call hw.i2c_init() first");
-    }
-
-    int addr = (int)luaL_checkinteger(L, 1);
-    int reg = (int)luaL_checkinteger(L, 2);
-
-    luaL_checktype(L, 3, LUA_TTABLE);
-    int len = (int)lua_rawlen(L, 3);
+    int skill_id = up_skill_id(L);
+    const char *bus = luaL_optstring(L, 1, "i2c0");
+    int addr = (int)luaL_checkinteger(L, 2);
+    int reg = (int)luaL_checkinteger(L, 3);
+    size_t len = 0;
+    const char *payload = luaL_checklstring(L, 4, &len);
+    if (!has_perm_i2c(skill_id, bus)) return luaL_error(L, "permission denied: i2c %s", bus);
+    i2c_ctx_t *ctx = &s_i2c_ctx[skill_id];
+    if (!ctx->inited || strcmp(ctx->bus, bus) != 0) return luaL_error(L, "i2c not initialized: %s", bus);
 
     uint8_t *buf = malloc(len + 1);
-    if (!buf) {
-        return luaL_error(L, "Out of memory");
-    }
-
+    if (!buf) return luaL_error(L, "no memory");
     buf[0] = (uint8_t)reg;
-    for (int i = 0; i < len; i++) {
-        lua_rawgeti(L, 3, i + 1);
-        buf[i + 1] = (uint8_t)lua_tointeger(L, -1);
-        lua_pop(L, 1);
-    }
-
-    esp_err_t ret = i2c_master_write_to_device(
-        s_i2c_port, addr, buf, len + 1, pdMS_TO_TICKS(100));
-
+    memcpy(buf + 1, payload, len);
+    esp_err_t ret = i2c_master_write_to_device(ctx->port, addr, buf, (int)len + 1, pdMS_TO_TICKS(100));
     free(buf);
     lua_pushboolean(L, ret == ESP_OK);
     return 1;
 }
 
-/* ── UART ──────────────────────────────────────────────── */
-
-/* hw.uart_send(port, data_string) */
 static int l_uart_send(lua_State *L)
 {
+    int skill_id = up_skill_id(L);
     int port = (int)luaL_optinteger(L, 1, 1);
-    size_t len;
+    size_t len = 0;
     const char *data = luaL_checklstring(L, 2, &len);
-
-    if (port < 0 || port > 2) {
-        return luaL_error(L, "UART port must be 0-2");
-    }
-
-    int written = uart_write_bytes(port, data, len);
-    lua_pushinteger(L, written);
+    if (!has_perm_uart(skill_id, port)) return luaL_error(L, "permission denied: uart%d", port);
+    int n = uart_write_bytes(port, data, len);
+    lua_pushinteger(L, n);
     return 1;
 }
 
-/* ── Utility ───────────────────────────────────────────── */
+static int l_pwm_set(lua_State *L)
+{
+    int skill_id = up_skill_id(L);
+    int pin = (int)luaL_checkinteger(L, 1);
+    int freq = (int)luaL_optinteger(L, 2, 5000);
+    lua_Number duty_pct = luaL_optnumber(L, 3, 50.0);
+    if (!has_perm_pwm(skill_id, pin)) return luaL_error(L, "permission denied: pwm pin %d", pin);
+    if (skill_resmgr_acquire_gpio(skill_id, pin) != ESP_OK) return luaL_error(L, "pwm pin conflict: %d", pin);
 
-/* hw.delay_ms(ms) */
+    ledc_timer_config_t timer_cfg = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .timer_num = LEDC_TIMER_2,
+        .duty_resolution = LEDC_TIMER_13_BIT,
+        .freq_hz = freq,
+        .clk_cfg = LEDC_AUTO_CLK,
+    };
+    ESP_ERROR_CHECK(ledc_timer_config(&timer_cfg));
+    ledc_channel_config_t ch_cfg = {
+        .gpio_num = pin,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .channel = LEDC_CHANNEL_4,
+        .timer_sel = LEDC_TIMER_2,
+        .duty = (uint32_t)(((1U << 13) - 1) * duty_pct / 100.0),
+        .hpoint = 0,
+    };
+    ESP_ERROR_CHECK(ledc_channel_config(&ch_cfg));
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+static int l_pwm_stop(lua_State *L)
+{
+    (void)up_skill_id(L);
+    int pin = (int)luaL_checkinteger(L, 1);
+    ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_4, 0);
+    gpio_set_level(pin, 0);
+    return 0;
+}
+
+static int l_adc_read(lua_State *L)
+{
+    int skill_id = up_skill_id(L);
+    int ch = (int)luaL_checkinteger(L, 1);
+    if (!has_perm_adc(skill_id, ch)) return luaL_error(L, "permission denied: adc %d", ch);
+    adc_oneshot_unit_handle_t handle = NULL;
+    adc_oneshot_unit_init_cfg_t init_cfg = {.unit_id = ADC_UNIT_1};
+    if (adc_oneshot_new_unit(&init_cfg, &handle) != ESP_OK) return luaL_error(L, "adc init failed");
+    adc_oneshot_chan_cfg_t cfg = {.atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_12};
+    adc_oneshot_config_channel(handle, ch, &cfg);
+    int raw = 0;
+    adc_oneshot_read(handle, ch, &raw);
+    adc_oneshot_del_unit(handle);
+    lua_newtable(L);
+    lua_pushinteger(L, raw);
+    lua_setfield(L, -2, "raw");
+    lua_pushinteger(L, (raw * 3100) / 4095);
+    lua_setfield(L, -2, "voltage_mv");
+    return 1;
+}
+
 static int l_delay_ms(lua_State *L)
 {
     int ms = (int)luaL_checkinteger(L, 1);
-    if (ms > 0) {
-        vTaskDelay(pdMS_TO_TICKS(ms));
-    }
+    if (ms < 0) ms = 0;
+    if (ms > 50) ms = 50;
+    if (ms > 0) vTaskDelay(pdMS_TO_TICKS(ms));
     return 0;
 }
 
-/* hw.log(message) */
 static int l_log(lua_State *L)
 {
+    int skill_id = up_skill_id(L);
     const char *msg = luaL_checkstring(L, 1);
-    ESP_LOGI(TAG, "[Lua] %s", msg);
+    ESP_LOGI(TAG, "[skill=%d] %s", skill_id, msg);
     return 0;
 }
 
-/* hw.free_heap() → internal free bytes */
 static int l_free_heap(lua_State *L)
 {
     lua_pushinteger(L, (lua_Integer)esp_get_free_heap_size());
     return 1;
 }
 
-/* ── Registration ──────────────────────────────────────── */
-
-static const luaL_Reg hw_lib[] = {
-    /* GPIO */
-    {"gpio_set_mode", l_gpio_set_mode},
-    {"gpio_read",     l_gpio_read},
-    {"gpio_write",    l_gpio_write},
-    /* ADC */
-    {"adc_read",      l_adc_read},
-    /* PWM */
-    {"pwm_set",       l_pwm_set},
-    {"pwm_stop",      l_pwm_stop},
-    /* I2C */
-    {"i2c_init",      l_i2c_init},
-    {"i2c_read",      l_i2c_read},
-    {"i2c_write",     l_i2c_write},
-    /* UART */
-    {"uart_send",     l_uart_send},
-    /* Utility */
-    {"delay_ms",      l_delay_ms},
-    {"log",           l_log},
-    {"free_heap",     l_free_heap},
-    /* Sentinel */
-    {NULL, NULL},
-};
-
-void skill_hw_api_register(lua_State *L)
+static int l_timer_stub(lua_State *L)
 {
-    luaL_newlib(L, hw_lib);
-    lua_setglobal(L, "hw");
+    (void)L;
+    return luaL_error(L, "timer callbacks are not enabled in this build yet");
+}
+
+static int l_interrupt_stub(lua_State *L)
+{
+    (void)L;
+    return luaL_error(L, "gpio interrupt callbacks are not enabled in this build yet");
+}
+
+typedef struct {
+    const char *name;
+    lua_CFunction fn;
+} hw_fn_t;
+
+void skill_hw_api_push_table(lua_State *L, int skill_id, const skill_permissions_t *permissions)
+{
+    if (skill_id >= 0 && skill_id < SKILL_MAX_SLOTS && permissions) {
+        s_permissions[skill_id] = *permissions;
+    }
+
+    static const hw_fn_t fns[] = {
+        {"gpio_set_mode", l_gpio_set_mode},
+        {"gpio_read", l_gpio_read},
+        {"gpio_write", l_gpio_write},
+        {"adc_read", l_adc_read},
+        {"pwm_set", l_pwm_set},
+        {"pwm_stop", l_pwm_stop},
+        {"i2c_init", l_i2c_init},
+        {"i2c_read", l_i2c_read},
+        {"i2c_write", l_i2c_write},
+        {"uart_send", l_uart_send},
+        {"delay_ms", l_delay_ms},
+        {"log", l_log},
+        {"free_heap", l_free_heap},
+        {"timer_every", l_timer_stub},
+        {"timer_once", l_timer_stub},
+        {"timer_cancel", l_timer_stub},
+        {"gpio_attach_interrupt", l_interrupt_stub},
+        {"gpio_detach_interrupt", l_interrupt_stub},
+    };
+
+    lua_newtable(L);
+    for (size_t i = 0; i < sizeof(fns) / sizeof(fns[0]); i++) {
+        lua_pushinteger(L, skill_id);
+        lua_pushcclosure(L, fns[i].fn, 1);
+        lua_setfield(L, -2, fns[i].name);
+    }
 }

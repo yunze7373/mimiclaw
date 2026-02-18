@@ -32,6 +32,7 @@ idf_component_register(
         "tools/tool_network.c"
         "skills/skill_engine.c"
         "skills/skill_hw_api.c"
+        "skills/skill_resource_manager.c"
         "cron/cron_service.c"
         "heartbeat/heartbeat.c"
         "web_ui/web_ui.c"
