@@ -24,6 +24,7 @@
 #include "esp_heap_caps.h"
 
 static const char *TAG = "web_ui";
+static httpd_handle_t s_http_server = NULL;
 
 /* WebSocket port - should match gateway/ws_server.c WS_PORT */
 #ifndef WS_PORT
@@ -2110,8 +2111,7 @@ esp_err_t web_ui_init(void)
     config.max_open_sockets = 3;  /* keep low — only serves HTML/JSON */
     config.max_uri_handlers = 40;
 
-    httpd_handle_t server = NULL;
-    esp_err_t ret = httpd_start(&server, &config);
+    esp_err_t ret = httpd_start(&s_http_server, &config);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start HTTP server");
         return ret;
@@ -2122,163 +2122,163 @@ esp_err_t web_ui_init(void)
         .method = HTTP_GET,
         .handler = index_handler,
     };
-    httpd_register_uri_handler(server, &index_uri);
+    httpd_register_uri_handler(s_http_server, &index_uri);
 
     httpd_uri_t favicon_uri = {
         .uri = "/favicon.ico",
         .method = HTTP_GET,
         .handler = favicon_handler,
     };
-    httpd_register_uri_handler(server, &favicon_uri);
+    httpd_register_uri_handler(s_http_server, &favicon_uri);
 
     httpd_uri_t api_status_uri = {
         .uri = "/api/status",
         .method = HTTP_GET,
         .handler = status_handler,
     };
-    httpd_register_uri_handler(server, &api_status_uri);
+    httpd_register_uri_handler(s_http_server, &api_status_uri);
 
     httpd_uri_t api_config_get_uri = {
         .uri = "/api/config",
         .method = HTTP_GET,
         .handler = config_get_handler,
     };
-    httpd_register_uri_handler(server, &api_config_get_uri);
+    httpd_register_uri_handler(s_http_server, &api_config_get_uri);
 
     httpd_uri_t api_config_post_uri = {
         .uri = "/api/config",
         .method = HTTP_POST,
         .handler = config_post_handler,
     };
-    httpd_register_uri_handler(server, &api_config_post_uri);
+    httpd_register_uri_handler(s_http_server, &api_config_post_uri);
 
     httpd_uri_t api_reboot_uri = {
         .uri = "/api/reboot",
         .method = HTTP_POST,
         .handler = reboot_handler,
     };
-    httpd_register_uri_handler(server, &api_reboot_uri);
+    httpd_register_uri_handler(s_http_server, &api_reboot_uri);
 
     httpd_uri_t api_agent_get_uri = {
         .uri = "/api/agent",
         .method = HTTP_GET,
         .handler = agent_get_handler,
     };
-    httpd_register_uri_handler(server, &api_agent_get_uri);
+    httpd_register_uri_handler(s_http_server, &api_agent_get_uri);
 
     httpd_uri_t api_agent_post_uri = {
         .uri = "/api/agent",
         .method = HTTP_POST,
         .handler = agent_post_handler,
     };
-    httpd_register_uri_handler(server, &api_agent_post_uri);
+    httpd_register_uri_handler(s_http_server, &api_agent_post_uri);
 
     httpd_uri_t api_search_key_get = {
         .uri = "/api/tools/search_key",
         .method = HTTP_GET,
         .handler = search_key_get_handler,
     };
-    httpd_register_uri_handler(server, &api_search_key_get);
+    httpd_register_uri_handler(s_http_server, &api_search_key_get);
 
     httpd_uri_t api_search_key_post = {
         .uri = "/api/tools/search_key",
         .method = HTTP_POST,
         .handler = search_key_post_handler,
     };
-    httpd_register_uri_handler(server, &api_search_key_post);
+    httpd_register_uri_handler(s_http_server, &api_search_key_post);
 
     httpd_uri_t api_cron_get = {
         .uri = "/api/tools/cron",
         .method = HTTP_GET,
         .handler = cron_get_handler,
     };
-    httpd_register_uri_handler(server, &api_cron_get);
+    httpd_register_uri_handler(s_http_server, &api_cron_get);
 
     httpd_uri_t api_cron_del = {
         .uri = "/api/tools/cron",
         .method = HTTP_DELETE,
         .handler = cron_delete_handler,
     };
-    httpd_register_uri_handler(server, &api_cron_del);
+    httpd_register_uri_handler(s_http_server, &api_cron_del);
 
     httpd_uri_t api_skills_get = {
         .uri = "/api/skills",
         .method = HTTP_GET,
         .handler = skills_get_handler,
     };
-    httpd_register_uri_handler(server, &api_skills_get);
+    httpd_register_uri_handler(s_http_server, &api_skills_get);
 
     httpd_uri_t api_skills_install_status = {
         .uri = "/api/skills/install_status",
         .method = HTTP_GET,
         .handler = skills_install_status_handler,
     };
-    httpd_register_uri_handler(server, &api_skills_install_status);
+    httpd_register_uri_handler(s_http_server, &api_skills_install_status);
 
     httpd_uri_t api_skills_capabilities = {
         .uri = "/api/skills/capabilities",
         .method = HTTP_GET,
         .handler = skills_capabilities_handler,
     };
-    httpd_register_uri_handler(server, &api_skills_capabilities);
+    httpd_register_uri_handler(s_http_server, &api_skills_capabilities);
 
     httpd_uri_t api_skills_install_history = {
         .uri = "/api/skills/install_history",
         .method = HTTP_GET,
         .handler = skills_install_history_handler,
     };
-    httpd_register_uri_handler(server, &api_skills_install_history);
+    httpd_register_uri_handler(s_http_server, &api_skills_install_history);
 
     httpd_uri_t api_skills_install_history_delete = {
         .uri = "/api/skills/install_history",
         .method = HTTP_DELETE,
         .handler = skills_install_history_delete_handler,
     };
-    httpd_register_uri_handler(server, &api_skills_install_history_delete);
+    httpd_register_uri_handler(s_http_server, &api_skills_install_history_delete);
 
     httpd_uri_t api_skills_install = {
         .uri = "/api/skills/install",
         .method = HTTP_POST,
         .handler = skills_install_handler,
     };
-    httpd_register_uri_handler(server, &api_skills_install);
+    httpd_register_uri_handler(s_http_server, &api_skills_install);
 
     httpd_uri_t api_skills_delete = {
         .uri = "/api/skills",
         .method = HTTP_DELETE,
         .handler = skills_delete_handler,
     };
-    httpd_register_uri_handler(server, &api_skills_delete);
+    httpd_register_uri_handler(s_http_server, &api_skills_delete);
 
     httpd_uri_t api_skills_reload = {
         .uri = "/api/skills/reload",
         .method = HTTP_POST,
         .handler = skills_reload_handler,
     };
-    httpd_register_uri_handler(server, &api_skills_reload);
+    httpd_register_uri_handler(s_http_server, &api_skills_reload);
 
     httpd_uri_t api_peers_get = {
         .uri = "/api/peers",
         .method = HTTP_GET,
         .handler = peers_get_handler,
     };
-    httpd_register_uri_handler(server, &api_peers_get);
+    httpd_register_uri_handler(s_http_server, &api_peers_get);
 
     httpd_uri_t api_peers_sync = {
         .uri = "/api/peers/sync",
         .method = HTTP_POST,
         .handler = peers_sync_handler,
     };
-    httpd_register_uri_handler(server, &api_peers_sync);
+    httpd_register_uri_handler(s_http_server, &api_peers_sync);
 
     httpd_uri_t api_tools_exec = {
         .uri = "/api/tools/exec",
         .method = HTTP_POST,
         .handler = tools_exec_handler,
     };
-    httpd_register_uri_handler(server, &api_tools_exec);
+    httpd_register_uri_handler(s_http_server, &api_tools_exec);
 
-    tool_hardware_register_handlers(server);
+    tool_hardware_register_handlers(s_http_server);
 
 #if CONFIG_MIMI_ENABLE_OTA
     httpd_uri_t api_fw_version = {
@@ -2286,42 +2286,42 @@ esp_err_t web_ui_init(void)
         .method = HTTP_GET,
         .handler = firmware_version_handler,
     };
-    httpd_register_uri_handler(server, &api_fw_version);
+    httpd_register_uri_handler(s_http_server, &api_fw_version);
 
     httpd_uri_t api_fw_status = {
         .uri = "/api/firmware/status",
         .method = HTTP_GET,
         .handler = firmware_status_handler,
     };
-    httpd_register_uri_handler(server, &api_fw_status);
+    httpd_register_uri_handler(s_http_server, &api_fw_status);
 
     httpd_uri_t api_fw_check = {
         .uri = "/api/firmware/check",
         .method = HTTP_POST,
         .handler = firmware_check_handler,
     };
-    httpd_register_uri_handler(server, &api_fw_check);
+    httpd_register_uri_handler(s_http_server, &api_fw_check);
 
     httpd_uri_t api_fw_update = {
         .uri = "/api/firmware/update",
         .method = HTTP_POST,
         .handler = firmware_update_handler,
     };
-    httpd_register_uri_handler(server, &api_fw_update);
+    httpd_register_uri_handler(s_http_server, &api_fw_update);
 
     httpd_uri_t api_fw_confirm = {
         .uri = "/api/firmware/confirm",
         .method = HTTP_POST,
         .handler = firmware_confirm_handler,
     };
-    httpd_register_uri_handler(server, &api_fw_confirm);
+    httpd_register_uri_handler(s_http_server, &api_fw_confirm);
 
     httpd_uri_t api_fw_rollback = {
         .uri = "/api/firmware/rollback",
         .method = HTTP_POST,
         .handler = firmware_rollback_handler,
     };
-    httpd_register_uri_handler(server, &api_fw_rollback);
+    httpd_register_uri_handler(s_http_server, &api_fw_rollback);
 #endif
 
     ESP_LOGI(TAG, "Web UI started on port 80");
@@ -2332,4 +2332,9 @@ esp_err_t web_ui_stop(void)
 {
     // TODO: implement stop
     return ESP_OK;
+}
+
+httpd_handle_t web_ui_get_server(void)
+{
+    return s_http_server;
 }

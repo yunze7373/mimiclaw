@@ -7,9 +7,9 @@
 #include "ha_integration.h"
 #include "mimi_config.h"
 #include "rgb/rgb.h"
+#include "web_ui/web_ui.h"
 
 static const char *TAG = "ha_integration";
-extern httpd_handle_t g_http_server; // Defined in http_server component or web_ui
 
 /* 
  * API: GET /api/ha/state
@@ -125,13 +125,14 @@ esp_err_t ha_integration_init(void)
 
 esp_err_t ha_integration_start(void)
 {
-    if (!g_http_server) {
+    httpd_handle_t server = web_ui_get_server();
+    if (!server) {
         ESP_LOGW(TAG, "HTTP Server not ready, cannot register HA endpoints");
         return ESP_FAIL;
     }
     
-    httpd_register_uri_handler(g_http_server, &ha_state_uri);
-    httpd_register_uri_handler(g_http_server, &ha_control_uri);
+    httpd_register_uri_handler(server, &ha_state_uri);
+    httpd_register_uri_handler(server, &ha_control_uri);
     
     ESP_LOGI(TAG, "HA Integration started. Endpoints registered.");
     return ESP_OK;
