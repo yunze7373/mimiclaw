@@ -136,7 +136,7 @@ esp_err_t zigbee_control_handler(httpd_req_t *req)
 
     cJSON *root = cJSON_Parse(buf);
     if (!root) {
-        httpd_resp_send_400(req);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
         return ESP_FAIL;
     }
 
@@ -167,7 +167,7 @@ esp_err_t zigbee_control_handler(httpd_req_t *req)
     if (response_code == 200) {
         httpd_resp_send(req, "{\"status\":\"ok\"}", -1);
     } else {
-        httpd_resp_send_400(req);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request");
     }
 
     return ESP_OK;
