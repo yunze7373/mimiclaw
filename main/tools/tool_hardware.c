@@ -787,10 +787,8 @@ esp_err_t tool_hardware_init(void) {
 }
 
 /* --- I2S Driver Support (Phase 4) - Legacy API --- */
+#if 0
 static int s_tx_port = -1; /* Amp */
-static int s_rx_port = -1; /* Mic */
-
-static esp_err_t audio_ensure_tx_init(void) {
     if (s_tx_port != -1) return ESP_OK;
 
     i2s_config_t i2s_config = {
@@ -965,4 +963,5 @@ esp_err_t tool_i2s_write(const char *input, char *output, size_t out_len) {
     }
     return ESP_OK;
 }
+#endif
 
