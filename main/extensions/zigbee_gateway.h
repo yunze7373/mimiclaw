@@ -3,6 +3,7 @@
 #include "esp_err.h"
 #include <stdint.h>
 #include <stdbool.h>
+#include "httpd.h"
 
 #define ZIGBEE_MAX_DEVICES 16
 
@@ -63,3 +64,9 @@ esp_err_t zigbee_gateway_permit_join(bool enable);
  * Create a JSON string of all devices. Caller must free.
  */
 char *zigbee_gateway_json(void);
+
+/**
+ * HTTP handlers for Web UI API
+ */
+esp_err_t zigbee_devices_handler(httpd_req_t *req);
+esp_err_t zigbee_control_handler(httpd_req_t *req);

@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "zigbee_gateway.h"
 #include "cJSON.h"
+#include "esp_http_server.h"
 
 static const char *TAG = "zigbee_gateway";
 
@@ -106,4 +107,68 @@ char *zigbee_gateway_json(void)
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     return json;
+}
+
+/* ── HTTP Handlers for Web UI API ───────────────────────────────── */
+
+esp_err_t zigbee_devices_handler(httpd_req_t *req)
+{
+    char *json = zigbee_gateway_json();
+    if (!json) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t ret = httpd_resp_send(req, json, strlen(json));
+    free(json);
+    return ret;
+}
+
+esp_err_t zigbee_control_handler(httpd_req_t *req)
+{
+    char buf[128];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_400(req);
+        return ESP_FAIL;
+    }
+
+    cJSON *addr_item = cJSON_GetObjectItem(root, "address");
+    cJSON *action_item = cJSON_GetObjectItem(root, "action");
+
+    int response_code = 200;
+
+    if (addr_item && action_item) {
+        uint16_t addr = (uint16_t)addr_item->valueint;
+        const char *action = action_item->valuestring;
+
+        if (strcmp(action, "on") == 0) {
+            zigbee_gateway_control_onoff(addr, true);
+        } else if (strcmp(action, "off") == 0) {
+            zigbee_gateway_control_onoff(addr, false);
+        } else if (strcmp(action, "permit_join") == 0) {
+            zigbee_gateway_permit_join(true);
+        } else {
+            response_code = 400;
+        }
+    } else {
+        response_code = 400;
+    }
+
+    cJSON_Delete(root);
+
+    if (response_code == 200) {
+        httpd_resp_send(req, "{\"status\":\"ok\"}", -1);
+    } else {
+        httpd_resp_send_400(req);
+    }
+
+    return ESP_OK;
 }
