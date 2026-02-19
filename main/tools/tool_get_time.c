@@ -15,6 +15,10 @@ static bool sntp_started = false;
 /* Initialize SNTP if not already started */
 static void ensure_sntp(void)
 {
+    if (esp_sntp_enabled()) {
+        sntp_started = true;
+        return;
+    }
     if (sntp_started) return;
 
     ESP_LOGI(TAG, "Initializing SNTP...");
@@ -65,9 +69,11 @@ static void format_local_time(char *out, size_t out_size)
 
 esp_err_t tool_get_time_execute(const char *input_json, char *output, size_t output_size)
 {
+    (void)input_json;
     ESP_LOGI(TAG, "Fetching current time...");
     /* Ensure SNTP is running */
     ensure_sntp();
+    ESP_LOGI(TAG, "SNTP status: %s", esp_sntp_enabled() ? "running" : "stopped");
     
     /* Wait if not synced (only short wait) */
     if (!time_is_valid()) {

@@ -42,7 +42,10 @@ static const char *HTML_PAGE =
 "<head>"
 "  <meta charset='utf-8'>"
 "  <meta name='viewport' content='width=device-width, initial-scale=1'>"
-"  <title>MimiClaw</title>"
+  <title>MimiClaw</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 "  <link rel='icon' href='data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text y=\".9em\" font-size=\"90\">🦊</text></svg>'>"
 "  <style>"
 "    :root {"
@@ -97,7 +100,15 @@ static const char *HTML_PAGE =
 "    .status-item { background: var(--bg); padding: 14px; border-radius: 8px; }"
 "    .status-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }"
 "    .status-value { font-size: 15px; font-weight: 600; }"
-"    /* Chat */"
+    /* Chat */
+    .markdown-body { font-size: 14px; line-height: 1.6; overflow-wrap: break-word; }
+    .markdown-body pre { background: #0d1117; padding: 12px; border-radius: 6px; overflow-x: auto; position: relative; margin-bottom: 10px; }
+    .markdown-body code { font-family: Consolas, Monaco, 'Andale Mono', monospace; font-size: 13px; }
+    .markdown-body p { margin-bottom: 10px; }
+    .markdown-body ul, .markdown-body ol { margin-left: 20px; margin-bottom: 10px; }
+    .markdown-body blockquote { border-left: 4px solid var(--border); padding-left: 10px; color: var(--text-secondary); margin-bottom: 10px; }
+    .copy-btn { position: absolute; top: 4px; right: 4px; padding: 4px 8px; background: #21262d; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; cursor: pointer; font-size: 11px; opacity: 0; transition: opacity 0.2s; }
+    .markdown-body pre:hover .copy-btn { opacity: 1; }
 "    .chat-container { height: calc(100vh - 140px); display: flex; flex-direction: column; }"
 "    .chat-messages { flex: 1; overflow-y: auto; padding: 16px; background: var(--bg); border-radius: 12px; margin-bottom: 16px; }"
 "    .chat-message { max-width: 80%; margin-bottom: 16px; padding: 12px 16px; border-radius: 16px; }"
@@ -716,12 +727,37 @@ static const char *HTML_PAGE =
 "      if (isStream) {"
 "        div.innerHTML = '<span class=\"content-span\">' + content.replace(/\\n/g, '<br>') + '</span>';"
 "      } else {"
-"        div.innerHTML = content.replace(/\\n/g, '<br>');"
+"        if (role === 'assistant' && typeof marked !== 'undefined') {"
+"           div.innerHTML = '<div class=\"markdown-body\">' + marked.parse(content) + '</div>';"
+"           div.querySelectorAll('pre code').forEach((block) => {"
+"               if (typeof hljs !== 'undefined') hljs.highlightElement(block);"
+"           });"
+"           div.querySelectorAll('pre').forEach((pre) => {"
+"               if (pre.querySelector('.copy-btn')) return;"
+"               const code = pre.querySelector('code');"
+"               if (!code) return;"
+"               const btn = document.createElement('button');"
+"               btn.className = 'copy-btn';"
+"               btn.textContent = 'Copy';"
+"               btn.onclick = () => copyToClipboard(code.innerText, btn);"
+"               pre.appendChild(btn);"
+"           });"
+"        } else {"
+"           div.innerHTML = content.replace(/\\n/g, '<br>');"
+"        }"
 "      }"
 "      div.innerHTML += '<div class=\"time\">' + new Date().toLocaleTimeString() + '</div>';"
 "      document.getElementById('chatMessages').appendChild(div);"
 "      document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;"
 "      return div;"
+"    }"
+""
+"    function copyToClipboard(text, btn) {"
+"        navigator.clipboard.writeText(text).then(() => {"
+"            const original = btn.textContent;"
+"            btn.textContent = 'Copied!';"
+"            setTimeout(() => btn.textContent = original, 2000);"
+"        });"
 "    }"
 ""
 "    function sendChat() {"
