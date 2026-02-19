@@ -37,7 +37,7 @@ idf_component_register(
         "skills/skill_resource_manager.c"
         "skills/skill_quota.c"
         "cron/cron_service.c"
-        "heartbeat/heartbeat.c"\r
+        "heartbeat/heartbeat.c"
         "component/component_mgr.c"
         "web_ui/web_ui.c"
     INCLUDE_DIRS
