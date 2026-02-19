@@ -180,7 +180,7 @@
 #define CONFIG_MIMI_ENABLE_MDNS      1
 #endif
 #ifndef CONFIG_MIMI_ENABLE_MCP
-#define CONFIG_MIMI_ENABLE_MCP       1
+#define CONFIG_MIMI_ENABLE_MCP       0
 #endif
 
 /* MCP Client */
