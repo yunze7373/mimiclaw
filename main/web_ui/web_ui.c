@@ -1159,22 +1159,22 @@ static const char *HTML_PAGE =
 "      }\n"
 "    }\n"
 "\n"
-"    async function reloadSkills() {
-      if (!confirm('确定要重载技能引擎吗?')) return;
-      try {
-        const resp = await fetch('/api/skills/reload', { method: 'POST' });
-        if (resp.ok) {
-          showToast('技能引擎已重载', 'success');
-          await loadSkills();
-        } else {
-          showToast('重载失败', 'error');
-        }
-      } catch(e) {
-        showToast('重载请求失败: ' + e.message, 'error');
-      }
-    }
-
-    function showSkillDetails(name) {\n"
+"    async function reloadSkills() {\n"
+"      if (!confirm('确定要重载技能引擎吗?')) return;\n"
+"      try {\n"
+"        const resp = await fetch('/api/skills/reload', { method: 'POST' });\n"
+"        if (resp.ok) {\n"
+"          showToast('技能引擎已重载', 'success');\n"
+"          await loadSkills();\n"
+"        } else {\n"
+"          showToast('重载失败', 'error');\n"
+"        }\n"
+"      } catch(e) {\n"
+"        showToast('重载请求失败: ' + e.message, 'error');\n"
+"      }\n"
+"    }\n"
+"\n"
+"    function showSkillDetails(name) {\n"
 "      const skill = allSkills.find(s => s.name === name);\n"
 "      if (!skill) return;\n"
 "      let details = '名称: ' + skill.name + '\\n';\n"
