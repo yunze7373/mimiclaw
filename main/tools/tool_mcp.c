@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "tool_mcp.h"
-#include "mcp_manager.h"
+#include "agent/mcp_manager.h"
 #include "cJSON.h"
 
 #if CONFIG_MIMI_ENABLE_MCP
