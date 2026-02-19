@@ -188,6 +188,9 @@
 #ifndef CONFIG_MIMI_ENABLE_ZIGBEE
 #define CONFIG_MIMI_ENABLE_ZIGBEE    0
 #endif
+#ifndef CONFIG_MIMI_ENABLE_SSDP
+#define CONFIG_MIMI_ENABLE_SSDP      1
+#endif
 
 /* MCP Client */
 #define MIMI_MCP_SERVER_URL          "ws://192.168.1.10:3000"

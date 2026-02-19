@@ -51,6 +51,7 @@ idf_component_register(
         "crypto/ed25519_verify.c"
         "web_ui/web_ui.c"
         "discovery/mdns_service.c"
+        "discovery/ssdp_service.c"
         "extensions/ha_integration.c"
         "extensions/zigbee_gateway.c"
     INCLUDE_DIRS
