@@ -4,6 +4,7 @@
 #include "cJSON.h"
 #include "esp_log.h"
 #include "esp_http_client.h"
+#include "esp_heap_caps.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -135,7 +136,10 @@ static esp_err_t api_endpoint_execute(const char *input_json, char *output, size
     /* Response buffer */
     api_buf_t buf = {0};
     buf.capacity = 4096;
-    buf.data = malloc(buf.capacity);
+    buf.data = heap_caps_malloc(buf.capacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf.data) {
+        buf.data = malloc(buf.capacity);
+    }
     if (!buf.data) {
         cJSON_Delete(input);
         snprintf(output, output_size, "{\"error\":\"no memory\"}");

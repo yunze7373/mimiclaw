@@ -23,6 +23,7 @@
 #include "skills/board_profile.h"
 #include "skills/skill_rate_limit.h"
 #include "esp_http_client.h"
+#include "esp_heap_caps.h"
 
 static const char *TAG = "skill_hw";
 
@@ -264,7 +265,10 @@ static int l_i2c_read(lua_State *L)
     if (len <= 0 || len > 256) return luaL_error(L, "invalid i2c read len");
 
     uint8_t reg_b = (uint8_t)reg;
-    uint8_t *buf = malloc(len);
+    uint8_t *buf = heap_caps_malloc((size_t)len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf) {
+        buf = malloc(len);
+    }
     if (!buf) return luaL_error(L, "no memory");
     esp_err_t ret = i2c_master_write_read_device(ctx->port, addr, &reg_b, 1, buf, len, pdMS_TO_TICKS(100));
     if (ret != ESP_OK) {
@@ -298,7 +302,10 @@ static int l_i2c_write(lua_State *L)
     i2c_ctx_t *ctx = &s_i2c_ctx[skill_id];
     if (!ctx->inited || strcmp(ctx->bus, bus) != 0) return luaL_error(L, "i2c not initialized: %s", bus);
 
-    uint8_t *buf = malloc(len + 1);
+    uint8_t *buf = heap_caps_malloc((size_t)len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf) {
+        buf = malloc(len + 1);
+    }
     if (!buf) return luaL_error(L, "no memory");
     buf[0] = (uint8_t)reg;
     memcpy(buf + 1, payload, len);
@@ -551,7 +558,10 @@ static int l_i2s_read(lua_State *L)
     int timeout_ms = (int)luaL_optinteger(L, 2, 100);
     int max_bytes = (int)luaL_optinteger(L, 3, 1024);
 
-    uint8_t *buf = malloc(max_bytes);
+    uint8_t *buf = heap_caps_malloc((size_t)max_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf) {
+        buf = malloc(max_bytes);
+    }
     if (!buf) return luaL_error(L, "malloc failed");
 
     esp_err_t ret = i2s_read(port, buf, max_bytes, &bytes_read, pdMS_TO_TICKS(timeout_ms));
@@ -614,7 +624,10 @@ static int l_http_get(lua_State *L)
 
     http_buf_t buf = {0};
     buf.capacity = 8192;
-    buf.data = malloc(buf.capacity);
+    buf.data = heap_caps_malloc((size_t)buf.capacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf.data) {
+        buf.data = malloc(buf.capacity);
+    }
     if (!buf.data) return luaL_error(L, "no memory");
     buf.data[0] = '\0';
 
@@ -662,7 +675,10 @@ static int l_http_post(lua_State *L)
 
     http_buf_t buf = {0};
     buf.capacity = 8192;
-    buf.data = malloc(buf.capacity);
+    buf.data = heap_caps_malloc((size_t)buf.capacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf.data) {
+        buf.data = malloc(buf.capacity);
+    }
     if (!buf.data) return luaL_error(L, "no memory");
     buf.data[0] = '\0';
 

@@ -20,6 +20,23 @@ static const char *TAG = "agent";
 
 #define TOOL_OUTPUT_SIZE  (8 * 1024)
 
+static void log_heap_snapshot(const char *phase)
+{
+    multi_heap_info_t internal_info = {0};
+    multi_heap_info_t psram_info = {0};
+    heap_caps_get_info(&internal_info, MALLOC_CAP_INTERNAL);
+    heap_caps_get_info(&psram_info, MALLOC_CAP_SPIRAM);
+
+    ESP_LOGI(TAG,
+             "Heap[%s] internal_free=%d internal_min=%d internal_largest=%d psram_free=%d psram_largest=%d",
+             phase ? phase : "n/a",
+             (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (int)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+             (int)internal_info.largest_free_block,
+             (int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+             (int)psram_info.largest_free_block);
+}
+
 /* Build the assistant content array from llm_response_t for the messages history.
  * Returns a cJSON array with text and tool_use blocks. */
 static cJSON *build_assistant_content(const llm_response_t *resp)
@@ -360,6 +377,7 @@ void agent_loop_task(void *pvParameters)
             cJSON_AddItemToObject(result_msg, "content", tool_results);
             cJSON_AddItemToArray(messages, result_msg);
 
+            log_heap_snapshot("after_tool_iteration");
             llm_response_free(&resp);
             iteration++;
         }
@@ -445,9 +463,7 @@ void agent_loop_task(void *pvParameters)
         free(msg.content);
 
         /* Log memory status */
-        ESP_LOGI(TAG, "Free internal: %d, PSRAM: %d bytes",
-                 (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-                 (int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+        log_heap_snapshot("after_message");
     }
 }
 

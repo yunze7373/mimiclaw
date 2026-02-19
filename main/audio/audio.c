@@ -2,7 +2,9 @@
 #include "../mimi_config.h"
 
 #include <string.h>
+#include <stdlib.h>
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "driver/i2s.h"
 #include "driver/gpio.h"
 
@@ -195,7 +197,10 @@ void audio_test_pin(int gpio)
     
     // Play tone (400Hz square wave)
     size_t len = 24000 * 2; // 1 second, 16-bit mono
-    int16_t *buf = malloc(len);
+    int16_t *buf = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf) {
+        buf = malloc(len);
+    }
     if (!buf) return;
     
     for (int i = 0; i < len / 2; i++) {

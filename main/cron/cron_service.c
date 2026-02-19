@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_heap_caps.h"
 #include "cJSON.h"
 
 static const char *TAG = "cron";
@@ -51,7 +52,10 @@ static esp_err_t cron_load_jobs(void)
         return ESP_OK;
     }
 
-    char *buf = malloc(fsize + 1);
+    char *buf = heap_caps_malloc((size_t)fsize + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf) {
+        buf = malloc(fsize + 1);
+    }
     if (!buf) {
         fclose(f);
         return ESP_ERR_NO_MEM;

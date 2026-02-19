@@ -7,6 +7,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_https_ota.h"
 #include "esp_app_desc.h"
+#include "esp_heap_caps.h"
 #include "cJSON.h"
 
 static const char *TAG = "ota";
@@ -86,7 +87,10 @@ esp_err_t ota_check_for_update(const char *version_url)
         return ESP_ERR_INVALID_SIZE;
     }
 
-    char *body = malloc(content_len + 1);
+    char *body = heap_caps_malloc(content_len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!body) {
+        body = malloc(content_len + 1);
+    }
     if (!body) {
         esp_http_client_close(client);
         esp_http_client_cleanup(client);

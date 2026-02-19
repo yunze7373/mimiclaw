@@ -5,6 +5,7 @@
 #include <stdlib.h>
 
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "cJSON.h"
 #include "component/component_auto_detect.h"
 
@@ -333,7 +334,10 @@ esp_err_t comp_load_config(void)
         return ESP_ERR_INVALID_SIZE;
     }
 
-    char *buf = malloc(len + 1);
+    char *buf = heap_caps_malloc((size_t)len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf) {
+        buf = malloc(len + 1);
+    }
     if (!buf) { fclose(f); return ESP_ERR_NO_MEM; }
 
     fread(buf, 1, len, f);

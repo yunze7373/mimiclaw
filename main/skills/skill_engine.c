@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "esp_http_client.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "nvs.h"
 #include "cJSON.h"
 #include "mbedtls/sha256.h"
@@ -531,7 +532,10 @@ static int l_struct_pack(lua_State *L)
 
     int total = 0;
     for (const char *p = fmt; *p; p++) total += struct_field_size(*p);
-    uint8_t *buf = malloc(total);
+    uint8_t *buf = heap_caps_malloc((size_t)total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf) {
+        buf = malloc(total);
+    }
     if (!buf) return luaL_error(L, "no memory");
 
     int arg = 2;
@@ -937,7 +941,10 @@ static bool read_file_alloc(const char *path, char **out)
         fclose(f);
         return false;
     }
-    char *buf = calloc(1, (size_t)sz + 1);
+    char *buf = heap_caps_calloc(1, (size_t)sz + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf) {
+        buf = calloc(1, (size_t)sz + 1);
+    }
     if (!buf) {
         fclose(f);
         return false;
