@@ -2564,6 +2564,17 @@ int skill_engine_get_count(void)
     return count_used_slots();
 }
 
+const skill_slot_t *skill_engine_get_slot(int idx)
+{
+    if (idx < 0 || idx >= SKILL_MAX_SLOTS) {
+        return NULL;
+    }
+    if (!s_slots[idx].used) {
+        return NULL;
+    }
+    return &s_slots[idx];
+}
+
 char *skill_engine_install_status_json(void)
 {
     cJSON *obj = cJSON_CreateObject();
