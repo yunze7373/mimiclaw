@@ -47,6 +47,7 @@ idf_component_register(
         "cron/cron_service.c"
         "heartbeat/heartbeat.c"
         "component/component_mgr.c"
+        "component/component_auto_detect.c"
         "crypto/ed25519_verify.c"
         "web_ui/web_ui.c"
         "discovery/mdns_service.c"

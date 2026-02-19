@@ -6,6 +6,7 @@
 
 #include "esp_log.h"
 #include "cJSON.h"
+#include "component/component_auto_detect.h"
 
 static const char *TAG = "comp_mgr";
 
@@ -344,6 +345,15 @@ esp_err_t comp_load_config(void)
     if (!root) {
         ESP_LOGW(TAG, "Failed to parse component config JSON");
         return ESP_ERR_INVALID_STATE;
+    }
+
+    /* Check for auto-detection flag */
+    cJSON *auto_det = cJSON_GetObjectItem(root, "auto_detection");
+    if (cJSON_IsBool(auto_det) && cJSON_IsTrue(auto_det)) {
+        ESP_LOGI(TAG, "Auto-detection enabled by config");
+        comp_auto_detect_apply();
+    } else {
+        ESP_LOGI(TAG, "Auto-detection disabled (manual mode)");
     }
 
     /* Format: { "disabled": ["telegram", "websocket"] } */

@@ -341,9 +341,13 @@ void app_main(void)
 #endif
 
 #if CONFIG_MIMI_ENABLE_HA
-    const char *ha_deps[] = {"wifi", NULL};
+#if CONFIG_MIMI_ENABLE_WEB_UI && CONFIG_MIMI_ENABLE_WEBSOCKET
+    const char *ha_deps[] = {"wifi", "web_ui", NULL};
     comp_register("ha_integration", COMP_LAYER_EXTENSION, false, true,
                   ha_integration_init, ha_integration_start, NULL, ha_deps);
+#else
+    ESP_LOGW(TAG, "Skipping ha_integration: requires Web UI HTTP server");
+#endif
 #endif
 
 #if CONFIG_MIMI_ENABLE_ZIGBEE
