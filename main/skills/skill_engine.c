@@ -2534,6 +2534,14 @@ esp_err_t skill_engine_uninstall(const char *name)
 
 char *skill_engine_list_json(void)
 {
+    const char *state_name[] = {
+        "INSTALLED",
+        "LOADED",
+        "READY",
+        "ERROR",
+        "DISABLED",
+        "UNINSTALLED",
+    };
     cJSON *arr = cJSON_CreateArray();
     for (int i = 0; i < SKILL_MAX_SLOTS; i++) {
         if (!s_slots[i].used) continue;
@@ -2543,6 +2551,11 @@ char *skill_engine_list_json(void)
         cJSON_AddStringToObject(obj, "description", s_slots[i].description);
         cJSON_AddNumberToObject(obj, "tools", s_slots[i].tool_count);
         cJSON_AddNumberToObject(obj, "state", s_slots[i].state);
+        if ((int)s_slots[i].state >= 0 && (int)s_slots[i].state < 6) {
+            cJSON_AddStringToObject(obj, "state_name", state_name[s_slots[i].state]);
+        } else {
+            cJSON_AddStringToObject(obj, "state_name", "UNKNOWN");
+        }
         cJSON *events = cJSON_CreateArray();
         for (int e = 0; e < s_slots[i].event_count; e++) {
             cJSON_AddItemToArray(events, cJSON_CreateString(s_slots[i].event_names[e]));
