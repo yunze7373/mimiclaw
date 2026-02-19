@@ -15,6 +15,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <sys/time.h>
 #include "esp_log.h"
 #include "esp_console.h"
 #include "esp_system.h"
