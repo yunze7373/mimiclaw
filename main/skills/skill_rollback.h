@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include <stdbool.h>
 
 /**
  * Backup a skill's current files before overwriting.
