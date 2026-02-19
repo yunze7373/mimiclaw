@@ -2,6 +2,40 @@
 
 #include "esp_err.h"
 #include <stdbool.h>
+#include "skills/skill_types.h"
+
+#define SKILL_MAX_SCHEMA_JSON 512
+
+typedef struct {
+    bool used;
+    skill_state_t state;
+    char name[32];
+    char version[16];
+    char author[32];
+    char description[128];
+    char root_dir[128];
+    char entry[64];
+
+    skill_permissions_t permissions;
+    skill_category_t category;
+    skill_type_t skill_type;
+    skill_bus_t bus;
+    int env_ref;
+
+    int tool_count;
+    char tool_names[SKILL_MAX_TOOLS_PER_SKILL][32];
+    char tool_descs[SKILL_MAX_TOOLS_PER_SKILL][128];
+    char tool_schema[SKILL_MAX_TOOLS_PER_SKILL][SKILL_MAX_SCHEMA_JSON];
+    int tool_handler_ref[SKILL_MAX_TOOLS_PER_SKILL];
+
+    int event_count;
+    char event_names[SKILL_MAX_EVENTS_PER_SKILL][32];
+
+    bool req_i2c_enabled;
+    char req_i2c_bus[16];
+    int req_i2c_min_freq_hz;
+    int req_i2c_max_freq_hz;
+} skill_slot_t;
 
 /**
  * Initialize single-VM Lua skill runtime and load bundles from /spiffs/skills.
