@@ -575,8 +575,14 @@ static int cmd_scan_audio(int argc, char **argv)
 
 static struct {
     struct arg_str *name;
+    struct arg_str *version;
     struct arg_end *end;
 } skill_rb_args;
+
+static struct {
+    struct arg_str *name;
+    struct arg_end *end;
+} skill_rb_list_args;
 
 static int cmd_skill_rollback(int argc, char **argv)
 {
@@ -586,21 +592,30 @@ static int cmd_skill_rollback(int argc, char **argv)
         return 1;
     }
     const char *name = skill_rb_args.name->sval[0];
-    if (!skill_rollback_exists(name)) {
-        printf("No rollback backup for '%s'\n", name);
-        return 1;
+    const char *version = skill_rb_args.version->sval[0];
+    esp_err_t err = skill_rollback_restore(name, version);
+    if (err == ESP_OK) {
+        printf("Skill '%s' restored to version '%s'.\n", name, version);
+    } else {
+        printf("Restore failed: %s\n", esp_err_to_name(err));
     }
-    esp_err_t err = skill_rollback_restore(name);
-    printf("%s\n", err == ESP_OK ? "Skill restored." : "Restore failed.");
     return err == ESP_OK ? 0 : 1;
 }
 
 static int cmd_skill_rollback_list(int argc, char **argv)
 {
-    char *json = skill_rollback_list_json();
+    int nerrors = arg_parse(argc, argv, (void **)&skill_rb_list_args);
+    if (nerrors) {
+        arg_print_errors(stderr, skill_rb_list_args.end, argv[0]);
+        return 1;
+    }
+    const char *name = skill_rb_list_args.name->sval[0];
+    char *json = skill_rollback_list_json(name);
     if (json) {
         printf("%s\n", json);
         free(json);
+    } else {
+        printf("{\"backups\":[]}\n");
     }
     return 0;
 }
@@ -972,20 +987,24 @@ esp_err_t serial_cli_init(void)
 
     /* skill_rollback */
     skill_rb_args.name = arg_str1(NULL, NULL, "<name>", "Skill name to rollback");
+    skill_rb_args.version = arg_str1(NULL, NULL, "<version>", "Backup version from skill_rollback_list");
     skill_rb_args.end = arg_end(1);
     esp_console_cmd_t skill_rb_cmd = {
         .command = "skill_rollback",
-        .help = "Restore a skill to its previous version",
+        .help = "Restore a skill to a specific backup version",
         .func = &cmd_skill_rollback,
         .argtable = &skill_rb_args,
     };
     esp_console_cmd_register(&skill_rb_cmd);
 
     /* skill_rollback_list */
+    skill_rb_list_args.name = arg_str1(NULL, NULL, "<name>", "Skill name");
+    skill_rb_list_args.end = arg_end(1);
     esp_console_cmd_t skill_rb_list_cmd = {
         .command = "skill_rollback_list",
-        .help = "List skills with rollback backups available",
+        .help = "List rollback backups for a skill",
         .func = &cmd_skill_rollback_list,
+        .argtable = &skill_rb_list_args,
     };
     esp_console_cmd_register(&skill_rb_list_cmd);
 

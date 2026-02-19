@@ -117,6 +117,45 @@ static adc_oneshot_unit_handle_t s_adc_handle = NULL;
 static adc_cali_handle_t s_adc_cali = NULL;
 static bool s_adc_calibrated = false;
 
+static esp_err_t ensure_adc_initialized(void) {
+    if (s_adc_handle) {
+        return ESP_OK;
+    }
+
+    adc_oneshot_unit_init_cfg_t init_cfg = {
+        .unit_id = MIMI_ADC_UNIT,
+        .ulp_mode = ADC_ULP_MODE_DISABLE,
+    };
+    esp_err_t ret = adc_oneshot_new_unit(&init_cfg, &s_adc_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "ADC init failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+    adc_cali_curve_fitting_config_t cali_cfg = {
+        .unit_id = MIMI_ADC_UNIT,
+        .atten = MIMI_ADC_DEFAULT_ATTEN,
+        .bitwidth = MIMI_ADC_DEFAULT_BITWIDTH,
+    };
+    if (adc_cali_create_scheme_curve_fitting(&cali_cfg, &s_adc_cali) == ESP_OK) {
+        s_adc_calibrated = true;
+    }
+#elif ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+    adc_cali_line_fitting_config_t cali_cfg = {
+        .unit_id = MIMI_ADC_UNIT,
+        .atten = MIMI_ADC_DEFAULT_ATTEN,
+        .bitwidth = MIMI_ADC_DEFAULT_BITWIDTH,
+    };
+    if (adc_cali_create_scheme_line_fitting(&cali_cfg, &s_adc_cali) == ESP_OK) {
+        s_adc_calibrated = true;
+    }
+#endif
+
+    ESP_LOGI(TAG, "ADC initialized (calibrated=%s)", s_adc_calibrated ? "true" : "false");
+    return ESP_OK;
+}
+
 /* --- PWM channel tracking --- */
 typedef struct {
     int pin;
@@ -381,8 +420,9 @@ esp_err_t tool_adc_read(const char *input, char *output, size_t out_len) {
         return ESP_OK;
     }
 
-    if (!s_adc_handle) {
-        snprintf(output, out_len, "Error: ADC not initialized");
+    esp_err_t init_ret = ensure_adc_initialized();
+    if (init_ret != ESP_OK) {
+        snprintf(output, out_len, "Error: ADC init failed: %s", esp_err_to_name(init_ret));
         return ESP_OK;
     }
 
@@ -837,8 +877,10 @@ void tool_hardware_register_handlers(httpd_handle_t server) {
 
 esp_err_t tool_hardware_init(void) {
     ESP_LOGI(TAG, "Legacy Temp Sensor init disabled");
-
-    ESP_LOGI(TAG, "Legacy ADC init disabled");
+    esp_err_t ret = ensure_adc_initialized();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "ADC init deferred: %s", esp_err_to_name(ret));
+    }
 
     return ESP_OK;
 }
