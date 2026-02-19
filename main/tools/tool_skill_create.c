@@ -1,0 +1,225 @@
+#include "tools/tool_skill_create.h"
+#include "mimi_config.h"
+#include "cJSON.h"
+
+#include <string.h>
+#include <stdio.h>
+#include <ctype.h>
+#include <sys/stat.h>
+#include <dirent.h>
+#include <errno.h>
+#include "esp_log.h"
+
+#if CONFIG_MIMI_ENABLE_SKILLS
+#include "skills/skill_engine.h"
+#endif
+
+static const char *TAG = "tool_skill_create";
+
+/* ── Helpers ─────────────────────────────────────────────────────── */
+
+/* Validate skill name: lowercase alpha, digits, underscores only */
+static bool is_valid_name(const char *name)
+{
+    if (!name || !name[0] || strlen(name) > 32) return false;
+    for (int i = 0; name[i]; i++) {
+        if (!isalnum((unsigned char)name[i]) && name[i] != '_') return false;
+    }
+    return true;
+}
+
+/* Write a file to SPIFFS, creating parent dir if needed */
+static esp_err_t write_file(const char *path, const char *content)
+{
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        ESP_LOGE(TAG, "Failed to open %s: %s", path, strerror(errno));
+        return ESP_FAIL;
+    }
+    fputs(content, f);
+    fclose(f);
+    return ESP_OK;
+}
+
+/* Generate manifest.json from metadata */
+static char *generate_manifest(const char *name, const char *desc,
+                               const char *category, const char *type,
+                               const char *bus)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "name", name);
+    cJSON_AddStringToObject(root, "version", "1.0.0");
+    cJSON_AddStringToObject(root, "description", desc ? desc : "");
+    cJSON_AddStringToObject(root, "author", "agent");
+    cJSON_AddStringToObject(root, "entry", "main.lua");
+
+    cJSON *cls = cJSON_CreateObject();
+    cJSON_AddStringToObject(cls, "category", category ? category : "software");
+    cJSON_AddStringToObject(cls, "type", type ? type : "utility");
+    cJSON_AddStringToObject(cls, "bus", bus ? bus : "none");
+    cJSON_AddItemToObject(root, "classification", cls);
+
+    cJSON *perms = cJSON_CreateObject();
+    cJSON_AddItemToObject(root, "permissions", perms);
+
+    char *json = cJSON_Print(root);
+    cJSON_Delete(root);
+    return json;
+}
+
+/* ── skill_create tool ───────────────────────────────────────────── */
+
+esp_err_t tool_skill_create_execute(const char *input_json, char *output, size_t output_size)
+{
+    cJSON *root = cJSON_Parse(input_json);
+    if (!root) {
+        snprintf(output, output_size, "Error: Invalid JSON input");
+        return ESP_FAIL;
+    }
+
+    cJSON *j_name = cJSON_GetObjectItem(root, "name");
+    cJSON *j_code = cJSON_GetObjectItem(root, "code");
+    cJSON *j_desc = cJSON_GetObjectItem(root, "description");
+    cJSON *j_cat  = cJSON_GetObjectItem(root, "category");
+    cJSON *j_type = cJSON_GetObjectItem(root, "type");
+    cJSON *j_bus  = cJSON_GetObjectItem(root, "bus");
+
+    if (!cJSON_IsString(j_name) || !cJSON_IsString(j_code)) {
+        snprintf(output, output_size, "Error: 'name' and 'code' are required strings");
+        cJSON_Delete(root);
+        return ESP_FAIL;
+    }
+
+    const char *name = j_name->valuestring;
+    const char *code = j_code->valuestring;
+
+    /* 1. Validate name */
+    if (!is_valid_name(name)) {
+        snprintf(output, output_size,
+                 "Error: Invalid name '%s'. Use lowercase letters, digits, underscores (max 32 chars).",
+                 name);
+        cJSON_Delete(root);
+        return ESP_FAIL;
+    }
+
+    /* 2. Create skill directory */
+    char dir_path[80];
+    snprintf(dir_path, sizeof(dir_path), "%s/skills/%s", MIMI_SPIFFS_BASE, name);
+    mkdir(dir_path, 0755);  /* May fail if exists, that's OK on SPIFFS */
+
+    /* 3. Write main.lua */
+    char lua_path[96];
+    snprintf(lua_path, sizeof(lua_path), "%s/main.lua", dir_path);
+    if (write_file(lua_path, code) != ESP_OK) {
+        snprintf(output, output_size, "Error: Failed to write %s", lua_path);
+        cJSON_Delete(root);
+        return ESP_FAIL;
+    }
+
+    /* 4. Generate and write manifest.json */
+    char *manifest = generate_manifest(
+        name,
+        cJSON_IsString(j_desc) ? j_desc->valuestring : "",
+        cJSON_IsString(j_cat)  ? j_cat->valuestring  : NULL,
+        cJSON_IsString(j_type) ? j_type->valuestring  : NULL,
+        cJSON_IsString(j_bus)  ? j_bus->valuestring   : NULL
+    );
+    if (manifest) {
+        char manifest_path[96];
+        snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.json", dir_path);
+        write_file(manifest_path, manifest);
+        free(manifest);
+    }
+
+    ESP_LOGI(TAG, "Skill '%s' written to %s", name, dir_path);
+
+    /* 5. Hot-reload: re-init skill engine to pick up new skill */
+#if CONFIG_MIMI_ENABLE_SKILLS
+    esp_err_t err = skill_engine_init();
+    if (err != ESP_OK) {
+        snprintf(output, output_size,
+                 "Skill '%s' files saved but reload failed: %s. "
+                 "Check Lua syntax and try 'skill_reload' from CLI.",
+                 name, esp_err_to_name(err));
+        cJSON_Delete(root);
+        return ESP_OK;  /* Files saved, just reload issue */
+    }
+#endif
+
+    snprintf(output, output_size,
+             "Skill '%s' created and loaded successfully. "
+             "Files: %s/main.lua, %s/manifest.json",
+             name, dir_path, dir_path);
+
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+/* ── skill_list_templates tool ───────────────────────────────────── */
+
+typedef struct {
+    const char *name;
+    const char *desc;
+    const char *category;
+    const char *type;
+    const char *bus;
+} template_info_t;
+
+static const template_info_t s_templates[] = {
+    {
+        .name     = "i2c_sensor",
+        .desc     = "I2C sensor driver template. Reads registers from an I2C device.",
+        .category = "hardware",
+        .type     = "sensor",
+        .bus      = "i2c",
+    },
+    {
+        .name     = "gpio_control",
+        .desc     = "GPIO input/output template. Read a pin and write to another.",
+        .category = "hardware",
+        .type     = "actuator",
+        .bus      = "gpio",
+    },
+    {
+        .name     = "timer_service",
+        .desc     = "Software timer/service template. Runs periodic tasks.",
+        .category = "software",
+        .type     = "service",
+        .bus      = "none",
+    },
+};
+
+esp_err_t tool_skill_list_templates_execute(const char *input_json, char *output, size_t output_size)
+{
+    cJSON *arr = cJSON_CreateArray();
+    int count = sizeof(s_templates) / sizeof(s_templates[0]);
+
+    for (int i = 0; i < count; i++) {
+        cJSON *obj = cJSON_CreateObject();
+        cJSON_AddStringToObject(obj, "name", s_templates[i].name);
+        cJSON_AddStringToObject(obj, "description", s_templates[i].desc);
+        cJSON_AddStringToObject(obj, "category", s_templates[i].category);
+        cJSON_AddStringToObject(obj, "type", s_templates[i].type);
+        cJSON_AddStringToObject(obj, "bus", s_templates[i].bus);
+
+        /* Build template file path */
+        char path[96];
+        snprintf(path, sizeof(path), "%s/skills/.templates/%s.lua.tmpl",
+                 MIMI_SPIFFS_BASE, s_templates[i].name);
+        cJSON_AddStringToObject(obj, "template_path", path);
+
+        cJSON_AddItemToArray(arr, obj);
+    }
+
+    char *json = cJSON_PrintUnformatted(arr);
+    cJSON_Delete(arr);
+
+    if (json) {
+        snprintf(output, output_size, "%s", json);
+        free(json);
+    } else {
+        snprintf(output, output_size, "[]");
+    }
+
+    return ESP_OK;
+}

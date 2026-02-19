@@ -176,6 +176,9 @@
 #ifndef CONFIG_MIMI_ENABLE_ED25519
 #define CONFIG_MIMI_ENABLE_ED25519   1
 #endif
+#ifndef CONFIG_MIMI_ENABLE_MDNS
+#define CONFIG_MIMI_ENABLE_MDNS      1
+#endif
 
 /* ========================================
  * Hardware Pin Map — ESP32-S3 Audio Dev Board

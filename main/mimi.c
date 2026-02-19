@@ -56,6 +56,9 @@
 #if CONFIG_MIMI_ENABLE_OTA
 #include "ota/ota_manager.h"
 #endif
+#if CONFIG_MIMI_ENABLE_MDNS
+#include "discovery/mdns_service.h"
+#endif
 #include "component/component_mgr.h"
 
 static const char *TAG = "mimi";
@@ -313,6 +316,13 @@ void app_main(void)
     comp_register("web_ui",    COMP_LAYER_ENTRY, false, true,
                   NULL, web_ui_init, NULL, ws_deps);
 #endif
+#endif
+
+    /* L3: Extensions — optional WiFi-dependent services */
+#if CONFIG_MIMI_ENABLE_MDNS
+    const char *mdns_deps[] = {"wifi", NULL};
+    comp_register("mdns", COMP_LAYER_EXT, false, true,
+                  mdns_service_init, mdns_service_start, NULL, mdns_deps);
 #endif
 
     /* ── Phase 3: Load config + Initialize all ──────────────────── */

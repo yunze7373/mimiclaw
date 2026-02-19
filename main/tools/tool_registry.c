@@ -5,6 +5,7 @@
 #include "tools/tool_cron.h"
 #include "tools/tool_hardware.h"
 #include "tools/tool_network.h"
+#include "tools/tool_skill_create.h"
 #include "llm/llm_proxy.h"
 
 #include <string.h>
@@ -390,6 +391,33 @@ esp_err_t tool_registry_init(void)
         .execute = tool_system_restart,
     };
     tool_registry_register(&sr);
+
+    /* --- Phase 6: Agent Skill Creation --- */
+    mimi_tool_t sc = {
+        .name = "skill_create",
+        .description = "Create a new hardware or software skill from Lua code. The skill is saved to SPIFFS and hot-loaded into the engine. Use skill_list_templates first to see available templates for reference.",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{"
+            "\"name\":{\"type\":\"string\",\"description\":\"Skill name (lowercase, alphanumeric, underscores)\"},"
+            "\"description\":{\"type\":\"string\",\"description\":\"Human-readable description\"},"
+            "\"category\":{\"type\":\"string\",\"description\":\"hardware or software\"},"
+            "\"type\":{\"type\":\"string\",\"description\":\"sensor, actuator, communication, utility, or service\"},"
+            "\"bus\":{\"type\":\"string\",\"description\":\"i2c, gpio, spi, pwm, uart, rmt, or none\"},"
+            "\"code\":{\"type\":\"string\",\"description\":\"Complete Lua skill code with SKILL and TOOLS tables\"}"
+            "},"
+            "\"required\":[\"name\",\"code\"]}",
+        .execute = tool_skill_create_execute,
+    };
+    tool_registry_register(&sc);
+
+    mimi_tool_t slt = {
+        .name = "skill_list_templates",
+        .description = "List available skill templates for creating new skills. Returns template names, descriptions, and categories. Use the template_path with read_file to see the full template code.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
+        .execute = tool_skill_list_templates_execute,
+    };
+    tool_registry_register(&slt);
 
     tool_registry_rebuild_json();
 

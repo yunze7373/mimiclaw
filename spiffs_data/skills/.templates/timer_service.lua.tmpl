@@ -1,0 +1,78 @@
+-- Timer/Service Skill Template for MimiClaw
+--
+-- Replace {{placeholders}} with your specific values.
+-- This template provides a periodic timer-based software skill.
+
+SKILL = {
+    name    = "{{skill_name}}",
+    version = "1.0.0",
+    desc    = "{{description}}",
+
+    classification = {
+        category = "software",
+        type     = "service",
+        bus      = "none",
+    },
+
+    permissions = {},
+}
+
+local INTERVAL_MS = {{interval_ms}}  -- e.g. 5000 for 5 seconds
+local timer_id = nil
+
+function init(config)
+    -- Start periodic timer
+    timer_id = hw.timer_every(INTERVAL_MS, function()
+        -- {{timer_body}}
+        hw.log("{{skill_name}} tick")
+    end)
+    hw.log("{{skill_name}} started with interval " .. INTERVAL_MS .. "ms")
+    return true
+end
+
+function get_status(params)
+    return {
+        name     = "{{skill_name}}",
+        running  = timer_id ~= nil,
+        interval = INTERVAL_MS,
+    }
+end
+
+function stop_timer(params)
+    if timer_id then
+        hw.timer_cancel(timer_id)
+        timer_id = nil
+    end
+    return { status = "stopped" }
+end
+
+function start_timer(params)
+    if timer_id then
+        return { status = "already_running" }
+    end
+    timer_id = hw.timer_every(INTERVAL_MS, function()
+        hw.log("{{skill_name}} tick")
+    end)
+    return { status = "started" }
+end
+
+TOOLS = {
+    {
+        name    = "skill_{{skill_name}}_status",
+        desc    = "Get the current status of the timer service.",
+        schema  = '{"type":"object","properties":{}}',
+        handler = get_status,
+    },
+    {
+        name    = "skill_{{skill_name}}_stop",
+        desc    = "Stop the periodic timer.",
+        schema  = '{"type":"object","properties":{}}',
+        handler = stop_timer,
+    },
+    {
+        name    = "skill_{{skill_name}}_start",
+        desc    = "Start/resume the periodic timer.",
+        schema  = '{"type":"object","properties":{}}',
+        handler = start_timer,
+    },
+}

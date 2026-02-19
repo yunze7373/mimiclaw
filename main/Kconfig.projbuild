@@ -74,4 +74,11 @@ menu "MimiClaw Configuration"
             Include Ed25519-based skill package signature verification.
             Required for secure skill installation from untrusted sources.
 
+    config MIMI_ENABLE_MDNS
+        bool "Enable mDNS Discovery"
+        default y
+        help
+            Advertise MimiClaw on the local network via mDNS.
+            Accessible at mimiclaw.local after WiFi connects.
+
 endmenu

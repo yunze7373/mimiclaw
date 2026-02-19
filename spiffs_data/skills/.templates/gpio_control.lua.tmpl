@@ -1,0 +1,56 @@
+-- GPIO Control Skill Template for MimiClaw
+--
+-- Replace {{placeholders}} with your specific values.
+-- Supports digital input reading and output control.
+
+SKILL = {
+    name    = "{{skill_name}}",
+    version = "1.0.0",
+    desc    = "{{description}}",
+
+    classification = {
+        category = "hardware",
+        type     = "actuator",
+        bus      = "gpio",
+    },
+
+    permissions = {
+        gpio = { {{gpio_pins}} },
+    },
+}
+
+local OUTPUT_PIN = {{output_pin}}
+local INPUT_PIN  = {{input_pin}}
+
+function init(config)
+    hw.gpio_set_mode(OUTPUT_PIN, "output")
+    hw.gpio_set_mode(INPUT_PIN,  "input_pullup")
+    hw.log("{{skill_name}} GPIO initialized: out=" .. OUTPUT_PIN .. " in=" .. INPUT_PIN)
+    return true
+end
+
+function set_output(params)
+    local value = params.value or 0
+    hw.gpio_write(OUTPUT_PIN, value)
+    return { pin = OUTPUT_PIN, value = value, status = "ok" }
+end
+
+function read_input(params)
+    local level = hw.gpio_read(INPUT_PIN)
+    return { pin = INPUT_PIN, level = level }
+end
+
+TOOLS = {
+    {
+        name    = "skill_{{skill_name}}_set",
+        desc    = "Set GPIO output to high (1) or low (0).",
+        schema  = '{"type":"object","properties":{"value":{"type":"integer","description":"0=LOW, 1=HIGH"}},"required":["value"]}',
+        handler = set_output,
+    },
+    {
+        name    = "skill_{{skill_name}}_read",
+        desc    = "Read the current level of the input GPIO pin.",
+        schema  = '{"type":"object","properties":{}}',
+        handler = read_input,
+    },
+}

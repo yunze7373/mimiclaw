@@ -1,0 +1,66 @@
+-- I2C Sensor Skill Template for MimiClaw
+--
+-- Replace {{placeholders}} with your sensor-specific values.
+-- This template provides a standard pattern for I2C sensor drivers.
+
+SKILL = {
+    name    = "{{skill_name}}",
+    version = "1.0.0",
+    desc    = "{{description}}",
+
+    classification = {
+        category = "hardware",
+        type     = "sensor",
+        bus      = "i2c",
+    },
+
+    permissions = {
+        i2c = { "{{i2c_address}}" },
+    },
+}
+
+-- I2C bus and device address
+local I2C_BUS  = {{i2c_bus}}    -- 0 or 1
+local I2C_ADDR = {{i2c_address}} -- e.g. 0x76
+
+function init(config)
+    hw.i2c_init(I2C_BUS, config.sda or 21, config.scl or 22, 100000)
+    hw.log("{{skill_name}} initialized on I2C bus " .. I2C_BUS)
+    return true
+end
+
+-- Read sensor data
+function read_sensor(params)
+    -- Write register address to read from
+    local reg = params.register or {{default_register}}
+    local len = params.length or {{read_length}}
+
+    hw.i2c_write(I2C_BUS, I2C_ADDR, string.char(reg))
+    local data = hw.i2c_read(I2C_BUS, I2C_ADDR, len)
+
+    if not data then
+        return { error = "Failed to read from sensor" }
+    end
+
+    -- Parse raw bytes into meaningful values
+    -- Customize this section for your sensor's data format
+    local raw = {}
+    for i = 1, #data do
+        raw[i] = string.byte(data, i)
+    end
+
+    return {
+        register = reg,
+        raw_bytes = raw,
+        byte_count = #data,
+    }
+end
+
+TOOLS = {
+    {
+        name    = "skill_{{skill_name}}_read",
+        desc    = "{{tool_description}}",
+        schema  = '{"type":"object","properties":{"register":{"type":"integer","description":"Register address to read"},"length":{"type":"integer","description":"Number of bytes to read"}},"required":[]}',
+        handler = read_sensor,
+    },
+}
