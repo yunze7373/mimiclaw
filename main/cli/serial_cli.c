@@ -411,6 +411,38 @@ static int cmd_restart(int argc, char **argv)
     return 0;  /* unreachable */
 }
 
+/* --- safe_reset command --- */
+static int cmd_safe_reset(int argc, char **argv)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("safe_mode", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u8(nvs, "boot_cnt", 0);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+        printf("Safe mode boot counter cleared. Restarting normally...\n");
+        esp_restart();
+    } else {
+        printf("Failed to open NVS.\n");
+    }
+    return 0;
+}
+
+/* --- safe_status command --- */
+extern bool mimi_is_safe_mode(void);
+
+static int cmd_safe_status(int argc, char **argv)
+{
+    nvs_handle_t nvs;
+    uint8_t boot_cnt = 0;
+    if (nvs_open("safe_mode", NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_get_u8(nvs, "boot_cnt", &boot_cnt);
+        nvs_close(nvs);
+    }
+    printf("Safe mode: %s\n", mimi_is_safe_mode() ? "ACTIVE" : "inactive");
+    printf("Boot counter: %d/3\n", (int)boot_cnt);
+    return 0;
+}
+
 /* --- scan_audio command --- */
 #include "../audio/audio.h"
 
@@ -670,6 +702,22 @@ esp_err_t serial_cli_init(void)
         .func = &cmd_restart,
     };
     esp_console_cmd_register(&restart_cmd);
+
+    /* safe_reset */
+    esp_console_cmd_t safe_reset_cmd = {
+        .command = "safe_reset",
+        .help = "Clear safe mode boot counter and restart normally",
+        .func = &cmd_safe_reset,
+    };
+    esp_console_cmd_register(&safe_reset_cmd);
+
+    /* safe_status */
+    esp_console_cmd_t safe_status_cmd = {
+        .command = "safe_status",
+        .help = "Show safe mode status and boot counter",
+        .func = &cmd_safe_status,
+    };
+    esp_console_cmd_register(&safe_status_cmd);
 
     /* Start REPL */
     ESP_ERROR_CHECK(esp_console_start_repl(repl));

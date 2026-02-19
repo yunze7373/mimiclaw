@@ -32,6 +32,7 @@
 #include "skills/skill_resource_manager.h"
 #include "skills/board_profile.h"
 #include "tools/tool_registry.h"
+#include "skills/skill_quota.h"
 #include "bus/message_bus.h"
 
 static const char *TAG = "skill_engine";
@@ -351,14 +352,24 @@ static void limit_hook(lua_State *L, lua_Debug *ar)
     }
 }
 
-static void guard_begin(void)
+static void guard_begin_for_slot(int slot_idx)
 {
     s_guard.active = true;
     s_guard.started_us = esp_timer_get_time();
-    s_guard.instr_budget = SKILL_EXEC_INSTR_BUDGET;
+    /* Use per-skill quota if available, else global default */
+    if (slot_idx >= 0 && slot_idx < SKILL_MAX_SLOTS && s_slots[slot_idx].used) {
+        s_guard.instr_budget = skill_quota_get_instr_limit(s_slots[slot_idx].name);
+    } else {
+        s_guard.instr_budget = SKILL_EXEC_INSTR_BUDGET;
+    }
     s_guard.time_budget_ms = SKILL_EXEC_TIME_BUDGET_MS;
     s_guard.instr_used = 0;
     lua_sethook(s_L, limit_hook, LUA_MASKCOUNT, LUA_HOOK_STRIDE);
+}
+
+static void guard_begin(void)
+{
+    guard_begin_for_slot(-1);
 }
 
 static void guard_end(void)
@@ -1596,9 +1607,11 @@ static esp_err_t lua_tool_execute(int ctx_idx, const char *input_json, char *out
         lua_newtable(s_L);
     }
 
-    guard_begin();
+    guard_begin_for_slot(slot_idx);
     int rc = lua_pcall(s_L, 1, 1, 0);
     guard_end();
+    /* Track instruction usage in quota */
+    skill_quota_update_instr(slot->name, s_guard.instr_used);
     if (rc != LUA_OK) {
         const char *err = lua_tostring(s_L, -1);
         snprintf(output, output_size, "{\"ok\":false,\"error\":\"%s\"}", err ? err : "lua error");
@@ -1957,6 +1970,7 @@ static esp_err_t skill_engine_init_impl(void)
     s_tool_ctx_count = 0;
     ESP_ERROR_CHECK(board_profile_init());
     ESP_ERROR_CHECK(skill_resmgr_init());
+    ESP_ERROR_CHECK(skill_quota_init());
 
     if (!s_lua_lock) {
         s_lua_lock = xSemaphoreCreateRecursiveMutex();
@@ -2180,6 +2194,9 @@ static esp_err_t activate_bundle_from_extracted_dir(const char *extract_dir,
         remove_path_recursive(dir_backup);
         s_slot_count = count_used_slots();
         tool_registry_rebuild_json();
+        /* Track disk usage in quota system */
+        int32_t dir_size = skill_quota_calc_dir_size(final_dir);
+        if (dir_size > 0) skill_quota_track_disk(meta.name, dir_size);
         return ESP_OK;
     }
 
@@ -2491,6 +2508,8 @@ esp_err_t skill_engine_uninstall(const char *name)
         if (fs_path[0]) remove_path_recursive(fs_path);
         s_slot_count = count_used_slots();
         tool_registry_rebuild_json();
+        /* Remove quota entry for uninstalled skill */
+        skill_quota_remove(name);
         ESP_LOGI(TAG, "Skill uninstalled: %s", name);
         xSemaphoreGive(s_install_lock);
         return ESP_OK;
