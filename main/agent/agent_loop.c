@@ -384,6 +384,16 @@ void agent_loop_task(void *pvParameters)
 
         cJSON_Delete(messages);
 
+        if (!final_text && iteration >= MIMI_AGENT_MAX_TOOL_ITER) {
+            const char *limit_msg = "The task is still running and reached the current tool-iteration limit. Please retry or simplify the request.";
+            size_t mlen = strlen(limit_msg);
+            final_text = heap_caps_malloc(mlen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (final_text) {
+                memcpy(final_text, limit_msg, mlen + 1);
+            }
+            ESP_LOGW(TAG, "Reached tool iteration limit: %d", MIMI_AGENT_MAX_TOOL_ITER);
+        }
+
         /* 5. Send response */
         if (final_text && final_text[0]) {
             /* Save to session (only user text + final assistant text) */

@@ -66,3 +66,10 @@ void skill_engine_install_history_clear(void);
  * Number of active skill slots.
  */
 int skill_engine_get_count(void);
+
+/**
+ * Get pointer to skill slot by index.
+ * Returns NULL if index invalid or slot unused.
+ * READ-ONLY access intended for inspections/UIs.
+ */
+const skill_slot_t *skill_engine_get_slot(int idx);

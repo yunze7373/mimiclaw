@@ -6,14 +6,34 @@
 #include "esp_timer.h"
 #include "ha_integration.h"
 #include "mimi_config.h"
-#include "rgb/rgb.h"
 #include "web_ui/web_ui.h"
+#include "skills/skill_engine.h"
+#include "skills/skill_types.h"
+#include "tools/tool_registry.h"
 
 static const char *TAG = "ha_integration";
 
+/* Helper: Sanitize skill name for HA entity ID */
+static void sanitize_entity_id(const char *name, char *out, size_t size)
+{
+    size_t i = 0;
+    while (name[i] && i < size - 1) {
+        char c = name[i];
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
+            out[i] = c;
+        } else if (c >= 'A' && c <= 'Z') {
+            out[i] = c + 32; /* tolower */
+        } else {
+            out[i] = '_';
+        }
+        i++;
+    }
+    out[i] = '\0';
+}
+
 /* 
  * API: GET /api/ha/state
- * Returns current state of exposed entities
+ * Returns current state of exposed entities by iterating skills
  */
 static esp_err_t ha_state_handler(httpd_req_t *req)
 {
@@ -23,30 +43,34 @@ static esp_err_t ha_state_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "device_id", "mimiclaw_s3");
     cJSON_AddStringToObject(root, "sw_version", "1.0.0");
     
-    /* RGB Light Entity */
-    cJSON *rgb = cJSON_CreateObject();
-    cJSON_AddStringToObject(rgb, "entity_id", "light.mimiclaw_rgb");
-    cJSON_AddStringToObject(rgb, "state", "on"); // TODO: Get actual state
-    
-    // Get actual color
-    uint8_t r, g, b;
-    // Assuming a getter exists or we track it. For now, placeholder.
-    r = 0; g = 255; b = 0; 
-    
-    cJSON *color = cJSON_CreateArray();
-    cJSON_AddItemToArray(color, cJSON_CreateNumber(r));
-    cJSON_AddItemToArray(color, cJSON_CreateNumber(g));
-    cJSON_AddItemToArray(color, cJSON_CreateNumber(b));
-    cJSON_AddItemToObject(rgb, "rgb_color", color);
-    
-    cJSON_AddItemToObject(root, "light", rgb);
+    /* Iterate Skills and map to Entities */
+    int count = skill_engine_get_count(); // just for loop limit hint
+    (void)count;
 
-    /* System Sensor */
-    cJSON *sensor = cJSON_CreateObject();
-    cJSON_AddStringToObject(sensor, "entity_id", "sensor.mimiclaw_status");
-    cJSON_AddStringToObject(sensor, "state", "online");
-    cJSON_AddNumberToObject(sensor, "uptime", (double)(esp_timer_get_time() / 1000000));
-    cJSON_AddItemToObject(root, "sensor", sensor);
+    for (int i = 0; i < SKILL_MAX_SLOTS; i++) {
+        const skill_slot_t *slot = skill_engine_get_slot(i);
+        if (!slot) continue;
+
+        char entity_id[64];
+        char safe_name[32];
+        sanitize_entity_id(slot->name, safe_name, sizeof(safe_name));
+
+        if (slot->category == SKILL_CAT_SENSOR) {
+            snprintf(entity_id, sizeof(entity_id), "sensor.%s", safe_name);
+            cJSON *ent = cJSON_CreateObject();
+            cJSON_AddStringToObject(ent, "entity_id", entity_id);
+            cJSON_AddStringToObject(ent, "state", "unknown"); // TODO: Poll
+            cJSON_AddStringToObject(ent, "attributes", slot->description);
+            cJSON_AddItemToObject(root, safe_name, ent); // Key is short name
+        } 
+        else if (slot->category == SKILL_CAT_ACTUATOR) {
+            snprintf(entity_id, sizeof(entity_id), "switch.%s", safe_name);
+            cJSON *ent = cJSON_CreateObject();
+            cJSON_AddStringToObject(ent, "entity_id", entity_id);
+            cJSON_AddStringToObject(ent, "state", "off"); // TODO: Poll
+            cJSON_AddItemToObject(root, safe_name, ent);
+        }
+    }
 
     const char *resp = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
@@ -63,7 +87,7 @@ static esp_err_t ha_state_handler(httpd_req_t *req)
 
 /* 
  * API: POST /api/ha/control
- * Body: {"entity_id": "light.mimiclaw_rgb", "state": "on", "attributes": {"rgb_color": [255,0,0]}}
+ * Body: {"entity_id": "switch.skill_name", "state": "on", ...}
  */
 static esp_err_t ha_control_handler(httpd_req_t *req)
 {
@@ -79,22 +103,62 @@ static esp_err_t ha_control_handler(httpd_req_t *req)
     }
 
     cJSON *entity_id = cJSON_GetObjectItem(json, "entity_id");
-    if (cJSON_IsString(entity_id) && strcmp(entity_id->valuestring, "light.mimiclaw_rgb") == 0) {
-        cJSON *state = cJSON_GetObjectItem(json, "state");
-        cJSON *attrs = cJSON_GetObjectItem(json, "attributes");
-        
-        if (state && strcmp(state->valuestring, "off") == 0) {
-            rgb_set(0, 0, 0);
-        } else if (attrs) {
-            cJSON *rgb = cJSON_GetObjectItem(attrs, "rgb_color");
-            if (cJSON_IsArray(rgb) && cJSON_GetArraySize(rgb) == 3) {
-                int r = cJSON_GetArrayItem(rgb, 0)->valueint;
-                int g = cJSON_GetArrayItem(rgb, 1)->valueint;
-                int b = cJSON_GetArrayItem(rgb, 2)->valueint;
-                rgb_set(r, g, b);
+    if (!cJSON_IsString(entity_id)) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing entity_id");
+        return ESP_FAIL;
+    }
+
+    /* Parse entity_id "switch.skill_name" -> "skill_name" */
+    const char *dot = strchr(entity_id->valuestring, '.');
+    if (!dot) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid entity_id format");
+        return ESP_FAIL;
+    }
+    const char *skill_name_ptr = dot + 1;
+
+    /* Find skill */
+    const skill_slot_t *target_slot = NULL;
+    for (int i = 0; i < SKILL_MAX_SLOTS; i++) {
+        const skill_slot_t *slot = skill_engine_get_slot(i);
+        if (slot) {
+            char safe_name[32];
+            sanitize_entity_id(slot->name, safe_name, sizeof(safe_name));
+            if (strcmp(safe_name, skill_name_ptr) == 0) {
+                target_slot = slot;
+                break;
             }
         }
-        ESP_LOGI(TAG, "HA Control: RGB updated");
+    }
+
+    if (!target_slot) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Skill not found");
+        return ESP_FAIL;
+    }
+
+    /* Find a suitable tool to execute */
+    /* Heuristic: Exec the first tool for now, or look for 'control' */
+    if (target_slot->tool_count == 0) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Skill has no tools");
+        return ESP_FAIL;
+    }
+
+    /* Pass the whole JSON body as args to the tool */
+    char output[512];
+    /* Construct tool name: "skill_name.tool_name"? No, tool_registry names are just "tool_name" 
+       BUT skill tools are usually registered with simple names. 
+       Wait, skill_engine uses `register_tool_ctx` which registers with `slot->tool_names[i]`.
+       If that name is not prefixed, we might have collisions, but currently it seems 1:1. 
+    */
+    const char *tool_name = target_slot->tool_names[0]; 
+    if (tool_registry_execute(tool_name, buf, output, sizeof(output)) != ESP_OK) {
+         ESP_LOGE(TAG, "Failed to execute tool %s", tool_name);
+         cJSON_Delete(json);
+         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Tool execution failed");
+         return ESP_FAIL;
     }
 
     cJSON_Delete(json);
@@ -118,8 +182,7 @@ static const httpd_uri_t ha_control_uri = {
 
 esp_err_t ha_integration_init(void)
 {
-    ESP_LOGI(TAG, "Initializing HA Integration");
-    // Registration happens in start(), assuming server is ready then
+    ESP_LOGI(TAG, "Initializing HA Integration (Dynamic)");
     return ESP_OK;
 }
 

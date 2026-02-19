@@ -58,7 +58,7 @@
 #define MIMI_AGENT_PRIO              6
 #define MIMI_AGENT_CORE              1
 #define MIMI_AGENT_MAX_HISTORY       20
-#define MIMI_AGENT_MAX_TOOL_ITER     10
+#define MIMI_AGENT_MAX_TOOL_ITER     25
 #define MIMI_MAX_TOOL_CALLS          4
 
 /* Timezone (POSIX TZ format) */
