@@ -365,7 +365,24 @@ esp_err_t tool_registry_init(void)
     };
     tool_registry_register(&us);
 
-    /* Register system_restart */
+    /* Phase 4: I2S Tools */
+    mimi_tool_t ir = {
+        .name = "i2s_read",
+        .description = "Read raw PCM audio from Microphone (I2S0). Input: {bytes: int}. Output: Base64 encoded PCM data. Default 4096 bytes.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"bytes\":{\"type\":\"integer\"}},\"required\":[]}",
+        .execute = tool_i2s_read,
+    };
+    tool_registry_register(&ir);
+
+    mimi_tool_t iw = {
+        .name = "i2s_write",
+        .description = "Write raw PCM audio to Amplifier (I2S1). Input: {data_base64: string}. Output: 'OK'.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"data_base64\":{\"type\":\"string\"}},\"required\":[\"data_base64\"]}",
+        .execute = tool_i2s_write,
+    };
+    tool_registry_register(&iw);
+
+    /* Register system_restart (re-registering properly) */
     mimi_tool_t sr = {
         .name = "system_restart",
         .description = "Restart the ESP32 system. Use only when necessary (e.g. after config changes). The device will reboot after a 500ms delay.",

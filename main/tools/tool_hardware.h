@@ -22,3 +22,7 @@ esp_err_t tool_rgb_control(const char *input, char *output, size_t out_len);
 /* Phase 3: System tools */
 esp_err_t tool_uart_send(const char *input, char *output, size_t out_len);
 esp_err_t tool_system_restart(const char *input, char *output, size_t out_len);
+
+/* Phase 4: I2S Audio tools */
+esp_err_t tool_i2s_read(const char *input, char *output, size_t out_len);
+esp_err_t tool_i2s_write(const char *input, char *output, size_t out_len);

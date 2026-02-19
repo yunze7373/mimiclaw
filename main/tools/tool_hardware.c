@@ -22,6 +22,8 @@
 #include "mimi_config.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/i2s_std.h"
+#include "mbedtls/base64.h"
 
 #define HW_NVS_NAMESPACE "hw_config"
 
@@ -781,6 +783,197 @@ esp_err_t tool_hardware_init(void) {
 
     ESP_LOGI(TAG, "Legacy ADC init disabled");
 
+    return ESP_OK;
+}
+
+/* --- I2S Driver Support (Phase 4) --- */
+static i2s_chan_handle_t s_tx_handle = NULL;
+static i2s_chan_handle_t s_rx_handle = NULL;
+
+static esp_err_t audio_ensure_tx_init(void) {
+    if (s_tx_handle) return ESP_OK;
+
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
+    chan_cfg.dma_desc_num = 6;
+    chan_cfg.dma_frame_num = 240;
+    chan_cfg.auto_clear = true;
+
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(44100),
+        .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = MIMI_PIN_I2S1_BCLK,
+            .ws = MIMI_PIN_I2S1_LRC,
+            .dout = MIMI_PIN_I2S1_DIN,
+            .din = I2S_GPIO_UNUSED,
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv = false,
+            },
+        },
+    };
+
+    esp_err_t ret = i2s_new_channel(&chan_cfg, &s_tx_handle, NULL);
+    if (ret != ESP_OK) return ret;
+    
+    ret = i2s_channel_init_std_mode(s_tx_handle, &std_cfg);
+    if (ret != ESP_OK) return ret;
+    
+    ret = i2s_channel_enable(s_tx_handle);
+    if (ret != ESP_OK) return ret;
+    
+    ESP_LOGI(TAG, "I2S TX (Amp) initialized on I2S_NUM_1");
+    return ESP_OK;
+}
+
+static esp_err_t audio_ensure_rx_init(void) {
+    if (s_rx_handle) return ESP_OK;
+
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    chan_cfg.dma_desc_num = 6;
+    chan_cfg.dma_frame_num = 240;
+
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
+        .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = MIMI_PIN_I2S0_SCK,
+            .ws = MIMI_PIN_I2S0_WS,
+            .dout = I2S_GPIO_UNUSED,
+            .din = MIMI_PIN_I2S0_SD,
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv = false,
+            },
+        },
+    };
+
+    esp_err_t ret = i2s_new_channel(&chan_cfg, NULL, &s_rx_handle);
+    if (ret != ESP_OK) return ret;
+
+    ret = i2s_channel_init_std_mode(s_rx_handle, &std_cfg);
+    if (ret != ESP_OK) return ret;
+
+    ret = i2s_channel_enable(s_rx_handle);
+    if (ret != ESP_OK) return ret;
+
+    ESP_LOGI(TAG, "I2S RX (Mic) initialized on I2S_NUM_0");
+    return ESP_OK;
+}
+
+esp_err_t tool_i2s_read(const char *input, char *output, size_t out_len) {
+    cJSON *in_json = cJSON_Parse(input);
+    int bytes_to_read = 4096;
+    if (in_json) {
+        cJSON *bytes_item = cJSON_GetObjectItem(in_json, "bytes");
+        if (bytes_item && cJSON_IsNumber(bytes_item)) {
+            bytes_to_read = bytes_item->valueint;
+        }
+        cJSON_Delete(in_json);
+    }
+
+    if (bytes_to_read > 32768) bytes_to_read = 32768;
+    if (bytes_to_read < 0) bytes_to_read = 4096;
+
+    if (audio_ensure_rx_init() != ESP_OK) {
+        snprintf(output, out_len, "Error: I2S RX init failed");
+        return ESP_OK;
+    }
+
+    void *buf = heap_caps_malloc(bytes_to_read, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        snprintf(output, out_len, "Error: OOM");
+        return ESP_OK;
+    }
+
+    size_t bytes_read = 0;
+    esp_err_t ret = i2s_channel_read(s_rx_handle, buf, bytes_to_read, &bytes_read, 1000 / portTICK_PERIOD_MS);
+    
+    if (ret != ESP_OK) {
+        free(buf);
+        snprintf(output, out_len, "Error: Read failed %s", esp_err_to_name(ret));
+        return ESP_OK;
+    }
+
+    size_t b64_len = 0;
+    mbedtls_base64_encode(NULL, 0, &b64_len, buf, bytes_read);
+    char *b64_buf = heap_caps_malloc(b64_len + 1, MALLOC_CAP_SPIRAM);
+    if (!b64_buf) {
+        free(buf);
+        snprintf(output, out_len, "Error: OOM B64");
+        return ESP_OK;
+    }
+
+    mbedtls_base64_encode((unsigned char *)b64_buf, b64_len, &b64_len, buf, bytes_read);
+    b64_buf[b64_len] = 0;
+    
+    /* Truncate if too long for output buffer, though usually output buffer is small */
+    /* Wait, output buffer is usually tool output buffer which is small (4KB?) */
+    /* If user asks for too much, it won't fit in JSON output */
+    
+    if (strlen(b64_buf) + 64 > out_len) {
+         snprintf(output, out_len, "Error: Result too large for output buffer (%d bytes)", (int)b64_len);
+    } else {
+         snprintf(output, out_len, "{\"bytes_read\":%d,\"data_base64\":\"%s\"}", (int)bytes_read, b64_buf);
+    }
+    
+    free(b64_buf);
+    free(buf);
+    return ESP_OK;
+}
+
+esp_err_t tool_i2s_write(const char *input, char *output, size_t out_len) {
+    cJSON *in_json = cJSON_Parse(input);
+    if (!in_json) {
+        snprintf(output, out_len, "Error: Invalid JSON");
+        return ESP_OK;
+    }
+    cJSON *data_item = cJSON_GetObjectItem(in_json, "data_base64");
+    if (!data_item || !cJSON_IsString(data_item)) {
+        cJSON_Delete(in_json);
+        snprintf(output, out_len, "Error: Missing data_base64");
+        return ESP_OK;
+    }
+
+    const char *b64_data = data_item->valuestring;
+    size_t b64_len = strlen(b64_data);
+    size_t out_buf_len = b64_len * 3 / 4 + 4;
+    unsigned char *pcm_buf = heap_caps_malloc(out_buf_len, MALLOC_CAP_SPIRAM);
+    if (!pcm_buf) {
+        cJSON_Delete(in_json);
+        snprintf(output, out_len, "Error: OOM");
+        return ESP_OK;
+    }
+
+    size_t pcm_len = 0;
+    int ret_b64 = mbedtls_base64_decode(pcm_buf, out_buf_len, &pcm_len, (const unsigned char *)b64_data, b64_len);
+    cJSON_Delete(in_json);
+
+    if (ret_b64 != 0) {
+        free(pcm_buf);
+        snprintf(output, out_len, "Error: Base64 decode failed");
+        return ESP_OK;
+    }
+
+    if (audio_ensure_tx_init() != ESP_OK) {
+        free(pcm_buf);
+        snprintf(output, out_len, "Error: I2S TX init failed");
+        return ESP_OK;
+    }
+
+    size_t bytes_written = 0;
+    esp_err_t ret = i2s_channel_write(s_tx_handle, pcm_buf, pcm_len, &bytes_written, 1000 / portTICK_PERIOD_MS);
+    free(pcm_buf);
+
+    if (ret != ESP_OK) {
+        snprintf(output, out_len, "Error: Write failed %s", esp_err_to_name(ret));
+    } else {
+        snprintf(output, out_len, "OK: Wrote %d bytes to I2S1", (int)bytes_written);
+    }
     return ESP_OK;
 }
 
