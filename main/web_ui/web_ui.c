@@ -1479,16 +1479,16 @@ static int extract_json_string(const char *json, const char *key, char *out, siz
 
 static esp_err_t agent_post_handler(httpd_req_t *req)
 {
+    enum { AGENT_POST_MAX_BODY = 131072 }; /* 128 KB */
     int total = req->content_len;
-    if (total <= 0 || total > 32768) {
+    if (total <= 0 || total > AGENT_POST_MAX_BODY) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Body too large");
         return ESP_FAIL;
     }
 
     char *buf = heap_caps_malloc(total + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    char *val = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!buf || !val) {
-        free(buf); free(val);
+    if (!buf) {
+        free(buf);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
@@ -1496,25 +1496,39 @@ static esp_err_t agent_post_handler(httpd_req_t *req)
     int received = 0;
     while (received < total) {
         int n = httpd_req_recv(req, buf + received, total - received);
-        if (n <= 0) { free(buf); free(val); return ESP_FAIL; }
+        if (n <= 0) { free(buf); return ESP_FAIL; }
         received += n;
     }
     buf[received] = '\0';
 
-    int len;
-    len = extract_json_string(buf, "soul", val, 8192);
-    if (len > 0) write_spiffs_file(MIMI_SOUL_FILE, val, len);
+    cJSON *root = cJSON_Parse(buf);
+    free(buf);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
 
-    len = extract_json_string(buf, "user", val, 8192);
-    if (len > 0) write_spiffs_file(MIMI_USER_FILE, val, len);
+    cJSON *item = cJSON_GetObjectItem(root, "soul");
+    if (cJSON_IsString(item) && item->valuestring) {
+        write_spiffs_file(MIMI_SOUL_FILE, item->valuestring, strlen(item->valuestring));
+    }
 
-    len = extract_json_string(buf, "memory", val, 8192);
-    if (len > 0) write_spiffs_file(MIMI_MEMORY_FILE, val, len);
+    item = cJSON_GetObjectItem(root, "user");
+    if (cJSON_IsString(item) && item->valuestring) {
+        write_spiffs_file(MIMI_USER_FILE, item->valuestring, strlen(item->valuestring));
+    }
 
-    len = extract_json_string(buf, "heartbeat", val, 8192);
-    if (len > 0) write_spiffs_file(MIMI_HEARTBEAT_FILE, val, len);
+    item = cJSON_GetObjectItem(root, "memory");
+    if (cJSON_IsString(item) && item->valuestring) {
+        write_spiffs_file(MIMI_MEMORY_FILE, item->valuestring, strlen(item->valuestring));
+    }
 
-    free(buf); free(val);
+    item = cJSON_GetObjectItem(root, "heartbeat");
+    if (cJSON_IsString(item) && item->valuestring) {
+        write_spiffs_file(MIMI_HEARTBEAT_FILE, item->valuestring, strlen(item->valuestring));
+    }
+
+    cJSON_Delete(root);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"success\":true}", 16);
