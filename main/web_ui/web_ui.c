@@ -8,6 +8,8 @@
 #if CONFIG_MIMI_ENABLE_OTA
 #include "../ota/ota_manager.h"
 #endif
+#include "agent/agent_loop.h"
+#include "agent/mcp_manager.h"
 #include "../federation/peer_manager.h"
 #include "../federation/federation_api.h"
 #include "../skills/skill_rollback.h"
@@ -2238,6 +2240,94 @@ static esp_err_t tools_exec_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ── MCP Manager API ───────────────────────────────────────────── */
+
+static esp_err_t mcp_sources_get_handler(httpd_req_t *req)
+{
+    char *json = mcp_manager_get_sources_json();
+    if (json) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, json, strlen(json));
+        free(json);
+    } else {
+        httpd_resp_send_500(req);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t mcp_sources_add_handler(httpd_req_t *req)
+{
+    char buf[512];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) return ESP_FAIL;
+    buf[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *name = cJSON_GetObjectItem(root, "name");
+    cJSON *url = cJSON_GetObjectItem(root, "url");
+    cJSON *transport = cJSON_GetObjectItem(root, "transport");
+    
+    if (!cJSON_IsString(name) || !cJSON_IsString(url)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing fields");
+        return ESP_FAIL;
+    }
+
+    int id = mcp_manager_add_source(name->valuestring, 
+                                   transport ? transport->valuestring : "websocket",
+                                   url->valuestring, 
+                                   true); // Auto-connect by default
+    cJSON_Delete(root);
+
+    if (id > 0) {
+        char resp[64];
+        snprintf(resp, sizeof(resp), "{\"id\":%d}", id);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, resp, strlen(resp));
+    } else {
+        httpd_resp_send_500(req);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t mcp_source_action_handler(httpd_req_t *req)
+{
+    char buf[128];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) return ESP_FAIL;
+    buf[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *id_item = cJSON_GetObjectItem(root, "id");
+    cJSON *action = cJSON_GetObjectItem(root, "action");
+
+    if (!cJSON_IsNumber(id_item) || !cJSON_IsString(action)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing id or action");
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = mcp_manager_source_action(id_item->valueint, action->valuestring);
+    cJSON_Delete(root);
+
+    if (err == ESP_OK) {
+        httpd_resp_send(req, "{\"status\":\"ok\"}", -1);
+    } else {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Action failed");
+    }
+    return ESP_OK;
+}
+
 /* ── Server Init ───────────────────────────────────────────────── */
 
 esp_err_t web_ui_init(void)
@@ -2490,6 +2580,28 @@ esp_err_t web_ui_init(void)
         .handler = zigbee_control_handler,
     };
     httpd_register_uri_handler(s_http_server, &api_zb_ctrl);
+
+    /* Register MCP Manager API */
+    httpd_uri_t api_mcp_sources = {
+        .uri = "/api/mcp/sources",
+        .method = HTTP_GET,
+        .handler = mcp_sources_get_handler,
+    };
+    httpd_register_uri_handler(s_http_server, &api_mcp_sources);
+
+    httpd_uri_t api_mcp_add = {
+        .uri = "/api/mcp/sources/add",
+        .method = HTTP_POST,
+        .handler = mcp_sources_add_handler,
+    };
+    httpd_register_uri_handler(s_http_server, &api_mcp_add);
+    
+    httpd_uri_t api_mcp_action = {
+        .uri = "/api/mcp/sources/action", // Matches simpler pattern
+        .method = HTTP_POST,
+        .handler = mcp_source_action_handler,
+    };
+    httpd_register_uri_handler(s_http_server, &api_mcp_action);
 
     /* Register Federation API */
     federation_api_register(s_http_server);

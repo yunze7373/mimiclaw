@@ -60,7 +60,7 @@
 #include "discovery/mdns_service.h"
 #endif
 #if CONFIG_MIMI_ENABLE_MCP
-#include "agent/mcp_client.h"
+#include "agent/mcp_manager.h"
 #endif
 #if CONFIG_MIMI_ENABLE_HA
 #include "extensions/ha_integration.h"
@@ -336,8 +336,8 @@ void app_main(void)
 
 #if CONFIG_MIMI_ENABLE_MCP
     const char *mcp_deps[] = {"wifi", "tool_reg", NULL};
-    comp_register("mcp_client", COMP_LAYER_EXTENSION, false, true,
-                  mcp_client_init, NULL, NULL, mcp_deps);
+    comp_register("mcp_manager", COMP_LAYER_EXTENSION, false, true,
+                  mcp_manager_init, NULL, NULL, mcp_deps);
 #endif
 
 #if CONFIG_MIMI_ENABLE_HA
