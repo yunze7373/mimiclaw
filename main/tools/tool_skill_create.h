@@ -23,3 +23,9 @@ esp_err_t tool_skill_create_execute(const char *input_json, char *output, size_t
  * Input JSON: {} (no parameters)
  */
 esp_err_t tool_skill_list_templates_execute(const char *input_json, char *output, size_t output_size);
+
+/**
+ * Get the Lua source code for a specific skill template.
+ * Input JSON: { "name": "i2c_sensor" }
+ */
+esp_err_t tool_skill_get_template_execute(const char *input_json, char *output, size_t output_size);

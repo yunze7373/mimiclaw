@@ -175,6 +175,95 @@ typedef struct {
     const char *bus;
 } template_info_t;
 
+static const char *s_template_content[] = {
+    /* i2c_sensor */
+    "SKILL = {\n"
+    "    name = \"i2c_sensor_demo\",\n"
+    "    version = \"1.0.0\",\n"
+    "    author = \"agent\",\n"
+    "    description = \"Reads generic I2C register\",\n"
+    "    classification = { category=\"hardware\", type=\"sensor\", bus=\"i2c\" },\n"
+    "    permissions = { i2c={\"i2c0\"} }\n"
+    "}\n\n"
+    "function read_reg(reg)\n"
+    "    -- Assuming i2c0 is configured. addr=0x40 example\n"
+    "    local dev_addr = 0x40\n"
+    "    local i2c_num = 0\n"
+    "    -- Write register address\n"
+    "    local ok = mimi.i2c_write(i2c_num, dev_addr, string.char(reg))\n"
+    "    if not ok then return nil, \"write failed\" end\n"
+    "    -- Read 1 byte\n"
+    "    local data = mimi.i2c_read(i2c_num, dev_addr, 1)\n"
+    "    if not data then return nil, \"read failed\" end\n"
+    "    return string.byte(data, 1)\n"
+    "end\n\n"
+    "TOOLS = {\n"
+    "    {\n"
+    "        name = \"read_value\",\n"
+    "        description = \"Read sensor value from register\",\n"
+    "        parameters = { type=\"object\", properties={ reg={type=\"integer\"} }, required={\"reg\"} },\n"
+    "        handler = function(args)\n"
+    "            local val, err = read_reg(args.reg)\n"
+    "            if err then return { error=err } end\n"
+    "            return { value=val }\n"
+    "        end\n"
+    "    }\n"
+    "}",
+
+    /* gpio_control */
+    "SKILL = {\n"
+    "    name = \"gpio_toggle\",\n"
+    "    version = \"1.0.0\",\n"
+    "    author = \"agent\",\n"
+    "    description = \"Control GPIO pin\",\n"
+    "    classification = { category=\"hardware\", type=\"actuator\", bus=\"gpio\" },\n"
+    "    permissions = { gpio={\"18\"} } -- Example pin\n"
+    "}\n\n"
+    "local PIN = 18\n\n"
+    "function set_state(on)\n"
+    "    mimi.gpio_set_direction(PIN, mimi.GPIO_MODE_OUTPUT)\n"
+    "    mimi.gpio_set_level(PIN, on and 1 or 0)\n"
+    "    return true\n"
+    "end\n\n"
+    "TOOLS = {\n"
+    "    {\n"
+    "        name = \"set_led\",\n"
+    "        description = \"Turn LED on or off\",\n"
+    "        parameters = { type=\"object\", properties={ on={type=\"boolean\"} }, required={\"on\"} },\n"
+    "        handler = function(args)\n"
+    "            set_state(args.on)\n"
+    "            return { ok=true, state=args.on }\n"
+    "        end\n"
+    "    }\n"
+    "}",
+
+    /* timer_service */
+    "SKILL = {\n"
+    "    name = \"timer_demo\",\n"
+    "    version = \"1.0.0\",\n"
+    "    author = \"agent\",\n"
+    "    description = \"Runs a task every 5 seconds\",\n"
+    "    classification = { category=\"software\", type=\"service\", bus=\"none\" }\n"
+    "}\n\n"
+    "local count = 0\n\n"
+    "function on_timer()\n"
+    "    count = count + 1\n"
+    "    print(\"Timer tick: \" .. count)\n"
+    "end\n\n"
+    "-- Timer ID 0, 5000ms interval, periodic=true\n"
+    "mimi.timer_start(0, 5000, true, \"on_timer\")\n\n"
+    "TOOLS = {\n"
+    "    {\n"
+    "        name = \"get_count\",\n"
+    "        description = \"Get current timer tick count\",\n"
+    "        parameters = { type=\"object\", properties={}, required={} },\n"
+    "        handler = function(args)\n"
+    "            return { count=count }\n"
+    "        end\n"
+    "    }\n"
+    "}"
+};
+
 static const template_info_t s_templates[] = {
     {
         .name     = "i2c_sensor",
@@ -211,13 +300,6 @@ esp_err_t tool_skill_list_templates_execute(const char *input_json, char *output
         cJSON_AddStringToObject(obj, "category", s_templates[i].category);
         cJSON_AddStringToObject(obj, "type", s_templates[i].type);
         cJSON_AddStringToObject(obj, "bus", s_templates[i].bus);
-
-        /* Build template file path */
-        char path[96];
-        snprintf(path, sizeof(path), "%s/skills/.t/%s.tmpl",
-                 MIMI_SPIFFS_BASE, s_templates[i].name);
-        cJSON_AddStringToObject(obj, "template_path", path);
-
         cJSON_AddItemToArray(arr, obj);
     }
 
@@ -231,5 +313,54 @@ esp_err_t tool_skill_list_templates_execute(const char *input_json, char *output
         snprintf(output, output_size, "[]");
     }
 
+    return ESP_OK;
+}
+
+esp_err_t tool_skill_get_template_execute(const char *input_json, char *output, size_t output_size)
+{
+    cJSON *root = cJSON_Parse(input_json);
+    if (!root) {
+        snprintf(output, output_size, "Error: Invalid JSON input");
+        return ESP_FAIL;
+    }
+    
+    cJSON *name = cJSON_GetObjectItem(root, "name");
+    if (!cJSON_IsString(name)) {
+        cJSON_Delete(root);
+        snprintf(output, output_size, "Error: 'name' parameter required");
+        return ESP_FAIL;
+    }
+    
+    int idx = -1;
+    int count = sizeof(s_templates) / sizeof(s_templates[0]);
+    for(int i=0; i<count; i++) {
+        if (strcmp(s_templates[i].name, name->valuestring) == 0) {
+            idx = i;
+            break;
+        }
+    }
+    
+    cJSON_Delete(root);
+    
+    if (idx < 0) {
+        snprintf(output, output_size, "Error: Template '%s' not found", name->valuestring);
+        return ESP_OK; /* Not a system error, just not found */
+    }
+    
+    /* Return JSON object with code */
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "name", s_templates[idx].name);
+    cJSON_AddStringToObject(resp, "code", s_template_content[idx]);
+    
+    char *json = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
+    
+    if (json) {
+        snprintf(output, output_size, "%s", json);
+        free(json);
+    } else {
+        snprintf(output, output_size, "{\"error\":\"out of memory\"}");
+    }
+    
     return ESP_OK;
 }

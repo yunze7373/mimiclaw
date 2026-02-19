@@ -59,6 +59,9 @@
 #if CONFIG_MIMI_ENABLE_MDNS
 #include "discovery/mdns_service.h"
 #endif
+#if CONFIG_MIMI_ENABLE_MCP
+#include "agent/mcp_client.h"
+#endif
 #include "component/component_mgr.h"
 
 static const char *TAG = "mimi";
@@ -325,6 +328,12 @@ void app_main(void)
                   mdns_service_init, mdns_service_start, NULL, mdns_deps);
 #endif
 
+#if CONFIG_MIMI_ENABLE_MCP
+    const char *mcp_deps[] = {"wifi", "tool_reg", NULL};
+    comp_register("mcp_client", COMP_LAYER_EXTENSION, false, true,
+                  mcp_client_init, NULL, NULL, mcp_deps);
+#endif
+
     /* ── Phase 3: Load config + Initialize all ──────────────────── */
     comp_load_config();  /* Disable components per /spiffs/config/components.json */
     ESP_ERROR_CHECK(comp_init_all());
@@ -353,7 +362,7 @@ void app_main(void)
 
             /* Start all WiFi-dependent components */
             ESP_LOGI(TAG, "Memory before services: %d KB free",
-                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
+                     (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
 
             comp_start_wifi_dependents();
 
@@ -364,7 +373,7 @@ void app_main(void)
                 MIMI_OUTBOUND_PRIO, NULL, MIMI_OUTBOUND_CORE);
 
             ESP_LOGI(TAG, "Memory after all services: %d KB free",
-                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
+                     (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
             ESP_LOGI(TAG, "All services started!");
         } else {
             ESP_LOGW(TAG, "WiFi connection timeout. Check MIMI_SECRET_WIFI_SSID in mimi_secrets.h");
@@ -375,4 +384,3 @@ void app_main(void)
 
     ESP_LOGI(TAG, "MimiClaw ready. Type 'help' for CLI commands.");
 }
-

@@ -420,6 +420,17 @@ esp_err_t tool_registry_init(void)
     };
     tool_registry_register(&slt);
 
+    mimi_tool_t sgt = {
+        .name = "skill_get_template",
+        .description = "Get the Lua source code for a skill template. Use this to start writing a new skill.",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"Template name (from skill_list_templates)\"}},"
+            "\"required\":[\"name\"]}",
+        .execute = tool_skill_get_template_execute,
+    };
+    tool_registry_register(&sgt);
+
     mimi_tool_t sm = {
         .name = "skill_manage",
         .description = "Manage installed skills: list, delete, or reload. Use delete to uninstall a skill by name. Use reload after manual file changes.",

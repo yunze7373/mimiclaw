@@ -47,6 +47,19 @@ idf_component_register(
         "heartbeat/heartbeat.c"
         "component/component_mgr.c"
         "crypto/ed25519_verify.c"
+        "skills/skill_hw_api.c"
+        "skills/skill_rollback.c"
+        "skills/board_profile.c"
+        "skills/skill_resource_manager.c"
+        "skills/skill_quota.c"
+        "skills/skill_rate_limit.c"
+        "skills/api_skill.c"
+        "federation/peer_manager.c"
+        "federation/peer_control.c"
+        "cron/cron_service.c"
+        "heartbeat/heartbeat.c"
+        "component/component_mgr.c"
+        "crypto/ed25519_verify.c"
         "web_ui/web_ui.c"
         "discovery/mdns_service.c"
     INCLUDE_DIRS
@@ -57,4 +70,5 @@ idf_component_register(
         nvs_flash esp_wifi esp_netif esp_http_client esp_http_server
         esp_https_ota esp_event json spiffs console vfs app_update esp-tls
         driver esp_lcd esp_timer led_strip qrcode esp_adc bt lua mbedtls mdns
+        esp_websocket_client
 )

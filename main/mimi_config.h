@@ -179,6 +179,16 @@
 #ifndef CONFIG_MIMI_ENABLE_MDNS
 #define CONFIG_MIMI_ENABLE_MDNS      1
 #endif
+#ifndef CONFIG_MIMI_ENABLE_MCP
+#define CONFIG_MIMI_ENABLE_MCP       1
+#endif
+
+/* MCP Client */
+#define MIMI_MCP_SERVER_URL          "ws://192.168.1.10:3000"
+#define MIMI_MCP_RECONNECT_MS        5000
+#define MIMI_MCP_TASK_STACK          (6 * 1024)
+#define MIMI_MCP_TASK_PRIO           4
+#define MIMI_MCP_TASK_CORE           1
 
 /* ========================================
  * Hardware Pin Map — ESP32-S3 Audio Dev Board
