@@ -12,6 +12,7 @@
 #include "heartbeat/heartbeat.h"
 #include "federation/peer_manager.h"
 #include "discovery/mdns_service.h"
+#include "federation/peer_control.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -636,6 +637,29 @@ static int cmd_peer_scan(int argc, char **argv)
     return 0;
 }
 
+/* --- peer_exec command --- */
+static int cmd_peer_exec(int argc, char **argv)
+{
+    if (argc < 3) {
+        printf("Usage: peer_exec <ip> <tool> [json_args]\n");
+        return 1;
+    }
+    const char *target = argv[1];
+    const char *tool = argv[2];
+    const char *args = (argc >= 4) ? argv[3] : "{}";
+
+    char output[4096];
+    esp_err_t err = peer_control_execute_tool(target, tool, args, output, sizeof(output));
+    
+    if (err == ESP_OK) {
+        printf("Peer response:\n%s\n", output);
+        return 0;
+    } else {
+        printf("Execution failed: %s\nResponse: %s\n", esp_err_to_name(err), output);
+        return 1;
+    }
+}
+
 esp_err_t serial_cli_init(void)
 {
     esp_console_repl_t *repl = NULL;
@@ -980,6 +1004,14 @@ esp_err_t serial_cli_init(void)
         .func = &cmd_peer_scan,
     };
     esp_console_cmd_register(&peer_scan_cmd);
+
+    /* peer_exec */
+    esp_console_cmd_t peer_exec_cmd = {
+        .command = "peer_exec",
+        .help = "Execute tool on remote peer",
+        .func = &cmd_peer_exec,
+    };
+    esp_console_cmd_register(&peer_exec_cmd);
 
     /* Start REPL */
     ESP_ERROR_CHECK(esp_console_start_repl(repl));

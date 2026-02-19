@@ -10,6 +10,7 @@
 #endif
 #include "../federation/peer_manager.h"
 #include "../discovery/mdns_service.h"
+#include "../tools/tool_registry.h"
 #include "nvs.h"
 
 #include <string.h>
@@ -1935,6 +1936,66 @@ static esp_err_t peers_sync_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t tools_exec_handler(httpd_req_t *req)
+{
+    char buf[1024];
+    int ret, remaining = req->content_len;
+    if (remaining >= sizeof(buf)) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    ret = httpd_req_recv(req, buf, remaining);
+    if (ret <= 0) return ESP_FAIL;
+    buf[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    cJSON *tool_item = cJSON_GetObjectItem(root, "tool");
+    cJSON *args_item = cJSON_GetObjectItem(root, "args");
+    if (!cJSON_IsString(tool_item)) {
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    char *args_str = NULL;
+    if (args_item) {
+        args_str = cJSON_PrintUnformatted(args_item);
+    } else {
+        args_str = strdup("{}");
+    }
+
+    /* Execute tool */
+    char *output = heap_caps_calloc(1, 4096, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!output) {
+        if (args_str) free(args_str);
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = tool_registry_execute(tool_item->valuestring, args_str, output, 4096);
+    
+    httpd_resp_set_type(req, "application/json");
+    if (err == ESP_OK) {
+        httpd_resp_send(req, output, strlen(output));
+    } else {
+        /* Send error json */
+        char err_buf[128];
+        snprintf(err_buf, sizeof(err_buf), "{\"error\":\"%s\"}", esp_err_to_name(err));
+        httpd_resp_send(req, err_buf, strlen(err_buf));
+    }
+
+    if (args_str) free(args_str);
+    free(output);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
 /* ── Server Init ───────────────────────────────────────────────── */
 
 esp_err_t web_ui_init(void)
@@ -2098,6 +2159,13 @@ esp_err_t web_ui_init(void)
         .handler = peers_sync_handler,
     };
     httpd_register_uri_handler(server, &api_peers_sync);
+
+    httpd_uri_t api_tools_exec = {
+        .uri = "/api/tools/exec",
+        .method = HTTP_POST,
+        .handler = tools_exec_handler,
+    };
+    httpd_register_uri_handler(server, &api_tools_exec);
 
     tool_hardware_register_handlers(server);
 
