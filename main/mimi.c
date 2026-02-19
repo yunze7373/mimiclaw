@@ -8,6 +8,8 @@
 #include "esp_heap_caps.h"
 #include "esp_spiffs.h"
 #include "nvs_flash.h"
+#include "nvs.h"
+#include "esp_timer.h"
 #include "cJSON.h"
 
 #include "mimi_config.h"
