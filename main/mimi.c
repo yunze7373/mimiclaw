@@ -337,7 +337,7 @@ void app_main(void)
 #if CONFIG_MIMI_ENABLE_MCP
     const char *mcp_deps[] = {"wifi", "tool_reg", NULL};
     comp_register("mcp_manager", COMP_LAYER_EXTENSION, false, true,
-                  mcp_manager_init, NULL, NULL, mcp_deps);
+                  mcp_manager_init, mcp_manager_start, NULL, mcp_deps);
 #endif
 
 #if CONFIG_MIMI_ENABLE_HA

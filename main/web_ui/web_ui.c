@@ -1506,7 +1506,7 @@ static const char *HTML_PAGE =
 "        switchHubTab('market');\n"
 "      }\n"
 "    };\n"
-"\n\"\n"
+""
 ""
 ""
 "    initGPIO();\n"
@@ -1528,7 +1528,21 @@ static const char *HTML_PAGE =
 static esp_err_t index_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_send(req, HTML_PAGE, strlen(HTML_PAGE));
+    /* Send large HTML page in chunks */
+    const char *ptr = HTML_PAGE;
+    size_t len = strlen(HTML_PAGE);
+    size_t chunk_size = 4096;
+    size_t sent = 0;
+
+    while (sent < len) {
+        size_t chunk = (len - sent > chunk_size) ? chunk_size : (len - sent);
+        if (httpd_resp_send_chunk(req, ptr + sent, chunk) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to send HTML chunk");
+            return ESP_FAIL;
+        }
+        sent += chunk;
+    }
+    httpd_resp_send_chunk(req, NULL, 0);
     return ESP_OK;
 }
 

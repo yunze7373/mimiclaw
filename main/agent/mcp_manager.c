@@ -26,17 +26,11 @@ typedef struct {
     bool auto_connect;
     bool enabled;
     mcp_client_t *client;
-    // Request tracking
-    int request_id_seq;
-    SemaphoreHandle_t pending_sema;
-    char *pending_output;
-    size_t pending_output_size;
-    int pending_req_id;
-    bool pending_busy;
 } mcp_source_t;
 
 static mcp_source_t s_sources[MAX_SOURCES];
 static int s_source_id_counter = 1;
+static bool s_mcp_started = false;
 
 typedef struct {
     int source_idx;
@@ -46,9 +40,11 @@ typedef struct {
 
 static mcp_tool_slot_t s_tool_slots[MAX_MCP_TOOLS];
 
-/* ── Tool Trampoline System ──────────────────────────────────────── */
-
+/* Forward decls */
 static esp_err_t mcp_execute_tool(int slot_idx, const char *input_json, char *output, size_t output_size);
+static void save_config(void);
+
+/* ── Tool Trampoline System ──────────────────────────────────────── */
 
 #define TRAMPOLINE(N) \
     static esp_err_t mcp_trampoline_##N(const char *input, char *output, size_t len) { \
@@ -76,42 +72,18 @@ static esp_err_t (*s_trampolines[MAX_MCP_TOOLS])(const char *, char *, size_t) =
     mcp_trampoline_28, mcp_trampoline_29, mcp_trampoline_30, mcp_trampoline_31
 };
 
-/* ── Callbacks ───────────────────────────────────────────────────── */
+/* ── Tool Registration Logic ─────────────────────────────────────── */
 
-static void on_connect(mcp_client_t *client)
+static void handle_tools_list_response(mcp_source_t *src, const char *json_result)
 {
-    mcp_source_t *src = (mcp_source_t *)mcp_client_get_ctx(client);
-    ESP_LOGI(TAG, "Source %s connected, sending tools/list", src->name);
+    cJSON *root = cJSON_Parse(json_result);
+    if (!root) return;
     
-    const char *msg = "{\"jsonrpc\":\"2.0\",\"method\":\"tools/list\",\"id\":1}";
-    mcp_client_send(client, msg);
-}
-
-static void on_disconnect(mcp_client_t *client)
-{
-    mcp_source_t *src = (mcp_source_t *)mcp_client_get_ctx(client);
-    ESP_LOGI(TAG, "Source %s disconnected", src->name);
-    
-    /* Remove tools associated with this source */
-    bool changed = false;
-    for (int i = 0; i < MAX_MCP_TOOLS; i++) {
-        if (s_tool_slots[i].used && s_tool_slots[i].source_idx == (src - s_sources)) {
-            s_tool_slots[i].used = false;
-            // Note: tool_registry doesn't have an unregister_all mechanism yet besides rebuild
-            changed = true;
-        }
+    cJSON *tools = cJSON_GetObjectItem(root, "tools");
+    if (!cJSON_IsArray(tools)) {
+        cJSON_Delete(root);
+        return;
     }
-    if (changed) {
-        // We really should unregister specific tools, but registry is simple. 
-        // For now, rebuild global JSON. Ghost entries might remain in array until reboot if registry doesn't support removal.
-        // TODO: Implement tool_registry_remove_by_prefix or similar.
-    }
-}
-
-static void handle_tools_list_response(mcp_source_t *src, cJSON *result)
-{
-    cJSON *tools = cJSON_GetObjectItem(result, "tools");
-    if (!cJSON_IsArray(tools)) return;
 
     int src_idx = (int)(src - s_sources);
     int tools_added = 0;
@@ -126,10 +98,7 @@ static void handle_tools_list_response(mcp_source_t *src, cJSON *result)
                 break;
             }
         }
-        if (slot == -1) {
-            ESP_LOGW(TAG, "Max MCP tools limit reached (%d)", MAX_MCP_TOOLS);
-            break;
-        }
+        if (slot == -1) break;
 
         cJSON *name = cJSON_GetObjectItem(tool, "name");
         cJSON *desc = cJSON_GetObjectItem(tool, "description");
@@ -139,11 +108,6 @@ static void handle_tools_list_response(mcp_source_t *src, cJSON *result)
             mcp_tool_slot_t *ts = &s_tool_slots[slot];
             ts->source_idx = src_idx;
             snprintf(ts->original_name, sizeof(ts->original_name), "%s", name->valuestring);
-            
-            /* Register with registry */
-            /* We construct a unique name if needed? For now allow collision or prefix? */
-            /* Let's prefix to avoid collision: "source_name:tool_name" ?? */
-            /* No, just use name for now, simpler for Agent */
             
             char schema_str[1024] = "{}";
             if (schema) {
@@ -167,52 +131,81 @@ static void handle_tools_list_response(mcp_source_t *src, cJSON *result)
     }
     ESP_LOGI(TAG, "Added %d tools from %s", tools_added, src->name);
     tool_registry_rebuild_json();
+    cJSON_Delete(root);
 }
+
+/* ── Callbacks ───────────────────────────────────────────────────── */
 
 static void on_message(mcp_client_t *client, const char *json, size_t len)
 {
-    mcp_source_t *src = (mcp_source_t *)mcp_client_get_ctx(client);
-
-    // esp_websocket_client payload is not guaranteed to be null-terminated.
-    // Copy into a temporary buffer before parsing JSON.
-    char *buf = malloc(len + 1);
-    if (!buf) return;
-    memcpy(buf, json, len);
-    buf[len] = '\0';
-    
-    cJSON *json_root = cJSON_Parse(buf);
-    free(buf);
-    
-    if (!json_root) return;
-
-    cJSON *id = cJSON_GetObjectItem(json_root, "id");
-    cJSON *result = cJSON_GetObjectItem(json_root, "result");
-    cJSON *error = cJSON_GetObjectItem(json_root, "error");
-
-    if (cJSON_IsNumber(id)) {
-        if (id->valueint == 1) { /* Init handshake */
-            handle_tools_list_response(src, result);
-        } 
-        else if (src->pending_busy && src->pending_req_id == id->valueint) {
-             /* Handle execution result */
-             if (error) {
-                 char *est = cJSON_PrintUnformatted(error);
-                 snprintf(src->pending_output, src->pending_output_size, "{\"error\":%s}", est ? est : "unknown");
-                 if(est) free(est);
-             } else if (result) {
-                 // Simplified content extraction
-                 cJSON *content = cJSON_GetObjectItem(result, "content");
-                 char *cstr = cJSON_PrintUnformatted(content ? content : result);
-                 snprintf(src->pending_output, src->pending_output_size, "%s", cstr ? cstr : "{}");
-                 if(cstr) free(cstr);
-             }
-             xSemaphoreGive(src->pending_sema);
-        }
-    }
-    cJSON_Delete(json_root);
+    // Notifications (no ID) go here.
+    // Assuming mcp_client handles Response (ID) matching internally.
+    // ESP_LOGD(TAG, "Notification: %.*s", (int)len, json);
 }
 
-/* ── Trampoline Logic ────────────────────────────────────────────── */
+static void on_tools_list(void *ctx, int id, const char *json_result, esp_err_t err)
+{
+    mcp_source_t *src = (mcp_source_t *)ctx;
+    if (err == ESP_OK && json_result) {
+        handle_tools_list_response(src, json_result);
+    } else {
+        ESP_LOGE(TAG, "tools/list failed for %s", src->name);
+    }
+}
+
+static void on_connect(mcp_client_t *client)
+{
+    mcp_source_t *src = (mcp_source_t *)mcp_client_get_ctx(client);
+    ESP_LOGI(TAG, "Source %s connected, refreshing tools...", src->name);
+    
+    // Request tools/list
+    mcp_client_send_request(client, "tools/list", NULL, on_tools_list, src);
+}
+
+static void on_disconnect(mcp_client_t *client)
+{
+    mcp_source_t *src = (mcp_source_t *)mcp_client_get_ctx(client);
+    ESP_LOGI(TAG, "Source %s disconnected cleaning up tools", src->name);
+    
+    // Cleanup tools logic
+    for (int i = 0; i < MAX_MCP_TOOLS; i++) {
+        if (s_tool_slots[i].used && s_tool_slots[i].source_idx == (src - s_sources)) {
+            s_tool_slots[i].used = false;
+        }
+    }
+    tool_registry_rebuild_json();
+}
+
+/* ── Tool Execution Wrapper ──────────────────────────────────────── */
+
+typedef struct {
+    SemaphoreHandle_t sema;
+    char *output_buf;
+    size_t output_len;
+} tool_exec_ctx_t;
+
+static void on_tool_call_result(void *ctx, int id, const char *json_result, esp_err_t err)
+{
+    tool_exec_ctx_t *tctx = (tool_exec_ctx_t *)ctx;
+    if (err == ESP_OK && json_result) {
+        // Extract content from result
+        cJSON *root = cJSON_Parse(json_result);
+        if (root) {
+            cJSON *content = cJSON_GetObjectItem(root, "content");
+            char *s = cJSON_PrintUnformatted(content ? content : root); // Content or full result? MCP says result has content.
+            if (s) {
+                snprintf(tctx->output_buf, tctx->output_len, "%s", s);
+                free(s);
+            }
+            cJSON_Delete(root);
+        } else {
+             snprintf(tctx->output_buf, tctx->output_len, "{}");
+        }
+    } else {
+        snprintf(tctx->output_buf, tctx->output_len, "{\"error\":\"RPC Error\"}");
+    }
+    xSemaphoreGive(tctx->sema);
+}
 
 static esp_err_t mcp_execute_tool(int slot_idx, const char *input_json, char *output, size_t output_size)
 {
@@ -227,52 +220,170 @@ static esp_err_t mcp_execute_tool(int slot_idx, const char *input_json, char *ou
          snprintf(output, output_size, "{\"error\":\"Server disconnected\"}");
          return ESP_OK;
     }
-    
-    /* Lock source for request */
-    if (src->pending_busy) {
-        snprintf(output, output_size, "{\"error\":\"Server busy\"}");
-        return ESP_OK;
-    }
-    
-    src->pending_busy = true;
-    src->pending_req_id = ++src->request_id_seq;
-    if (src->request_id_seq < 10) src->request_id_seq = 10;
-    
-    src->pending_output = output;
-    src->pending_output_size = output_size;
-    
-    if (!src->pending_sema) src->pending_sema = xSemaphoreCreateBinary();
-    xSemaphoreTake(src->pending_sema, 0);
 
-    /* Construct JSON-RPC */
-    cJSON *req = cJSON_CreateObject();
-    cJSON_AddStringToObject(req, "jsonrpc", "2.0");
-    cJSON_AddStringToObject(req, "method", "tools/call");
-    cJSON_AddNumberToObject(req, "id", src->pending_req_id);
+    tool_exec_ctx_t tctx = {
+        .sema = xSemaphoreCreateBinary(),
+        .output_buf = output,
+        .output_len = output_size
+    };
+    
+    cJSON *args = cJSON_Parse(input_json);
     cJSON *params = cJSON_CreateObject();
     cJSON_AddStringToObject(params, "name", slot->original_name);
-    cJSON *args = cJSON_Parse(input_json);
     if (args) cJSON_AddItemToObject(params, "arguments", args);
-    cJSON_AddItemToObject(req, "params", params);
+    char *params_str = cJSON_PrintUnformatted(params);
+    cJSON_Delete(params);
     
-    char *req_str = cJSON_PrintUnformatted(req);
-    cJSON_Delete(req);
+    esp_err_t err = mcp_client_send_request(src->client, "tools/call", params_str, on_tool_call_result, &tctx);
+    free(params_str);
     
-    if (req_str) {
-        mcp_client_send(src->client, req_str);
-        free(req_str);
+    if (err == ESP_OK) {
+        xSemaphoreTake(tctx.sema, pdMS_TO_TICKS(10000)); // 10s timeout
+    } else {
+        snprintf(output, output_size, "{\"error\":\"Send failed\"}");
     }
     
-    /* Wait */
-    if (xSemaphoreTake(src->pending_sema, pdMS_TO_TICKS(10000)) != pdTRUE) {
-        snprintf(output, output_size, "{\"error\":\"Timeout\"}");
-    }
-    
-    src->pending_busy = false;
+    vSemaphoreDelete(tctx.sema);
     return ESP_OK;
 }
 
+/* ── Manager Internal ────────────────────────────────────────────── */
+
+static int add_source_internal(const char *name, const char *transport, const char *url, bool auto_connect, int force_id)
+{
+    int idx = -1;
+    for (int i = 0; i < MAX_SOURCES; i++) {
+        if (s_sources[i].id == 0) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx == -1) return -1;
+
+    mcp_source_t *src = &s_sources[idx];
+    src->id = (force_id > 0) ? force_id : s_source_id_counter++;
+    if (src->id >= s_source_id_counter) s_source_id_counter = src->id + 1;
+    
+    strncpy(src->name, name, sizeof(src->name)-1);
+    strncpy(src->url, url, sizeof(src->url)-1);
+    strncpy(src->transport, transport, sizeof(src->transport)-1);
+    src->auto_connect = auto_connect;
+    src->enabled = true;
+    src->client = NULL;
+
+    return src->id;
+}
+
+static void load_config(void)
+{
+    FILE *f = fopen(CONFIG_PATH, "r");
+    if (!f) return;
+    
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    char *data = malloc(len + 1);
+    if (data) {
+        fread(data, 1, len, f);
+        data[len] = 0;
+        cJSON *root = cJSON_Parse(data);
+        if (root) {
+            cJSON *arr = cJSON_GetObjectItem(root, "sources");
+            cJSON *item = NULL;
+            cJSON_ArrayForEach(item, arr) {
+                cJSON *id = cJSON_GetObjectItem(item, "id");
+                cJSON *name = cJSON_GetObjectItem(item, "name");
+                cJSON *trans = cJSON_GetObjectItem(item, "transport");
+                cJSON *url = cJSON_GetObjectItem(item, "url");
+                cJSON *auto_conn = cJSON_GetObjectItem(item, "auto_connect");
+                
+                if (name && url && trans) {
+                    add_source_internal(name->valuestring, trans->valuestring, url->valuestring, 
+                                        cJSON_IsTrue(auto_conn), id ? id->valueint : 0);
+                }
+            }
+            cJSON_Delete(root);
+        }
+        free(data);
+    }
+    fclose(f);
+}
+
+static void save_config(void)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON *arr = cJSON_CreateArray();
+    cJSON_AddItemToObject(root, "sources", arr);
+    
+    for (int i = 0; i < MAX_SOURCES; i++) {
+        if (s_sources[i].id != 0) {
+            cJSON *item = cJSON_CreateObject();
+            cJSON_AddNumberToObject(item, "id", s_sources[i].id);
+            cJSON_AddStringToObject(item, "name", s_sources[i].name);
+            cJSON_AddStringToObject(item, "transport", s_sources[i].transport);
+            cJSON_AddStringToObject(item, "url", s_sources[i].url);
+            cJSON_AddBoolToObject(item, "auto_connect", s_sources[i].auto_connect);
+            cJSON_AddItemToArray(arr, item);
+        }
+    }
+    
+    char *str = cJSON_Print(root);
+    if (str) {
+        FILE *f = fopen(CONFIG_PATH, "w");
+        if (f) {
+            fprintf(f, "%s", str);
+            fclose(f);
+        }
+        free(str);
+    }
+    cJSON_Delete(root);
+}
+
 /* ── Manager API ─────────────────────────────────────────────────── */
+
+esp_err_t mcp_manager_init(void)
+{
+    load_config();
+    return ESP_OK;
+}
+
+esp_err_t mcp_manager_start(void)
+{
+    s_mcp_started = true;
+    for (int i = 0; i < MAX_SOURCES; i++) {
+        if (s_sources[i].id != 0 && s_sources[i].auto_connect) {
+            mcp_manager_source_action(s_sources[i].id, "connect");
+        }
+    }
+    return ESP_OK;
+}
+
+int mcp_manager_add_source(const char *name, const char *transport, const char *url, bool auto_connect)
+{
+    int id = add_source_internal(name, transport, url, auto_connect, 0);
+    if (id > 0) {
+        save_config();
+        if (auto_connect && s_mcp_started) {
+            mcp_manager_source_action(id, "connect");
+        }
+    }
+    return id;
+}
+
+esp_err_t mcp_manager_remove_source(int id)
+{
+    for (int i = 0; i < MAX_SOURCES; i++) {
+        if (s_sources[i].id == id) {
+            mcp_manager_source_action(id, "disconnect");
+            
+            memset(&s_sources[i], 0, sizeof(mcp_source_t));
+            save_config();
+            return ESP_OK;
+        }
+    }
+    return ESP_ERR_NOT_FOUND;
+}
 
 char *mcp_manager_get_sources_json(void)
 {
@@ -286,72 +397,28 @@ char *mcp_manager_get_sources_json(void)
             cJSON_AddNumberToObject(item, "id", s_sources[i].id);
             cJSON_AddStringToObject(item, "name", s_sources[i].name);
             cJSON_AddStringToObject(item, "url", s_sources[i].url);
-            bool connected = s_sources[i].client && mcp_client_is_connected(s_sources[i].client);
+            
+            bool connected = (s_sources[i].client != NULL);
             cJSON_AddStringToObject(item, "status", connected ? "connected" : "disconnected");
+            
+            /* Count tools for this source */
+            int tool_count = 0;
+            if (connected) {
+                for (int t = 0; t < MAX_MCP_TOOLS; t++) {
+                    if (s_tool_slots[t].original_name && s_tool_slots[t].source_id == s_sources[i].id) {
+                        tool_count++;
+                    }
+                }
+            }
+            cJSON_AddNumberToObject(item, "tools_count", tool_count);
+            
             cJSON_AddItemToArray(arr, item);
         }
     }
-    char *s = cJSON_PrintUnformatted(root);
+    
+    char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
-    return s;
-}
-
-esp_err_t mcp_manager_init(void)
-{
-    // TODO: Load from JSON
-    // For now, init manual source if needed
-    // mcp_manager_add_source("Filesystem", "websocket", "ws://192.168.31.50:8080/mcp", true);
-    return ESP_OK;
-}
-
-int mcp_manager_add_source(const char *name, const char *transport, const char *url, bool auto_connect)
-{
-    int idx = -1;
-    for (int i = 0; i < MAX_SOURCES; i++) {
-        if (s_sources[i].id == 0) {
-            idx = i;
-            break;
-        }
-    }
-    if (idx == -1) return -1;
-
-    mcp_source_t *src = &s_sources[idx];
-    src->id = s_source_id_counter++;
-    strncpy(src->name, name, sizeof(src->name)-1);
-    strncpy(src->url, url, sizeof(src->url)-1);
-    strncpy(src->transport, transport, sizeof(src->transport)-1);
-    src->auto_connect = auto_connect;
-    src->enabled = true;
-
-    if (auto_connect) {
-        mcp_manager_source_action(src->id, "connect");
-    }
-    return src->id;
-}
-
-esp_err_t mcp_manager_remove_source(int id)
-{
-    for (int i = 0; i < MAX_SOURCES; i++) {
-        if (s_sources[i].id != id) {
-            continue;
-        }
-
-        mcp_source_t *src = &s_sources[i];
-
-        if (src->client) {
-            mcp_client_disconnect(src->client);
-            mcp_client_destroy(src->client);
-            src->client = NULL;
-        }
-        if (src->pending_sema) {
-            vSemaphoreDelete(src->pending_sema);
-            src->pending_sema = NULL;
-        }
-
-        memset(src, 0, sizeof(*src));
-        return ESP_OK;
-    }
-    return ESP_ERR_NOT_FOUND;
+    return json;
 }
 
 esp_err_t mcp_manager_source_action(int id, const char *action)
@@ -385,6 +452,11 @@ esp_err_t mcp_manager_source_action(int id, const char *action)
             mcp_client_disconnect(src->client);
             mcp_client_destroy(src->client);
             src->client = NULL;
+            on_disconnect(NULL); // Force cleanup visual state? on_disconnect callback usually called by client destroy/event? 
+            // mcp_client_destroy calls stop, which might trigger event?
+            // Safer to call logic here if event didn't fire?
+            // Actually destroy might not fire event if loop stopped.
+            // Let's rely on event if possible, but force cleanup too.
         }
         return ESP_OK;
     }

@@ -45,9 +45,34 @@ esp_err_t mcp_client_disconnect(mcp_client_t *client);
 bool mcp_client_is_connected(mcp_client_t *client);
 
 /**
- * Send JSON message.
+ * Send JSON message (raw).
  */
 esp_err_t mcp_client_send(mcp_client_t *client, const char *json_data);
+
+/**
+ * Result callback for requests.
+ * @param ctx User context passed to send_request
+ * @param result JSON object containing result (or error). NULL if timeout/transport error.
+ * @param err ESP_OK or error code
+ */
+typedef void (*mcp_result_cb_t)(void *ctx, int id, const char *json_result, esp_err_t err);
+
+/**
+ * Send a JSON-RPC request with ID tracking.
+ * 
+ * @param client Client handle
+ * @param method Method name (e.g. "tools/list")
+ * @param params JSON object string of params (e.g. "{\"ptr\":...}") or NULL
+ * @param cb Callback to invoke when response with matching ID arrives
+ * @param ctx User context passed to callback
+ * @return ESP_OK if queued
+ */
+esp_err_t mcp_client_send_request(mcp_client_t *client, const char *method, const char *params, mcp_result_cb_t cb, void *ctx);
+
+/**
+ * Send a JSON-RPC notification (no ID, no response).
+ */
+esp_err_t mcp_client_send_notification(mcp_client_t *client, const char *method, const char *params);
 
 /**
  * Get user context.

@@ -5,16 +5,23 @@
 
 /**
  * Initialize MCP Manager.
- * Loads configuration from /spiffs/config/mcp_sources.json and auto-connects enabled sources.
+ * Loads configuration from /spiffs/config/mcp_sources.json but does NOT connect.
  */
 esp_err_t mcp_manager_init(void);
+
+/**
+ * Start MCP Manager.
+ * Connects to all enabled auto-connect sources.
+ * Valid only after WiFi is connected.
+ */
+esp_err_t mcp_manager_start(void);
 
 /**
  * Add a new MCP source.
  * @param name Display name
  * @param transport Protocol (currently only "websocket")
  * @param url Connection URL
- * @param auto_connect if true, connect immediately and on boot
+ * @param auto_connect if true, connect immediately (if started) and on boot
  * @return Source ID (int) or negative error
  */
 int mcp_manager_add_source(const char *name, const char *transport, const char *url, bool auto_connect);
