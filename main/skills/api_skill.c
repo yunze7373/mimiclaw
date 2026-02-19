@@ -21,6 +21,7 @@ typedef struct {
     char path[64];
     char description[128];
     char tool_name[48];        /* Registered tool name: <skill>_<endpoint> */
+    char input_schema_json[512];
 } api_endpoint_t;
 
 typedef struct {
@@ -338,13 +339,15 @@ esp_err_t api_skill_load(const char *name, const char *config_json)
                     "}}", name, i);
             }
 
+            snprintf(e->input_schema_json, sizeof(e->input_schema_json), "%s", schema_buf);
+
             /* Register tool */
             mimi_tool_t tool = {
+                .name = e->tool_name,
+                .description = e->description,
+                .input_schema_json = e->input_schema_json,
                 .execute = api_endpoint_execute,
             };
-            snprintf(tool.name, sizeof(tool.name), "%s", e->tool_name);
-            snprintf(tool.description, sizeof(tool.description), "%s", e->description);
-            snprintf(tool.input_schema, sizeof(tool.input_schema), "%s", schema_buf);
             tool_registry_register(&tool);
 
             ESP_LOGI(TAG, "Registered API tool: %s", e->tool_name);
