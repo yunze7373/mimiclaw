@@ -1,4 +1,5 @@
 #include "discovery/mdns_service.h"
+#include "federation/peer_manager.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -32,6 +33,10 @@ esp_err_t mdns_service_init(void)
     mdns_instance_name_set(MDNS_INSTANCE);
 
     ESP_LOGI(TAG, "mDNS initialized: %s.local", MDNS_HOSTNAME);
+    
+    /* Init peer manager */
+    peer_manager_init();
+    
     return ESP_OK;
 }
 
@@ -73,4 +78,43 @@ void mdns_service_update_skill_count(int count)
     char buf[8];
     snprintf(buf, sizeof(buf), "%d", count);
     mdns_service_txt_item_set(MDNS_SERVICE, MDNS_PROTO, "skills", buf);
+}
+
+void mdns_service_query_peers(void)
+{
+    ESP_LOGI(TAG, "Querying for peers (_mimiclaw._tcp)...");
+    
+    peer_manager_prune();
+
+    mdns_result_t *results = NULL;
+    esp_err_t err = mdns_query_ptr(MDNS_SERVICE, MDNS_PROTO, 3000, 16, &results);
+    if (err) {
+        ESP_LOGW(TAG, "mDNS query failed");
+        return;
+    }
+
+    if (!results) {
+        ESP_LOGW(TAG, "No peers found");
+        return;
+    }
+
+    mdns_result_t *r = results;
+    while (r) {
+        if (r->addr) {
+            char ip_str[16];
+            if (r->addr->addr.type == ESP_IPADDR_TYPE_V4) {
+                snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&r->addr->addr.u_addr.ip4));
+                
+                /* Filter out ourselves if possible, or handle loopback logic elsewhere. 
+                   For now, just add everyone found. */
+                const char *hostname = r->hostname ? r->hostname : (r->instance_name ? r->instance_name : "unknown");
+                
+                ESP_LOGI(TAG, "Found peer: %s @ %s:%d", hostname, ip_str, r->port);
+                peer_manager_add_or_update(hostname, ip_str, r->port);
+            }
+        }
+        r = r->next;
+    }
+
+    mdns_query_results_free(results);
 }

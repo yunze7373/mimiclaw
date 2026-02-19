@@ -40,6 +40,7 @@ idf_component_register(
         "skills/skill_quota.c"
         "skills/skill_rate_limit.c"
         "skills/api_skill.c"
+        "federation/peer_manager.c"
         "cron/cron_service.c"
         "heartbeat/heartbeat.c"
         "component/component_mgr.c"

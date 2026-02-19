@@ -10,6 +10,8 @@
 #include "tools/tool_registry.h"
 #include "cron/cron_service.h"
 #include "heartbeat/heartbeat.h"
+#include "federation/peer_manager.h"
+#include "discovery/mdns_service.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -601,6 +603,38 @@ static int cmd_skill_rollback_list(int argc, char **argv)
     return 0;
 }
 
+/* --- peer_list command --- */
+static int cmd_peer_list(int argc, char **argv)
+{
+    int count = 0;
+    const peer_t *peers = peer_manager_get_list(&count);
+    printf("Active Peers:\n");
+    printf("%-20s %-16s %-6s %s\n", "Hostname", "IP", "Port", "Last Seen");
+    printf("----------------------------------------------------------\n");
+    bool found = false;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    int64_t now = tv.tv_sec;
+
+    for (int i = 0; i < count; i++) {
+        if (peers[i].active) {
+            found = true;
+            printf("%-20s %-16s %-6d %lds ago\n", 
+                   peers[i].hostname, peers[i].ip_addr, peers[i].port, (long)(now - peers[i].last_seen));
+        }
+    }
+    if (!found) printf("(none)\n");
+    return 0;
+}
+
+/* --- peer_scan command --- */
+static int cmd_peer_scan(int argc, char **argv)
+{
+    printf("Scanning for peers...\n");
+    mdns_service_query_peers();
+    return 0;
+}
+
 esp_err_t serial_cli_init(void)
 {
     esp_console_repl_t *repl = NULL;
@@ -929,6 +963,22 @@ esp_err_t serial_cli_init(void)
         .func = &cmd_skill_rollback_list,
     };
     esp_console_cmd_register(&skill_rb_list_cmd);
+
+    /* peer_list */
+    esp_console_cmd_t peer_list_cmd = {
+        .command = "peer_list",
+        .help = "List discovered peers",
+        .func = &cmd_peer_list,
+    };
+    esp_console_cmd_register(&peer_list_cmd);
+
+    /* peer_scan */
+    esp_console_cmd_t peer_scan_cmd = {
+        .command = "peer_scan",
+        .help = "Trigger mDNS peer scan",
+        .func = &cmd_peer_scan,
+    };
+    esp_console_cmd_register(&peer_scan_cmd);
 
     /* Start REPL */
     ESP_ERROR_CHECK(esp_console_start_repl(repl));

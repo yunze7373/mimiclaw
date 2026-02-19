@@ -8,6 +8,7 @@
 #if CONFIG_MIMI_ENABLE_OTA
 #include "../ota/ota_manager.h"
 #endif
+#include "../federation/peer_manager.h"
 #include "nvs.h"
 
 #include <string.h>
@@ -1909,6 +1910,28 @@ static esp_err_t firmware_rollback_handler(httpd_req_t *req)
 }
 #endif /* CONFIG_MIMI_ENABLE_OTA */
 
+static esp_err_t peers_get_handler(httpd_req_t *req)
+{
+    char *json = peer_manager_get_json();
+    if (json) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, json, strlen(json));
+        free(json);
+    } else {
+        httpd_resp_send_500(req);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t peers_sync_handler(httpd_req_t *req)
+{
+    /* Trigger mDNS query */
+    mdns_service_query_peers();
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"status\":\"ok\",\"message\":\"Scan started\"}", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 /* ── Server Init ───────────────────────────────────────────────── */
 
 esp_err_t web_ui_init(void)
@@ -2058,6 +2081,20 @@ esp_err_t web_ui_init(void)
         .handler = skills_delete_handler,
     };
     httpd_register_uri_handler(server, &api_skills_delete);
+
+    httpd_uri_t api_peers_get = {
+        .uri = "/api/peers",
+        .method = HTTP_GET,
+        .handler = peers_get_handler,
+    };
+    httpd_register_uri_handler(server, &api_peers_get);
+
+    httpd_uri_t api_peers_sync = {
+        .uri = "/api/peers/sync",
+        .method = HTTP_POST,
+        .handler = peers_sync_handler,
+    };
+    httpd_register_uri_handler(server, &api_peers_sync);
 
     tool_hardware_register_handlers(server);
 
