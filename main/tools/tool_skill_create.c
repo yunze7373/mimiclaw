@@ -204,7 +204,7 @@ esp_err_t tool_skill_list_templates_execute(const char *input_json, char *output
 
         /* Build template file path */
         char path[96];
-        snprintf(path, sizeof(path), "%s/skills/.templates/%s.lua.tmpl",
+        snprintf(path, sizeof(path), "%s/skills/.t/%s.tmpl",
                  MIMI_SPIFFS_BASE, s_templates[i].name);
         cJSON_AddStringToObject(obj, "template_path", path);
 
