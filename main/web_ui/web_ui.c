@@ -2235,6 +2235,201 @@ static esp_err_t tools_exec_handler(httpd_req_t *req)
 }
 
 /* ── Server Init ───────────────────────────────────────────────── */
+    snprintf(resp, sizeof(resp), "{\"version\":\"%s\"}", ver ? ver : "unknown");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t firmware_status_handler(httpd_req_t *req)
+{
+    char *json = ota_status_json();
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+    free(json);
+    return ESP_OK;
+}
+
+static esp_err_t firmware_check_handler(httpd_req_t *req)
+{
+    char body[512];
+    int ret = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (ret <= 0) return ESP_FAIL;
+    body[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(body);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *url = cJSON_GetObjectItem(root, "url");
+    if (!cJSON_IsString(url)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing url");
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = ota_check_for_update(url->valuestring);
+    cJSON_Delete(root);
+
+    char resp[256];
+    if (err == ESP_OK) {
+        snprintf(resp, sizeof(resp),
+                 "{\"update_available\":true,\"version\":\"%s\",\"download_url\":\"%s\"}",
+                 ota_get_pending_version() ? ota_get_pending_version() : "",
+                 ota_get_pending_url() ? ota_get_pending_url() : "");
+    } else {
+        snprintf(resp, sizeof(resp),
+                 "{\"update_available\":false,\"current_version\":\"%s\"}",
+                 ota_get_current_version() ? ota_get_current_version() : "unknown");
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t firmware_update_handler(httpd_req_t *req)
+{
+    char body[512];
+    int ret = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (ret <= 0) return ESP_FAIL;
+    body[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(body);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *url = cJSON_GetObjectItem(root, "url");
+    if (!cJSON_IsString(url)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing url");
+        return ESP_FAIL;
+    }
+
+    /* Respond first, OTA will reboot on success */
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"updating\":true}", HTTPD_RESP_USE_STRLEN);
+
+    /* Start OTA in the current context — will reboot on success */
+    ota_update_from_url(url->valuestring);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t firmware_confirm_handler(httpd_req_t *req)
+{
+    esp_err_t err = ota_confirm_running_firmware();
+    char resp[128];
+    snprintf(resp, sizeof(resp), "{\"success\":%s}",
+             err == ESP_OK ? "true" : "false");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t firmware_rollback_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"rolling_back\":true}", HTTPD_RESP_USE_STRLEN);
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+    ota_rollback();  /* will reboot */
+    return ESP_OK;
+}
+#endif /* CONFIG_MIMI_ENABLE_OTA */
+
+static esp_err_t peers_get_handler(httpd_req_t *req)
+{
+    char *json = peer_manager_get_json();
+    if (json) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, json, strlen(json));
+        free(json);
+    } else {
+        httpd_resp_send_500(req);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t peers_sync_handler(httpd_req_t *req)
+{
+    /* Trigger mDNS query */
+#if CONFIG_MIMI_ENABLE_MDNS
+    mdns_service_query_peers();
+#endif
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"status\":\"ok\",\"message\":\"Scan started\"}", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t tools_exec_handler(httpd_req_t *req)
+{
+    char buf[1024];
+    int ret, remaining = req->content_len;
+    if (remaining >= sizeof(buf)) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    ret = httpd_req_recv(req, buf, remaining);
+    if (ret <= 0) return ESP_FAIL;
+    buf[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    cJSON *tool_item = cJSON_GetObjectItem(root, "tool");
+    cJSON *args_item = cJSON_GetObjectItem(root, "args");
+    if (!cJSON_IsString(tool_item)) {
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    char *args_str = NULL;
+    if (args_item) {
+        args_str = cJSON_PrintUnformatted(args_item);
+    } else {
+        args_str = strdup("{}");
+    }
+
+    /* Execute tool */
+    char *output = heap_caps_calloc(1, 4096, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!output) {
+        if (args_str) free(args_str);
+        cJSON_Delete(root);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = tool_registry_execute(tool_item->valuestring, args_str, output, 4096);
+    
+    httpd_resp_set_type(req, "application/json");
+    if (err == ESP_OK) {
+        httpd_resp_send(req, output, strlen(output));
+    } else {
+        /* Send error json */
+        char err_buf[128];
+        snprintf(err_buf, sizeof(err_buf), "{\"error\":\"%s\"}", esp_err_to_name(err));
+        httpd_resp_send(req, err_buf, strlen(err_buf));
+    }
+
+    if (args_str) free(args_str);
+    free(output);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+/* ── Server Init ───────────────────────────────────────────────── */
 
 esp_err_t web_ui_init(void)
 {
@@ -2244,11 +2439,6 @@ esp_err_t web_ui_init(void)
     config.max_open_sockets = 3;  /* keep low — only serves HTML/JSON */
     /* Keep headroom for optional modules (HA/MCP/etc.) to register endpoints later. */
     config.max_uri_handlers = 64;
-
-    esp_err_t ret = httpd_start(&s_http_server, &config);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start HTTP server");
-        return ret;
     }
 
     httpd_uri_t index_uri = {
