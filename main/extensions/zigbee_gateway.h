@@ -3,7 +3,7 @@
 #include "esp_err.h"
 #include <stdint.h>
 #include <stdbool.h>
-#include "httpd.h"
+#include "esp_http_server.h"
 
 #define ZIGBEE_MAX_DEVICES 16
 
