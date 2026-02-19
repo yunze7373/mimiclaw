@@ -329,6 +329,31 @@ int mcp_manager_add_source(const char *name, const char *transport, const char *
     return src->id;
 }
 
+esp_err_t mcp_manager_remove_source(int id)
+{
+    for (int i = 0; i < MAX_SOURCES; i++) {
+        if (s_sources[i].id != id) {
+            continue;
+        }
+
+        mcp_source_t *src = &s_sources[i];
+
+        if (src->client) {
+            mcp_client_disconnect(src->client);
+            mcp_client_destroy(src->client);
+            src->client = NULL;
+        }
+        if (src->pending_sema) {
+            vSemaphoreDelete(src->pending_sema);
+            src->pending_sema = NULL;
+        }
+
+        memset(src, 0, sizeof(*src));
+        return ESP_OK;
+    }
+    return ESP_ERR_NOT_FOUND;
+}
+
 esp_err_t mcp_manager_source_action(int id, const char *action)
 {
     mcp_source_t *src = NULL;
