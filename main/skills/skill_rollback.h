@@ -1,36 +1,26 @@
 #pragma once
 
 #include "esp_err.h"
-#include <stdbool.h>
 
 /**
- * Backup a skill's current files before overwriting.
- * Copies main.lua + manifest.json to .rollback/<name>/
- *
- * @param name  Skill name (directory name under /spiffs/skills/)
+ * Backup the current version of a skill before overwriting.
+ * @param skill_name Name of the skill to backup
  * @return ESP_OK on success
  */
-esp_err_t skill_rollback_backup(const char *name);
+esp_err_t skill_rollback_backup(const char *skill_name);
 
 /**
- * Restore a skill from its backup (.rollback/<name>/).
- * Copies backed-up files back and re-initializes the skill engine.
- *
- * @param name  Skill name
+ * Restore a skill from a specific backup version.
+ * @param skill_name Name of the skill
+ * @param version Version identifier (timestamp or hash) to restore
  * @return ESP_OK on success
  */
-esp_err_t skill_rollback_restore(const char *name);
+esp_err_t skill_rollback_restore(const char *skill_name, const char *version);
 
 /**
- * Check if a rollback backup exists for the given skill.
- *
- * @param name  Skill name
- * @return true if backup exists
+ * List available backups for a skill as JSON.
+ * Caller must free the returned string.
+ * @param skill_name Name of the skill
+ * @return JSON string or NULL on error
  */
-bool skill_rollback_exists(const char *name);
-
-/**
- * List all skills that have rollback backups.
- * @return JSON string (caller must free), e.g. ["skill_a","skill_b"]
- */
-char *skill_rollback_list_json(void);
+char *skill_rollback_list_json(const char *skill_name);

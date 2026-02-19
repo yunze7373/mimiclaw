@@ -1,183 +1,146 @@
 #include "skills/skill_rollback.h"
-#include "mimi_config.h"
-#include "cJSON.h"
-
+#include "skills/skill_engine.h"
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <dirent.h>
-#include <errno.h>
+#include <time.h>
 #include "esp_log.h"
-
-#if CONFIG_MIMI_ENABLE_SKILLS
-#include "skills/skill_engine.h"
-#endif
+#include "cJSON.h"
 
 static const char *TAG = "skill_rollback";
 
-/* ── Helpers ─────────────────────────────────────────────────────── */
+#define SKILL_BASE_DIR "/spiffs/skills"
+#define ROLLBACK_DIR   "/spiffs/skills/.rollback"
+#define MAX_BACKUPS    3
 
-/* Copy a file from src to dst. Returns ESP_OK on success. */
+static void ensure_rollback_dir(const char *skill_name)
+{
+    char path[128];
+    snprintf(path, sizeof(path), "%s/%s", ROLLBACK_DIR, skill_name);
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        mkdir(ROLLBACK_DIR, 0755);
+        mkdir(path, 0755);
+    }
+}
+
 static esp_err_t copy_file(const char *src, const char *dst)
 {
-    FILE *fin = fopen(src, "r");
-    if (!fin) return ESP_ERR_NOT_FOUND;
+    FILE *f_src = fopen(src, "rb");
+    if (!f_src) return ESP_FAIL;
 
-    FILE *fout = fopen(dst, "w");
-    if (!fout) {
-        fclose(fin);
+    FILE *f_dst = fopen(dst, "wb");
+    if (!f_dst) {
+        fclose(f_src);
         return ESP_FAIL;
     }
 
-    char buf[256];
+    char buf[512];
     size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), fin)) > 0) {
-        fwrite(buf, 1, n, fout);
+    while ((n = fread(buf, 1, sizeof(buf), f_src)) > 0) {
+        fwrite(buf, 1, n, f_dst);
     }
 
-    fclose(fin);
-    fclose(fout);
+    fclose(f_src);
+    fclose(f_dst);
     return ESP_OK;
 }
 
-/* Check if a file exists */
-static bool file_exists(const char *path)
+esp_err_t skill_rollback_backup(const char *skill_name)
 {
+    char src_main[128], src_manifest[128];
+    snprintf(src_main, sizeof(src_main), "%s/%s/main.lua", SKILL_BASE_DIR, skill_name);
+    snprintf(src_manifest, sizeof(src_manifest), "%s/%s/manifest.json", SKILL_BASE_DIR, skill_name);
+
     struct stat st;
-    return (stat(path, &st) == 0);
-}
-
-/* ── Public API ──────────────────────────────────────────────────── */
-
-esp_err_t skill_rollback_backup(const char *name)
-{
-    if (!name || !name[0]) return ESP_ERR_INVALID_ARG;
-
-    /* Source: /spiffs/skills/<name>/main.lua */
-    char src_lua[80], src_manifest[80];
-    snprintf(src_lua, sizeof(src_lua), "%s/skills/%s/main.lua", MIMI_SPIFFS_BASE, name);
-    snprintf(src_manifest, sizeof(src_manifest), "%s/skills/%s/manifest.json", MIMI_SPIFFS_BASE, name);
-
-    /* Check source exists */
-    if (!file_exists(src_lua)) {
-        ESP_LOGW(TAG, "No main.lua for '%s', skip backup", name);
-        return ESP_ERR_NOT_FOUND;
+    if (stat(src_main, &st) != 0) {
+        ESP_LOGW(TAG, "No existing skill '%s' to backup", skill_name);
+        return ESP_OK; /* Nothing to backup is fine */
     }
 
-    /* Create rollback dir: /spiffs/skills/.rb/<name>/ */
-    char rb_dir[80];
-    snprintf(rb_dir, sizeof(rb_dir), "%s/skills/.rb", MIMI_SPIFFS_BASE);
-    mkdir(rb_dir, 0755);
+    ensure_rollback_dir(skill_name);
 
-    char rb_skill_dir[80];
-    snprintf(rb_skill_dir, sizeof(rb_skill_dir), "%s/skills/.rb/%s", MIMI_SPIFFS_BASE, name);
-    mkdir(rb_skill_dir, 0755);
+    /* Generate timestamp version: YYYYMMDD_HHMMSS */
+    time_t now;
+    time(&now);
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+    char version[32];
+    strftime(version, sizeof(version), "%Y%m%d_%H%M%S", &timeinfo);
 
-    /* Copy main.lua */
-    char dst_lua[96];
-    snprintf(dst_lua, sizeof(dst_lua), "%s/main.lua", rb_skill_dir);
-    esp_err_t err = copy_file(src_lua, dst_lua);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to backup main.lua for '%s'", name);
-        return err;
+    char dst_main[128], dst_manifest[128];
+    snprintf(dst_main, sizeof(dst_main), "%s/%s/main.lua.%s", ROLLBACK_DIR, skill_name, version);
+    snprintf(dst_manifest, sizeof(dst_manifest), "%s/%s/manifest.json.%s", ROLLBACK_DIR, skill_name, version);
+
+    ESP_LOGI(TAG, "Backing up '%s' to version '%s'", skill_name, version);
+    
+    if (copy_file(src_main, dst_main) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to backup main.lua");
+        return ESP_FAIL;
     }
+    
+    /* Manifest is optional but good to have */
+    copy_file(src_manifest, dst_manifest);
 
-    /* Copy manifest.json if exists */
-    if (file_exists(src_manifest)) {
-        char dst_manifest[96];
-        snprintf(dst_manifest, sizeof(dst_manifest), "%s/manifest.json", rb_skill_dir);
-        copy_file(src_manifest, dst_manifest);
-    }
-
-    ESP_LOGI(TAG, "Backup created for skill '%s'", name);
-    return ESP_OK;
-}
-
-esp_err_t skill_rollback_restore(const char *name)
-{
-    if (!name || !name[0]) return ESP_ERR_INVALID_ARG;
-
-    /* Source: /spiffs/skills/.rb/<name>/main.lua */
-    char rb_lua[96], rb_manifest[96];
-    snprintf(rb_lua, sizeof(rb_lua), "%s/skills/.rb/%s/main.lua", MIMI_SPIFFS_BASE, name);
-    snprintf(rb_manifest, sizeof(rb_manifest), "%s/skills/.rb/%s/manifest.json", MIMI_SPIFFS_BASE, name);
-
-    if (!file_exists(rb_lua)) {
-        ESP_LOGW(TAG, "No rollback backup for '%s'", name);
-        return ESP_ERR_NOT_FOUND;
-    }
-
-    /* Destination: /spiffs/skills/<name>/ */
-    char dst_dir[80];
-    snprintf(dst_dir, sizeof(dst_dir), "%s/skills/%s", MIMI_SPIFFS_BASE, name);
-    mkdir(dst_dir, 0755);
-
-    char dst_lua[96], dst_manifest[96];
-    snprintf(dst_lua, sizeof(dst_lua), "%s/main.lua", dst_dir);
-    snprintf(dst_manifest, sizeof(dst_manifest), "%s/manifest.json", dst_dir);
-
-    esp_err_t err = copy_file(rb_lua, dst_lua);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to restore main.lua for '%s'", name);
-        return err;
-    }
-
-    if (file_exists(rb_manifest)) {
-        copy_file(rb_manifest, dst_manifest);
-    }
-
-    ESP_LOGI(TAG, "Skill '%s' restored from backup", name);
-
-    /* Re-initialize skill engine to pick up restored skill */
-#if CONFIG_MIMI_ENABLE_SKILLS
-    skill_engine_init();
-#endif
+    // TODO: implement pruning of old backups (MAX_BACKUPS)
 
     return ESP_OK;
 }
 
-bool skill_rollback_exists(const char *name)
+esp_err_t skill_rollback_restore(const char *skill_name, const char *version)
 {
-    char path[96];
-    snprintf(path, sizeof(path), "%s/skills/.rb/%s/main.lua", MIMI_SPIFFS_BASE, name);
-    return file_exists(path);
+    char src_main[128], src_manifest[128];
+    snprintf(src_main, sizeof(src_main), "%s/%s/main.lua.%s", ROLLBACK_DIR, skill_name, version);
+    snprintf(src_manifest, sizeof(src_manifest), "%s/%s/manifest.json.%s", ROLLBACK_DIR, skill_name, version);
+
+    char dst_main[128], dst_manifest[128];
+    snprintf(dst_main, sizeof(dst_main), "%s/%s/main.lua", SKILL_BASE_DIR, skill_name);
+    snprintf(dst_manifest, sizeof(dst_manifest), "%s/%s/manifest.json", SKILL_BASE_DIR, skill_name);
+
+    struct stat st;
+    if (stat(src_main, &st) != 0) {
+        ESP_LOGE(TAG, "Backup version '%s' not found for skill '%s'", version, skill_name);
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    ESP_LOGI(TAG, "Restoring '%s' from version '%s'", skill_name, version);
+
+    if (copy_file(src_main, dst_main) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to restore main.lua");
+        return ESP_FAIL;
+    }
+    
+    copy_file(src_manifest, dst_manifest);
+
+    /* Reload engine to pick up changes */
+    return skill_engine_init();
 }
 
-char *skill_rollback_list_json(void)
+char *skill_rollback_list_json(const char *skill_name)
 {
-    cJSON *arr = cJSON_CreateArray();
+    char dir_path[128];
+    snprintf(dir_path, sizeof(dir_path), "%s/%s", ROLLBACK_DIR, skill_name);
 
-    char rb_dir[80];
-    snprintf(rb_dir, sizeof(rb_dir), "%s/skills/.rb", MIMI_SPIFFS_BASE);
+    DIR *d = opendir(dir_path);
+    if (!d) return NULL;
 
-    DIR *dir = opendir(rb_dir);
-    if (dir) {
-        struct dirent *ent;
-        while ((ent = readdir(dir)) != NULL) {
-            if (ent->d_type == DT_DIR && ent->d_name[0] != '.') {
-                /* Verify main.lua exists in this backup */
-                char check[96];
-                const char suffix[] = "/main.lua";
-                size_t rb_len = strlen(rb_dir);
-                size_t name_len = strlen(ent->d_name);
-                size_t need = rb_len + 1 + name_len + sizeof(suffix); /* +1 for '/' and suffix includes NUL */
-                if (need > sizeof(check)) {
-                    ESP_LOGW(TAG, "Rollback path too long, skip: %s/%s", rb_dir, ent->d_name);
-                    continue;
-                }
-                memcpy(check, rb_dir, rb_len);
-                check[rb_len] = '/';
-                memcpy(check + rb_len + 1, ent->d_name, name_len);
-                memcpy(check + rb_len + 1 + name_len, suffix, sizeof(suffix));
-                if (file_exists(check)) {
-                    cJSON_AddItemToArray(arr, cJSON_CreateString(ent->d_name));
-                }
-            }
+    cJSON *root = cJSON_CreateObject();
+    cJSON *backups = cJSON_CreateArray();
+    cJSON_AddItemToObject(root, "backups", backups);
+
+    struct dirent *entry;
+    while ((entry = readdir(d)) != NULL) {
+        if (strstr(entry->d_name, "main.lua.")) {
+            /* version is suffix after main.lua. */
+            char *ver = entry->d_name + 9; /* strlen("main.lua.") */
+            cJSON_AddItemToArray(backups, cJSON_CreateString(ver));
         }
-        closedir(dir);
     }
+    closedir(d);
 
-    char *json = cJSON_PrintUnformatted(arr);
-    cJSON_Delete(arr);
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
     return json;
 }

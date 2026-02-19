@@ -10,6 +10,7 @@
 #endif
 #include "../federation/peer_manager.h"
 #include "../federation/federation_api.h"
+#include "../skills/skill_rollback.h"
 #include "../discovery/mdns_service.h"
 #include "../tools/tool_registry.h"
 #include "nvs.h"
@@ -1944,6 +1945,72 @@ static esp_err_t skills_delete_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t skills_rollback_history_handler(httpd_req_t *req)
+{
+    char query[128] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing query");
+        return ESP_FAIL;
+    }
+
+    char name[64] = {0};
+    if (httpd_query_key_value(query, "name", name, sizeof(name)) != ESP_OK || !name[0]) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing name");
+        return ESP_FAIL;
+    }
+
+    char *json = skill_rollback_list_json(name);
+    if (!json) {
+        /* If no history or error, return empty list */
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"backups\":[]}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+    free(json);
+    return ESP_OK;
+}
+
+static esp_err_t skills_rollback_handler(httpd_req_t *req)
+{
+    char body[256];
+    int ret = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (ret <= 0) return ESP_FAIL;
+    body[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(body);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *name_item = cJSON_GetObjectItem(root, "name");
+    cJSON *ver_item = cJSON_GetObjectItem(root, "version");
+
+    if (!cJSON_IsString(name_item) || !cJSON_IsString(ver_item)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing name or version");
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = skill_rollback_restore(name_item->valuestring, ver_item->valuestring);
+    cJSON_Delete(root);
+
+    if (err != ESP_OK) {
+        char resp[128];
+        snprintf(resp, sizeof(resp), "{\"success\":false,\"error\":\"%s\"}", esp_err_to_name(err));
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 static esp_err_t skills_reload_handler(httpd_req_t *req)
 {
     esp_err_t err = skill_engine_init();
@@ -2321,6 +2388,20 @@ esp_err_t web_ui_init(void)
         .handler = skills_reload_handler,
     };
     httpd_register_uri_handler(s_http_server, &api_skills_reload);
+
+    httpd_uri_t api_skills_rollback_hist = {
+        .uri = "/api/skills/rollback",
+        .method = HTTP_GET,
+        .handler = skills_rollback_history_handler,
+    };
+    httpd_register_uri_handler(s_http_server, &api_skills_rollback_hist);
+
+    httpd_uri_t api_skills_rollback = {
+        .uri = "/api/skills/rollback",
+        .method = HTTP_POST,
+        .handler = skills_rollback_handler,
+    };
+    httpd_register_uri_handler(s_http_server, &api_skills_rollback);
 
     httpd_uri_t api_peers_get = {
         .uri = "/api/peers",
