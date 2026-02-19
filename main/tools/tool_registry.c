@@ -31,7 +31,7 @@ static esp_err_t tool_set_streaming_execute(const char *input_json, char *output
     return ESP_OK;
 }
 
-#define MAX_TOOLS 32
+#define MAX_TOOLS 48
 
 static mimi_tool_t s_tools[MAX_TOOLS];
 static int s_tool_count = 0;
