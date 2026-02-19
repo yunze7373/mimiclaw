@@ -22,7 +22,7 @@
 #include "mimi_config.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/i2s.h"
+/* remove driver/i2s.h to avoid header conflicts, we use audio.h */
 #include "mbedtls/base64.h"
 
 #define HW_NVS_NAMESPACE "hw_config"
@@ -230,6 +230,15 @@ esp_err_t tool_system_status(const char *input, char *output, size_t out_len) {
             char pin_str[8];
             snprintf(pin_str, sizeof(pin_str), "%d", i);
             cJSON_AddNumberToObject(gpio_obj, pin_str, level);
+        }
+    }
+
+    /* Audio Status */
+    char audio_info[128];
+    if (audio_get_info(audio_info, sizeof(audio_info)) == ESP_OK) {
+        cJSON *audio_json = cJSON_Parse(audio_info);
+        if (audio_json) {
+            cJSON_AddItemToObject(root, "audio", audio_json);
         }
     }
 
@@ -786,75 +795,9 @@ esp_err_t tool_hardware_init(void) {
     return ESP_OK;
 }
 
-/* --- I2S Driver Support (Phase 4) - Legacy API --- */
-#if 0
-static int s_tx_port = -1; /* Amp */
-    if (s_tx_port != -1) return ESP_OK;
+/* --- I2S Driver Support (Phase 4) - Wrapper around audio.c --- */
 
-    i2s_config_t i2s_config = {
-        .mode = I2S_MODE_MASTER | I2S_MODE_TX,
-        .sample_rate = 44100,
-        .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-        .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count = 6,
-        .dma_buf_len = 240,
-        .use_apll = false,
-        .tx_desc_auto_clear = true,
-    };
-
-    i2s_pin_config_t pin_config = {
-        .bck_io_num = MIMI_PIN_I2S1_BCLK,
-        .ws_io_num = MIMI_PIN_I2S1_LRC,
-        .data_out_num = MIMI_PIN_I2S1_DIN,
-        .data_in_num = I2S_PIN_NO_CHANGE
-    };
-
-    esp_err_t ret = i2s_driver_install(I2S_NUM_1, &i2s_config, 0, NULL);
-    if (ret != ESP_OK) return ret;
-    
-    ret = i2s_set_pin(I2S_NUM_1, &pin_config);
-    if (ret != ESP_OK) return ret;
-    
-    s_tx_port = I2S_NUM_1;
-    ESP_LOGI(TAG, "I2S TX (Amp) initialized on I2S_NUM_1");
-    return ESP_OK;
-}
-
-static esp_err_t audio_ensure_rx_init(void) {
-    if (s_rx_port != -1) return ESP_OK;
-
-    i2s_config_t i2s_config = {
-        .mode = I2S_MODE_MASTER | I2S_MODE_RX,
-        .sample_rate = 16000,
-        .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-        .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-        .dma_buf_count = 6,
-        .dma_buf_len = 240,
-        .use_apll = false,
-        .tx_desc_auto_clear = false,
-    };
-
-    i2s_pin_config_t pin_config = {
-        .bck_io_num = MIMI_PIN_I2S0_SCK,
-        .ws_io_num = MIMI_PIN_I2S0_WS,
-        .data_out_num = I2S_PIN_NO_CHANGE,
-        .data_in_num = MIMI_PIN_I2S0_SD
-    };
-
-    esp_err_t ret = i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
-    if (ret != ESP_OK) return ret;
-
-    ret = i2s_set_pin(I2S_NUM_0, &pin_config);
-    if (ret != ESP_OK) return ret;
-
-    s_rx_port = I2S_NUM_0;
-    ESP_LOGI(TAG, "I2S RX (Mic) initialized on I2S_NUM_0");
-    return ESP_OK;
-}
+#include "../audio/audio.h"
 
 esp_err_t tool_i2s_read(const char *input, char *output, size_t out_len) {
     cJSON *in_json = cJSON_Parse(input);
@@ -870,26 +813,29 @@ esp_err_t tool_i2s_read(const char *input, char *output, size_t out_len) {
     if (bytes_to_read > 32768) bytes_to_read = 32768;
     if (bytes_to_read < 0) bytes_to_read = 4096;
 
-    if (audio_ensure_rx_init() != ESP_OK) {
-        snprintf(output, out_len, "Error: I2S RX init failed");
+    /* Ensure mic is started */
+    esp_err_t err = audio_mic_start();
+    if (err != ESP_OK) {
+        snprintf(output, out_len, "Error: Mic start failed: %s", esp_err_to_name(err));
         return ESP_OK;
     }
 
+    /* Allocate buffer in PSRAM */
     void *buf = heap_caps_malloc(bytes_to_read, MALLOC_CAP_SPIRAM);
     if (!buf) {
         snprintf(output, out_len, "Error: OOM");
         return ESP_OK;
     }
 
-    size_t bytes_read = 0;
-    esp_err_t ret = i2s_read(s_rx_port, buf, bytes_to_read, &bytes_read, 1000 / portTICK_PERIOD_MS);
+    int bytes_read = audio_mic_read(buf, bytes_to_read);
     
-    if (ret != ESP_OK) {
+    if (bytes_read <= 0) {
         free(buf);
-        snprintf(output, out_len, "Error: Read failed %s", esp_err_to_name(ret));
+        snprintf(output, out_len, "Error: Read returned %d bytes", bytes_read);
         return ESP_OK;
     }
 
+    /* Base64 Encode */
     size_t b64_len = 0;
     mbedtls_base64_encode(NULL, 0, &b64_len, buf, bytes_read);
     char *b64_buf = heap_caps_malloc(b64_len + 1, MALLOC_CAP_SPIRAM);
@@ -946,20 +892,21 @@ esp_err_t tool_i2s_write(const char *input, char *output, size_t out_len) {
         return ESP_OK;
     }
 
-    if (audio_ensure_tx_init() != ESP_OK) {
+    /* Ensure speaker is started */
+    esp_err_t err = audio_speaker_start();
+    if (err != ESP_OK) {
         free(pcm_buf);
-        snprintf(output, out_len, "Error: I2S TX init failed");
+        snprintf(output, out_len, "Error: Speaker start failed: %s", esp_err_to_name(err));
         return ESP_OK;
     }
 
-    size_t bytes_written = 0;
-    esp_err_t ret = i2s_write(s_tx_port, pcm_buf, pcm_len, &bytes_written, 1000 / portTICK_PERIOD_MS);
+    err = audio_speaker_write(pcm_buf, pcm_len);
     free(pcm_buf);
 
-    if (ret != ESP_OK) {
-        snprintf(output, out_len, "Error: Write failed %s", esp_err_to_name(ret));
+    if (err != ESP_OK) {
+        snprintf(output, out_len, "Error: Write failed %s", esp_err_to_name(err));
     } else {
-        snprintf(output, out_len, "OK: Wrote %d bytes to I2S1", (int)bytes_written);
+        snprintf(output, out_len, "OK: Wrote %d bytes to Speaker", (int)pcm_len);
     }
     return ESP_OK;
 }
