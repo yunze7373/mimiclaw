@@ -22,7 +22,7 @@
 #include "mimi_config.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/i2s_std.h"
+#include "driver/i2s.h"
 #include "mbedtls/base64.h"
 
 #define HW_NVS_NAMESPACE "hw_config"
@@ -786,81 +786,74 @@ esp_err_t tool_hardware_init(void) {
     return ESP_OK;
 }
 
-/* --- I2S Driver Support (Phase 4) --- */
-static i2s_chan_handle_t s_tx_handle = NULL;
-static i2s_chan_handle_t s_rx_handle = NULL;
+/* --- I2S Driver Support (Phase 4) - Legacy API --- */
+static int s_tx_port = -1; /* Amp */
+static int s_rx_port = -1; /* Mic */
 
 static esp_err_t audio_ensure_tx_init(void) {
-    if (s_tx_handle) return ESP_OK;
+    if (s_tx_port != -1) return ESP_OK;
 
-    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
-    chan_cfg.dma_desc_num = 6;
-    chan_cfg.dma_frame_num = 240;
-    chan_cfg.auto_clear = true;
-
-    i2s_std_config_t std_cfg = {
-        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(44100),
-        .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
-        .gpio_cfg = {
-            .mclk = I2S_GPIO_UNUSED,
-            .bclk = MIMI_PIN_I2S1_BCLK,
-            .ws = MIMI_PIN_I2S1_LRC,
-            .dout = MIMI_PIN_I2S1_DIN,
-            .din = I2S_GPIO_UNUSED,
-            .invert_flags = {
-                .mclk_inv = false,
-                .bclk_inv = false,
-                .ws_inv = false,
-            },
-        },
+    i2s_config_t i2s_config = {
+        .mode = I2S_MODE_MASTER | I2S_MODE_TX,
+        .sample_rate = 44100,
+        .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+        .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+        .dma_buf_count = 6,
+        .dma_buf_len = 240,
+        .use_apll = false,
+        .tx_desc_auto_clear = true,
     };
 
-    esp_err_t ret = i2s_new_channel(&chan_cfg, &s_tx_handle, NULL);
+    i2s_pin_config_t pin_config = {
+        .bck_io_num = MIMI_PIN_I2S1_BCLK,
+        .ws_io_num = MIMI_PIN_I2S1_LRC,
+        .data_out_num = MIMI_PIN_I2S1_DIN,
+        .data_in_num = I2S_PIN_NO_CHANGE
+    };
+
+    esp_err_t ret = i2s_driver_install(I2S_NUM_1, &i2s_config, 0, NULL);
     if (ret != ESP_OK) return ret;
     
-    ret = i2s_channel_init_std_mode(s_tx_handle, &std_cfg);
+    ret = i2s_set_pin(I2S_NUM_1, &pin_config);
     if (ret != ESP_OK) return ret;
     
-    ret = i2s_channel_enable(s_tx_handle);
-    if (ret != ESP_OK) return ret;
-    
+    s_tx_port = I2S_NUM_1;
     ESP_LOGI(TAG, "I2S TX (Amp) initialized on I2S_NUM_1");
     return ESP_OK;
 }
 
 static esp_err_t audio_ensure_rx_init(void) {
-    if (s_rx_handle) return ESP_OK;
+    if (s_rx_port != -1) return ESP_OK;
 
-    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-    chan_cfg.dma_desc_num = 6;
-    chan_cfg.dma_frame_num = 240;
-
-    i2s_std_config_t std_cfg = {
-        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
-        .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
-        .gpio_cfg = {
-            .mclk = I2S_GPIO_UNUSED,
-            .bclk = MIMI_PIN_I2S0_SCK,
-            .ws = MIMI_PIN_I2S0_WS,
-            .dout = I2S_GPIO_UNUSED,
-            .din = MIMI_PIN_I2S0_SD,
-            .invert_flags = {
-                .mclk_inv = false,
-                .bclk_inv = false,
-                .ws_inv = false,
-            },
-        },
+    i2s_config_t i2s_config = {
+        .mode = I2S_MODE_MASTER | I2S_MODE_RX,
+        .sample_rate = 16000,
+        .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
+        .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+        .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+        .dma_buf_count = 6,
+        .dma_buf_len = 240,
+        .use_apll = false,
+        .tx_desc_auto_clear = false,
     };
 
-    esp_err_t ret = i2s_new_channel(&chan_cfg, NULL, &s_rx_handle);
+    i2s_pin_config_t pin_config = {
+        .bck_io_num = MIMI_PIN_I2S0_SCK,
+        .ws_io_num = MIMI_PIN_I2S0_WS,
+        .data_out_num = I2S_PIN_NO_CHANGE,
+        .data_in_num = MIMI_PIN_I2S0_SD
+    };
+
+    esp_err_t ret = i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
     if (ret != ESP_OK) return ret;
 
-    ret = i2s_channel_init_std_mode(s_rx_handle, &std_cfg);
+    ret = i2s_set_pin(I2S_NUM_0, &pin_config);
     if (ret != ESP_OK) return ret;
 
-    ret = i2s_channel_enable(s_rx_handle);
-    if (ret != ESP_OK) return ret;
-
+    s_rx_port = I2S_NUM_0;
     ESP_LOGI(TAG, "I2S RX (Mic) initialized on I2S_NUM_0");
     return ESP_OK;
 }
@@ -891,7 +884,7 @@ esp_err_t tool_i2s_read(const char *input, char *output, size_t out_len) {
     }
 
     size_t bytes_read = 0;
-    esp_err_t ret = i2s_channel_read(s_rx_handle, buf, bytes_to_read, &bytes_read, 1000 / portTICK_PERIOD_MS);
+    esp_err_t ret = i2s_read(s_rx_port, buf, bytes_to_read, &bytes_read, 1000 / portTICK_PERIOD_MS);
     
     if (ret != ESP_OK) {
         free(buf);
@@ -910,10 +903,6 @@ esp_err_t tool_i2s_read(const char *input, char *output, size_t out_len) {
 
     mbedtls_base64_encode((unsigned char *)b64_buf, b64_len, &b64_len, buf, bytes_read);
     b64_buf[b64_len] = 0;
-    
-    /* Truncate if too long for output buffer, though usually output buffer is small */
-    /* Wait, output buffer is usually tool output buffer which is small (4KB?) */
-    /* If user asks for too much, it won't fit in JSON output */
     
     if (strlen(b64_buf) + 64 > out_len) {
          snprintf(output, out_len, "Error: Result too large for output buffer (%d bytes)", (int)b64_len);
@@ -966,7 +955,7 @@ esp_err_t tool_i2s_write(const char *input, char *output, size_t out_len) {
     }
 
     size_t bytes_written = 0;
-    esp_err_t ret = i2s_channel_write(s_tx_handle, pcm_buf, pcm_len, &bytes_written, 1000 / portTICK_PERIOD_MS);
+    esp_err_t ret = i2s_write(s_tx_port, pcm_buf, pcm_len, &bytes_written, 1000 / portTICK_PERIOD_MS);
     free(pcm_buf);
 
     if (ret != ESP_OK) {
