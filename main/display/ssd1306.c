@@ -87,6 +87,12 @@ bool ssd1306_is_connected(void)
     i2c_master_stop(handle);
     esp_err_t ret = i2c_master_cmd_begin(I2C_MASTER_NUM, handle, I2C_TIMEOUT_MS / portTICK_PERIOD_MS);
     i2c_cmd_link_delete(handle);
+
+    /* Clean up driver if we just initialized it for this check */
+    if (!s_inited) {
+        i2c_driver_delete(I2C_MASTER_NUM);
+    }
+
     return ret == ESP_OK;
 }
 

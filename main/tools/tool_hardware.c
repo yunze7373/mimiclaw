@@ -298,8 +298,9 @@ esp_err_t tool_i2c_scan(const char *input, char *output, size_t out_len) {
         esp_err_t ret = i2c_param_config(0, &conf);
         if (ret == ESP_OK) {
             ret = i2c_driver_install(0, I2C_MODE_MASTER, 0, 0, 0);
-            /* ESP_ERR_INVALID_STATE means driver already installed (by IMU) */
-            if (ret == ESP_OK || ret == ESP_ERR_INVALID_STATE) {
+            /* ESP_ERR_INVALID_STATE means driver already installed (by IMU/OLED). 
+             * ESP_FAIL (-1) also seen when re-installing. Assume driver OK if config succeeded. */
+            if (ret == ESP_OK || ret == ESP_ERR_INVALID_STATE || ret == ESP_FAIL) {
                 s_i2c_scan_initialized = true;
             }
         }
@@ -695,8 +696,8 @@ static esp_err_t hw_scan_handler(httpd_req_t *req) {
         esp_err_t ret = i2c_param_config(I2C_NUM_0, &conf);
         if (ret == ESP_OK) {
             ret = i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0);
-            /* ESP_ERR_INVALID_STATE means driver already installed */
-            if (ret == ESP_OK || ret == ESP_ERR_INVALID_STATE) {
+            /* ESP_ERR_INVALID_STATE (-1) means driver already installed */
+            if (ret == ESP_OK || ret == ESP_ERR_INVALID_STATE || ret == ESP_FAIL) {
                 i2c_inited = true;
             }
         }
