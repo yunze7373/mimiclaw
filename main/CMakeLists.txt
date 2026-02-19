@@ -70,5 +70,4 @@ idf_component_register(
         nvs_flash esp_wifi esp_netif esp_http_client esp_http_server
         esp_https_ota esp_event json spiffs console vfs app_update esp-tls
         driver esp_lcd esp_timer led_strip qrcode esp_adc bt lua mbedtls mdns
-        esp_websocket_client
 )
