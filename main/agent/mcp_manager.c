@@ -405,7 +405,7 @@ char *mcp_manager_get_sources_json(void)
             int tool_count = 0;
             if (connected) {
                 for (int t = 0; t < MAX_MCP_TOOLS; t++) {
-                    if (s_tool_slots[t].original_name && s_tool_slots[t].source_id == s_sources[i].id) {
+                    if (s_tool_slots[t].used && s_tool_slots[t].source_idx == i) {
                         tool_count++;
                     }
                 }
