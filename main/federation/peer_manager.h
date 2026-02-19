@@ -19,6 +19,7 @@ typedef struct {
     int64_t last_seen;    /* Timestamp (seconds) */
     bool active;
     int port;             /* Service port (default 80) */
+    char group_id[32];    /* Device group ID */
     /* Potential future fields: role, capabilities, version */
 } peer_t;
 
@@ -32,9 +33,10 @@ void peer_manager_init(void);
  * @param hostname  Device hostname (e.g., mimiclaw-1234)
  * @param ip        IP address string
  * @param port      Service port
+ * @param group_id  Device group ID (optional, default "default")
  * @return ESP_OK on success, ESP_ERR_NO_MEM if list full
  */
-esp_err_t peer_manager_add_or_update(const char *hostname, const char *ip, int port);
+esp_err_t peer_manager_add_or_update(const char *hostname, const char *ip, int port, const char *group_id);
 
 /**
  * Remove stale peers that haven't been seen for PEER_TIMEOUT_SEC.

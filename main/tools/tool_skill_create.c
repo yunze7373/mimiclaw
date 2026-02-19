@@ -16,6 +16,8 @@
 #endif
 
 static const char *TAG = "tool_skill_create";
+/* SPIFFS object name limit is 32, and "/skills/<name>/manifest.json" must fit. */
+#define SKILL_FS_NAME_MAX 10
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
@@ -27,6 +29,30 @@ static bool is_valid_name(const char *name)
         if (!isalnum((unsigned char)name[i]) && name[i] != '_') return false;
     }
     return true;
+}
+
+static uint8_t name_hash8(const char *s)
+{
+    uint8_t h = 0x5a;
+    while (*s) {
+        h ^= (uint8_t)(*s++);
+        h = (uint8_t)((h << 1) | (h >> 7));
+    }
+    return h;
+}
+
+/* Keep names compatible with SPIFFS object-name limit constraints. */
+static void to_fs_skill_name(const char *in, char out[SKILL_FS_NAME_MAX + 1])
+{
+    size_t len = strlen(in);
+    if (len <= SKILL_FS_NAME_MAX) {
+        snprintf(out, SKILL_FS_NAME_MAX + 1, "%s", in);
+        return;
+    }
+
+    uint8_t h = name_hash8(in);
+    /* 7 chars + '_' + 2 hex chars = 10 chars */
+    snprintf(out, SKILL_FS_NAME_MAX + 1, "%.7s_%02x", in, (unsigned)h);
 }
 
 /* Write a file to SPIFFS, creating parent dir if needed */
@@ -93,6 +119,7 @@ esp_err_t tool_skill_create_execute(const char *input_json, char *output, size_t
 
     const char *name = j_name->valuestring;
     const char *code = j_code->valuestring;
+    char skill_name[SKILL_FS_NAME_MAX + 1] = {0};
 
     /* 1. Validate name */
     if (!is_valid_name(name)) {
@@ -102,10 +129,14 @@ esp_err_t tool_skill_create_execute(const char *input_json, char *output, size_t
         cJSON_Delete(root);
         return ESP_FAIL;
     }
+    to_fs_skill_name(name, skill_name);
+    if (strcmp(name, skill_name) != 0) {
+        ESP_LOGW(TAG, "Skill name '%s' normalized to '%s' due to SPIFFS path length limit", name, skill_name);
+    }
 
     /* 2. Create skill directory */
     char dir_path[80];
-    snprintf(dir_path, sizeof(dir_path), "%s/skills/%s", MIMI_SPIFFS_BASE, name);
+    snprintf(dir_path, sizeof(dir_path), "%s/skills/%s", MIMI_SPIFFS_BASE, skill_name);
     mkdir(dir_path, 0755);  /* May fail if exists, that's OK on SPIFFS */
 
     /* 2b. Backup existing skill before overwriting */
@@ -113,8 +144,8 @@ esp_err_t tool_skill_create_execute(const char *input_json, char *output, size_t
     snprintf(existing_lua, sizeof(existing_lua), "%s/main.lua", dir_path);
     struct stat st;
     if (stat(existing_lua, &st) == 0) {
-        ESP_LOGI(TAG, "Backing up existing skill '%s' before overwrite", name);
-        skill_rollback_backup(name);
+        ESP_LOGI(TAG, "Backing up existing skill '%s' before overwrite", skill_name);
+        skill_rollback_backup(skill_name);
     }
 
     /* 3. Write main.lua */
@@ -128,7 +159,7 @@ esp_err_t tool_skill_create_execute(const char *input_json, char *output, size_t
 
     /* 4. Generate and write manifest.json */
     char *manifest = generate_manifest(
-        name,
+        skill_name,
         cJSON_IsString(j_desc) ? j_desc->valuestring : "",
         cJSON_IsString(j_cat)  ? j_cat->valuestring  : NULL,
         cJSON_IsString(j_type) ? j_type->valuestring  : NULL,
@@ -137,11 +168,16 @@ esp_err_t tool_skill_create_execute(const char *input_json, char *output, size_t
     if (manifest) {
         char manifest_path[96];
         snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.json", dir_path);
-        write_file(manifest_path, manifest);
+        if (write_file(manifest_path, manifest) != ESP_OK) {
+            free(manifest);
+            snprintf(output, output_size, "Error: Failed to write %s (skill name may be too long)", manifest_path);
+            cJSON_Delete(root);
+            return ESP_FAIL;
+        }
         free(manifest);
     }
 
-    ESP_LOGI(TAG, "Skill '%s' written to %s", name, dir_path);
+    ESP_LOGI(TAG, "Skill '%s' written to %s", skill_name, dir_path);
 
     /* 5. Hot-reload: re-init skill engine to pick up new skill */
 #if CONFIG_MIMI_ENABLE_SKILLS
@@ -150,7 +186,7 @@ esp_err_t tool_skill_create_execute(const char *input_json, char *output, size_t
         snprintf(output, output_size,
                  "Skill '%s' files saved but reload failed: %s. "
                  "Check Lua syntax and try 'skill_reload' from CLI.",
-                 name, esp_err_to_name(err));
+                 skill_name, esp_err_to_name(err));
         cJSON_Delete(root);
         return ESP_OK;  /* Files saved, just reload issue */
     }
@@ -159,7 +195,7 @@ esp_err_t tool_skill_create_execute(const char *input_json, char *output, size_t
     snprintf(output, output_size,
              "Skill '%s' created and loaded successfully. "
              "Files: %s/main.lua, %s/manifest.json",
-             name, dir_path, dir_path);
+             skill_name, dir_path, dir_path);
 
     cJSON_Delete(root);
     return ESP_OK;

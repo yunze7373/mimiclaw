@@ -69,7 +69,10 @@ esp_err_t mdns_service_start(void)
     /* Also register as HTTP service for browser discovery */
     mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
 
-    ESP_LOGI(TAG, "mDNS service started: %s._mimiclaw._tcp port %d", MDNS_HOSTNAME, MIMI_WS_PORT);
+    /* Add Group ID TXT record */
+    mdns_service_txt_item_set(MDNS_SERVICE, MDNS_PROTO, "group", "default");
+
+    ESP_LOGI(TAG, "mDNS service started: %s._mimiclaw._tcp port %d (group: default)", MDNS_HOSTNAME, MIMI_WS_PORT);
     return ESP_OK;
 }
 
@@ -109,8 +112,17 @@ void mdns_service_query_peers(void)
                    For now, just add everyone found. */
                 const char *hostname = r->hostname ? r->hostname : (r->instance_name ? r->instance_name : "unknown");
                 
-                ESP_LOGI(TAG, "Found peer: %s @ %s:%d", hostname, ip_str, r->port);
-                peer_manager_add_or_update(hostname, ip_str, r->port);
+                /* Extract Group ID from TXT records */
+                const char *group_id = "default";
+                for (int i = 0; i < r->txt_count; i++) {
+                    if (strcmp(r->txt[i].key, "group") == 0) {
+                        group_id = r->txt[i].value;
+                        break;
+                    }
+                }
+
+                ESP_LOGI(TAG, "Found peer: %s @ %s:%d group=%s", hostname, ip_str, r->port, group_id);
+                peer_manager_add_or_update(hostname, ip_str, r->port, group_id);
             }
         }
         r = r->next;

@@ -25,9 +25,10 @@ void peer_manager_init(void)
     ESP_LOGI(TAG, "Peer Manager initialized (max %d peers)", PEER_MAX_COUNT);
 }
 
-esp_err_t peer_manager_add_or_update(const char *hostname, const char *ip, int port)
+esp_err_t peer_manager_add_or_update(const char *hostname, const char *ip, int port, const char *group_id)
 {
     if (!hostname || !ip) return ESP_ERR_INVALID_ARG;
+    if (!group_id) group_id = "default";
 
     int64_t now = get_time_sec();
 
@@ -36,9 +37,10 @@ esp_err_t peer_manager_add_or_update(const char *hostname, const char *ip, int p
         if (s_peers[i].active && strcmp(s_peers[i].hostname, hostname) == 0) {
             /* Update existing */
             strncpy(s_peers[i].ip_addr, ip, sizeof(s_peers[i].ip_addr) - 1);
+            strncpy(s_peers[i].group_id, group_id, sizeof(s_peers[i].group_id) - 1);
             s_peers[i].port = port;
             s_peers[i].last_seen = now;
-            ESP_LOGD(TAG, "Updated peer: %s (%s)", hostname, ip);
+            ESP_LOGD(TAG, "Updated peer: %s (%s) group=%s", hostname, ip, group_id);
             return ESP_OK;
         }
     }
@@ -48,11 +50,12 @@ esp_err_t peer_manager_add_or_update(const char *hostname, const char *ip, int p
         if (!s_peers[i].active) {
             strncpy(s_peers[i].hostname, hostname, sizeof(s_peers[i].hostname) - 1);
             strncpy(s_peers[i].ip_addr, ip, sizeof(s_peers[i].ip_addr) - 1);
+            strncpy(s_peers[i].group_id, group_id, sizeof(s_peers[i].group_id) - 1);
             s_peers[i].port = port;
             s_peers[i].last_seen = now;
             s_peers[i].active = true;
             if (i >= s_peer_count) s_peer_count = i + 1;
-            ESP_LOGI(TAG, "New peer discovered: %s (%s)", hostname, ip);
+            ESP_LOGI(TAG, "New peer discovered: %s (%s) group=%s", hostname, ip, group_id);
             return ESP_OK;
         }
     }
@@ -87,6 +90,7 @@ char *peer_manager_get_json(void)
             cJSON *p = cJSON_CreateObject();
             cJSON_AddStringToObject(p, "hostname", s_peers[i].hostname);
             cJSON_AddStringToObject(p, "ip", s_peers[i].ip_addr);
+            cJSON_AddStringToObject(p, "group", s_peers[i].group_id);
             cJSON_AddNumberToObject(p, "port", s_peers[i].port);
             cJSON_AddNumberToObject(p, "last_seen_ago", (double)(now - s_peers[i].last_seen));
             cJSON_AddItemToArray(peers, p);

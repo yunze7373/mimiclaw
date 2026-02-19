@@ -582,6 +582,9 @@ esp_err_t tool_uart_send(const char *input, char *output, size_t out_len) {
 
     cJSON *data_item = cJSON_GetObjectItem(in_json, "data");
     cJSON *port_item = cJSON_GetObjectItem(in_json, "port");
+    cJSON *baud_item = cJSON_GetObjectItem(in_json, "baud");
+    cJSON *tx_pin_item = cJSON_GetObjectItem(in_json, "tx_pin");
+    cJSON *rx_pin_item = cJSON_GetObjectItem(in_json, "rx_pin");
 
     if (!data_item || !cJSON_IsString(data_item)) {
         cJSON_Delete(in_json);
@@ -591,6 +594,9 @@ esp_err_t tool_uart_send(const char *input, char *output, size_t out_len) {
 
     const char *data = data_item->valuestring;
     int port = UART_NUM_1;
+    int baud = 115200;
+    int tx_pin = 17;
+    int rx_pin = 18;
     if (port_item) {
         if (!cJSON_IsNumber(port_item)) {
             cJSON_Delete(in_json);
@@ -599,6 +605,15 @@ esp_err_t tool_uart_send(const char *input, char *output, size_t out_len) {
         }
         port = port_item->valueint;
     }
+    if (baud_item && cJSON_IsNumber(baud_item)) {
+        baud = baud_item->valueint;
+    }
+    if (tx_pin_item && cJSON_IsNumber(tx_pin_item)) {
+        tx_pin = tx_pin_item->valueint;
+    }
+    if (rx_pin_item && cJSON_IsNumber(rx_pin_item)) {
+        rx_pin = rx_pin_item->valueint;
+    }
     cJSON_Delete(in_json);
 
     if (port < 0 || port > UART_NUM_MAX - 1) {
@@ -606,10 +621,43 @@ esp_err_t tool_uart_send(const char *input, char *output, size_t out_len) {
         return ESP_OK;
     }
 
-    /* Check if UART is already installed; if not, install with defaults */
+    /* UART0 is generally used by console/monitor on ESP-IDF projects. */
+    if (port == UART_NUM_0) {
+        snprintf(output, out_len, "Error: UART0 is reserved for console. Use UART1/2.");
+        return ESP_OK;
+    }
+
+    /* Lazy-install driver when missing. */
+    if (!uart_is_driver_installed(port)) {
+        uart_config_t cfg = {
+            .baud_rate = baud,
+            .data_bits = UART_DATA_8_BITS,
+            .parity = UART_PARITY_DISABLE,
+            .stop_bits = UART_STOP_BITS_1,
+            .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+            .source_clk = UART_SCLK_DEFAULT,
+        };
+        esp_err_t err = uart_param_config(port, &cfg);
+        if (err != ESP_OK) {
+            snprintf(output, out_len, "Error: UART%d param config failed: %s", port, esp_err_to_name(err));
+            return ESP_OK;
+        }
+        err = uart_set_pin(port, tx_pin, rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+        if (err != ESP_OK) {
+            snprintf(output, out_len, "Error: UART%d pin config failed (tx=%d rx=%d): %s",
+                     port, tx_pin, rx_pin, esp_err_to_name(err));
+            return ESP_OK;
+        }
+        err = uart_driver_install(port, 2048, 0, 0, NULL, 0);
+        if (err != ESP_OK) {
+            snprintf(output, out_len, "Error: UART%d driver init failed: %s", port, esp_err_to_name(err));
+            return ESP_OK;
+        }
+    }
+
     int tx_len = uart_write_bytes(port, data, strlen(data));
     if (tx_len < 0) {
-        snprintf(output, out_len, "Error: UART%d write failed. Port may not be initialized.", port);
+        snprintf(output, out_len, "Error: UART%d write failed (tx=%d rx=%d baud=%d).", port, tx_pin, rx_pin, baud);
         return ESP_OK;
     }
 

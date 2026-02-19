@@ -44,6 +44,7 @@ idf_component_register(
         "skills/api_skill.c"
         "federation/peer_manager.c"
         "federation/peer_control.c"
+        "federation/federation_api.c"
         "cron/cron_service.c"
         "heartbeat/heartbeat.c"
         "component/component_mgr.c"
