@@ -5,6 +5,7 @@
 #include "lwip/sockets.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
+#include "esp_netif.h"
 #include "mimi_config.h"
 
 static const char *TAG = "ssdp";
@@ -78,11 +79,16 @@ static void ssdp_task(void *pvParameters)
             /* Check if looking for rootdevice or basic device */
             if (strstr(rx_buffer, "upnp:rootdevice") || strstr(rx_buffer, "ssdp:all") || strstr(rx_buffer, "urn:schemas-upnp-org:device:Basic:1")) {
                 
-                /* Get local IP */
-                tcpip_adapter_ip_info_t ip_info;
-                tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &ip_info);
-                char ip_str[16];
-                snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&ip_info.ip));
+                /* Get local STA IP (ESP-IDF 5.x uses esp_netif, not tcpip_adapter) */
+                esp_netif_t *sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+                esp_netif_ip_info_t ip_info = {0};
+                char ip_str[16] = {0};
+                if (sta_netif && esp_netif_get_ip_info(sta_netif, &ip_info) == ESP_OK) {
+                    snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&ip_info.ip));
+                } else {
+                    ESP_LOGW(TAG, "Failed to get STA IP, skip SSDP response");
+                    continue;
+                }
 
                 /* Construct response */
                 snprintf(tx_buffer, sizeof(tx_buffer), ssdp_response_template, ip_str, 80);
