@@ -811,6 +811,12 @@ esp_err_t tool_i2s_read(const char *input, char *output, size_t out_len) {
     if (bytes_to_read > 32768) bytes_to_read = 32768;
     if (bytes_to_read < 0) bytes_to_read = 4096;
 
+    /* Ensure audio subsystem is initialized */
+    if (audio_init() != ESP_OK) {
+        snprintf(output, out_len, "Error: Audio init failed");
+        return ESP_OK;
+    }
+
     /* Ensure mic is started */
     esp_err_t err = audio_mic_start();
     if (err != ESP_OK) {
@@ -887,6 +893,13 @@ esp_err_t tool_i2s_write(const char *input, char *output, size_t out_len) {
     if (ret_b64 != 0) {
         free(pcm_buf);
         snprintf(output, out_len, "Error: Base64 decode failed");
+        return ESP_OK;
+    }
+
+    /* Ensure audio subsystem is initialized */
+    if (audio_init() != ESP_OK) {
+        free(pcm_buf);
+        snprintf(output, out_len, "Error: Audio init failed");
         return ESP_OK;
     }
 

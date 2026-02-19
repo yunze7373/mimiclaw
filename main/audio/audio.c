@@ -17,6 +17,9 @@ static bool s_i2s_installed = false;
 
 esp_err_t audio_init(void)
 {
+    if (s_i2s_installed) {
+        return ESP_OK;
+    }
     // I2S configuration for BOTH microphone and speaker
     // Using legacy API for compatibility - works in ESP-IDF 5.x
     i2s_config_t i2s_config = {
