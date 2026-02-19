@@ -1,0 +1,77 @@
+menu "MimiClaw Configuration"
+
+    config MIMI_ENABLE_TELEGRAM
+        bool "Enable Telegram Bot"
+        default y
+        help
+            Include Telegram bot polling and message relay.
+            Disable for WebSocket-only or CLI-only setups.
+
+    config MIMI_ENABLE_WEBSOCKET
+        bool "Enable WebSocket Gateway"
+        default y
+        help
+            Include WebSocket server for real-time browser/app connections.
+
+    config MIMI_ENABLE_WEB_UI
+        bool "Enable Web UI"
+        default y
+        depends on MIMI_ENABLE_WEBSOCKET
+        help
+            Include the embedded web-based management UI.
+            Requires the WebSocket gateway.
+
+    config MIMI_ENABLE_SKILLS
+        bool "Enable Skill Engine (Lua runtime)"
+        default y
+        help
+            Include the Lua-based skill engine for user-installable plugins.
+            Disable to save ~60 KB RAM.
+
+    config MIMI_ENABLE_CRON
+        bool "Enable Cron Service"
+        default y
+        help
+            Include timer-based scheduled task execution.
+
+    config MIMI_ENABLE_HEARTBEAT
+        bool "Enable Heartbeat"
+        default y
+        depends on MIMI_ENABLE_CRON
+        help
+            Periodic heartbeat that triggers the agent at configurable intervals.
+
+    config MIMI_ENABLE_DISPLAY
+        bool "Enable SPI LCD Display (ST7789T)"
+        default n
+        help
+            Enable for boards with an ST7789T SPI LCD.
+            Also enables IMU shake-to-toggle and config screen.
+
+    config MIMI_ENABLE_OLED
+        bool "Enable SSD1306 OLED"
+        default y
+        help
+            Enable I2C SSD1306 OLED status display.
+
+    config MIMI_ENABLE_OTA
+        bool "Enable OTA Updates"
+        default y
+        help
+            Include over-the-air firmware update support.
+
+    config MIMI_ENABLE_HTTP_PROXY
+        bool "Enable HTTP Proxy"
+        default y
+        help
+            Include outbound HTTP proxy for external API calls.
+
+    config MIMI_ENABLE_ED25519
+        bool "Enable Ed25519 Signature Verification"
+        default y
+        depends on MIMI_ENABLE_SKILLS
+        help
+            Include Ed25519-based skill package signature verification.
+            Required for secure skill installation from untrusted sources.
+
+endmenu

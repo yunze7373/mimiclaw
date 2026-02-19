@@ -131,9 +131,51 @@
 #define MIMI_NVS_KEY_OLLAMA_PORT     "ollama_port"
 
 /* ========================================
- * Hardware Feature Flags
+ * Feature Gates (driven by Kconfig)
+ *
+ * Run `idf.py menuconfig` → MimiClaw Configuration
+ * to toggle these at build time.
+ * Defaults below apply if Kconfig hasn't been configured.
  * ======================================== */
-#define MIMI_HAS_LCD                 0    /* 1 = board has SPI LCD (ST7789T) */
+
+/* Bridge Kconfig → legacy MIMI_HAS_LCD */
+#ifdef CONFIG_MIMI_ENABLE_DISPLAY
+#define MIMI_HAS_LCD                 1
+#else
+#define MIMI_HAS_LCD                 0
+#endif
+
+/* Provide defaults when Kconfig hasn't run (backward compatibility) */
+#ifndef CONFIG_MIMI_ENABLE_TELEGRAM
+#define CONFIG_MIMI_ENABLE_TELEGRAM  1
+#endif
+#ifndef CONFIG_MIMI_ENABLE_WEBSOCKET
+#define CONFIG_MIMI_ENABLE_WEBSOCKET 1
+#endif
+#ifndef CONFIG_MIMI_ENABLE_WEB_UI
+#define CONFIG_MIMI_ENABLE_WEB_UI    1
+#endif
+#ifndef CONFIG_MIMI_ENABLE_SKILLS
+#define CONFIG_MIMI_ENABLE_SKILLS    1
+#endif
+#ifndef CONFIG_MIMI_ENABLE_CRON
+#define CONFIG_MIMI_ENABLE_CRON      1
+#endif
+#ifndef CONFIG_MIMI_ENABLE_HEARTBEAT
+#define CONFIG_MIMI_ENABLE_HEARTBEAT 1
+#endif
+#ifndef CONFIG_MIMI_ENABLE_OLED
+#define CONFIG_MIMI_ENABLE_OLED      1
+#endif
+#ifndef CONFIG_MIMI_ENABLE_OTA
+#define CONFIG_MIMI_ENABLE_OTA       1
+#endif
+#ifndef CONFIG_MIMI_ENABLE_HTTP_PROXY
+#define CONFIG_MIMI_ENABLE_HTTP_PROXY 1
+#endif
+#ifndef CONFIG_MIMI_ENABLE_ED25519
+#define CONFIG_MIMI_ENABLE_ED25519   1
+#endif
 
 /* ========================================
  * Hardware Pin Map — ESP32-S3 Audio Dev Board

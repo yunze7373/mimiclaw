@@ -491,6 +491,64 @@ static int cmd_config_comp(int argc, char **argv)
     return 0;
 }
 
+/* --- OTA commands --- */
+#include "ota/ota_manager.h"
+
+static int cmd_ota_status(int argc, char **argv)
+{
+    char *json = ota_status_json();
+    if (json) {
+        printf("%s\n", json);
+        free(json);
+    } else {
+        printf("Failed to generate OTA status.\n");
+    }
+    return 0;
+}
+
+static struct {
+    struct arg_str *url;
+    struct arg_end *end;
+} ota_check_args;
+
+static int cmd_ota_check(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&ota_check_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, ota_check_args.end, argv[0]);
+        return 1;
+    }
+    esp_err_t err = ota_check_for_update(ota_check_args.url->sval[0]);
+    if (err == ESP_OK) {
+        printf("Update available: %s\n", ota_get_pending_version());
+        printf("URL: %s\n", ota_get_pending_url());
+    } else if (err == ESP_ERR_NOT_FOUND) {
+        printf("Already up to date (%s)\n", ota_get_current_version());
+    } else {
+        printf("Check failed: %s\n", esp_err_to_name(err));
+    }
+    return 0;
+}
+
+static int cmd_ota_confirm(int argc, char **argv)
+{
+    esp_err_t err = ota_confirm_running_firmware();
+    if (err == ESP_OK) {
+        printf("Firmware confirmed as valid.\n");
+    } else {
+        printf("Error: %s\n", esp_err_to_name(err));
+    }
+    return 0;
+}
+
+static int cmd_ota_rollback(int argc, char **argv)
+{
+    printf("Rolling back to previous firmware...\n");
+    esp_err_t err = ota_rollback();
+    printf("Rollback failed: %s\n", esp_err_to_name(err));
+    return 1;
+}
+
 /* --- scan_audio command --- */
 #include "../audio/audio.h"
 
@@ -782,6 +840,41 @@ esp_err_t serial_cli_init(void)
         .func = &cmd_config_comp,
     };
     esp_console_cmd_register(&config_comp_cmd);
+
+    /* ota_status */
+    esp_console_cmd_t ota_status_cmd = {
+        .command = "ota_status",
+        .help = "Show OTA/firmware status (JSON)",
+        .func = &cmd_ota_status,
+    };
+    esp_console_cmd_register(&ota_status_cmd);
+
+    /* ota_check */
+    ota_check_args.url = arg_str1(NULL, NULL, "<url>", "Version check URL");
+    ota_check_args.end = arg_end(1);
+    esp_console_cmd_t ota_check_cmd = {
+        .command = "ota_check",
+        .help = "Check for firmware update from version URL",
+        .func = &cmd_ota_check,
+        .argtable = &ota_check_args,
+    };
+    esp_console_cmd_register(&ota_check_cmd);
+
+    /* ota_confirm */
+    esp_console_cmd_t ota_confirm_cmd = {
+        .command = "ota_confirm",
+        .help = "Confirm running firmware as valid (prevents rollback)",
+        .func = &cmd_ota_confirm,
+    };
+    esp_console_cmd_register(&ota_confirm_cmd);
+
+    /* ota_rollback */
+    esp_console_cmd_t ota_rollback_cmd = {
+        .command = "ota_rollback",
+        .help = "Rollback to previous firmware and reboot",
+        .func = &cmd_ota_rollback,
+    };
+    esp_console_cmd_register(&ota_rollback_cmd);
 
     /* Start REPL */
     ESP_ERROR_CHECK(esp_console_start_repl(repl));

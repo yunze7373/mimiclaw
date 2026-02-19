@@ -15,25 +15,47 @@
 #include "mimi_config.h"
 #include "bus/message_bus.h"
 #include "wifi/wifi_manager.h"
-#include "telegram/telegram_bot.h"
 #include "llm/llm_proxy.h"
 #include "agent/agent_loop.h"
 #include "memory/memory_store.h"
 #include "memory/session_mgr.h"
-#include "gateway/ws_server.h"
 #include "cli/serial_cli.h"
-#include "proxy/http_proxy.h"
 #include "tools/tool_registry.h"
-#include "display/display.h"
-#include "display/ssd1306.h"
 #include "buttons/button_driver.h"
+#include "rgb/rgb.h"
+
+#if CONFIG_MIMI_ENABLE_TELEGRAM
+#include "telegram/telegram_bot.h"
+#endif
+#if CONFIG_MIMI_ENABLE_WEBSOCKET
+#include "gateway/ws_server.h"
+#endif
+#if CONFIG_MIMI_ENABLE_WEB_UI
+#include "web_ui/web_ui.h"
+#endif
+#if CONFIG_MIMI_ENABLE_HTTP_PROXY
+#include "proxy/http_proxy.h"
+#endif
+#if MIMI_HAS_LCD
+#include "display/display.h"
 #include "ui/config_screen.h"
 #include "imu/imu_manager.h"
-#include "rgb/rgb.h"
+#endif
+#if CONFIG_MIMI_ENABLE_OLED
+#include "display/ssd1306.h"
+#endif
+#if CONFIG_MIMI_ENABLE_CRON
 #include "cron/cron_service.h"
+#endif
+#if CONFIG_MIMI_ENABLE_HEARTBEAT
 #include "heartbeat/heartbeat.h"
-#include "web_ui/web_ui.h"
+#endif
+#if CONFIG_MIMI_ENABLE_SKILLS
 #include "skills/skill_engine.h"
+#endif
+#if CONFIG_MIMI_ENABLE_OTA
+#include "ota/ota_manager.h"
+#endif
 #include "component/component_mgr.h"
 
 static const char *TAG = "mimi";
@@ -100,6 +122,11 @@ static void stability_timer_cb(void *arg)
         nvs_close(nvs);
         ESP_LOGI(TAG, "Stable boot confirmed — boot counter reset");
     }
+
+#if CONFIG_MIMI_ENABLE_OTA
+    /* Also confirm OTA firmware if pending verification */
+    ota_confirm_running_firmware();
+#endif
 }
 
 static bool check_safe_mode(void)
@@ -155,11 +182,17 @@ static void outbound_dispatch_task(void *arg)
 
         ESP_LOGI(TAG, "Dispatching response to %s:%s", msg.channel, msg.chat_id);
 
+#if CONFIG_MIMI_ENABLE_TELEGRAM
         if (strcmp(msg.channel, MIMI_CHAN_TELEGRAM) == 0) {
             telegram_send_message(msg.chat_id, msg.content);
-        } else if (strcmp(msg.channel, MIMI_CHAN_WEBSOCKET) == 0) {
+        } else
+#endif
+#if CONFIG_MIMI_ENABLE_WEBSOCKET
+        if (strcmp(msg.channel, MIMI_CHAN_WEBSOCKET) == 0) {
             ws_server_send(msg.chat_id, msg.content);
-        } else if (strcmp(msg.channel, MIMI_CHAN_SYSTEM) == 0) {
+        } else
+#endif
+        if (strcmp(msg.channel, MIMI_CHAN_SYSTEM) == 0) {
             ESP_LOGI(TAG, "System message [%s]: %.128s", msg.chat_id, msg.content);
         } else {
             ESP_LOGW(TAG, "Unknown channel: %s", msg.channel);
@@ -223,8 +256,10 @@ void app_main(void)
                   session_mgr_init, NULL, NULL, NULL);
     comp_register("wifi",       COMP_LAYER_BASE, true,  false,
                   wifi_manager_init, NULL, NULL, NULL);
+#if CONFIG_MIMI_ENABLE_HTTP_PROXY
     comp_register("http_proxy", COMP_LAYER_BASE, false, false,
                   http_proxy_init, NULL, NULL, NULL);
+#endif
 
     /* L1: Core — depends on base */
     const char *core_deps[] = {"msg_bus", "memory", "session", NULL};
@@ -234,6 +269,7 @@ void app_main(void)
                   tool_registry_init, NULL, NULL, core_deps);
 
     /* Skill engine depends on tool_reg + needs safe mode check */
+#if CONFIG_MIMI_ENABLE_SKILLS
     const char *skill_deps[] = {"tool_reg", NULL};
     if (!s_safe_mode) {
         /* check_safe_mode must be called before registration */
@@ -245,12 +281,17 @@ void app_main(void)
     } else {
         ESP_LOGW(TAG, "Skipping skill_engine registration — SAFE MODE");
     }
+#endif
 
     const char *agent_deps[] = {"llm", "tool_reg", "msg_bus", NULL};
+#if CONFIG_MIMI_ENABLE_CRON
     comp_register("cron",     COMP_LAYER_CORE, false, false,
                   cron_service_init, cron_service_start, NULL, core_deps);
+#endif
+#if CONFIG_MIMI_ENABLE_HEARTBEAT
     comp_register("heartbeat", COMP_LAYER_CORE, false, false,
                   heartbeat_init, heartbeat_start, NULL, core_deps);
+#endif
     comp_register("agent",    COMP_LAYER_CORE, true,  true,
                   agent_loop_init, agent_loop_start, NULL, agent_deps);
 
@@ -258,15 +299,21 @@ void app_main(void)
     comp_register("cli",       COMP_LAYER_ENTRY, false, false,
                   serial_cli_init, NULL, NULL, NULL);
 
+#if CONFIG_MIMI_ENABLE_TELEGRAM
     const char *tg_deps[] = {"agent", "msg_bus", NULL};
     comp_register("telegram",  COMP_LAYER_ENTRY, false, true,
                   telegram_bot_init, telegram_bot_start, NULL, tg_deps);
+#endif
 
+#if CONFIG_MIMI_ENABLE_WEBSOCKET
     const char *ws_deps[] = {"agent", NULL};
     comp_register("websocket", COMP_LAYER_ENTRY, false, true,
                   NULL, ws_server_start, NULL, ws_deps);
+#if CONFIG_MIMI_ENABLE_WEB_UI
     comp_register("web_ui",    COMP_LAYER_ENTRY, false, true,
                   NULL, web_ui_init, NULL, ws_deps);
+#endif
+#endif
 
     /* ── Phase 3: Load config + Initialize all ──────────────────── */
     comp_load_config();  /* Disable components per /spiffs/config/components.json */
@@ -275,6 +322,7 @@ void app_main(void)
     /* Initialize RGB LED (lazy init in tool, but try here for early boot feedback) */
     rgb_init();
 
+#if CONFIG_MIMI_ENABLE_OLED
     /* Initialize SSD1306 OLED if connected */
     if (ssd1306_is_connected()) {
         ssd1306_init();
@@ -282,6 +330,7 @@ void app_main(void)
         ssd1306_draw_string(0, 0, "MimiClaw Ready!");
         ssd1306_update();
     }
+#endif
 
     /* ── Phase 4: WiFi connect + start WiFi-dependents ────────── */
     esp_err_t wifi_err = wifi_manager_start();
