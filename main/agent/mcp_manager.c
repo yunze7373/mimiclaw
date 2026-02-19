@@ -65,7 +65,7 @@ TRAMPOLINE(20) TRAMPOLINE(21) TRAMPOLINE(22) TRAMPOLINE(23)
 TRAMPOLINE(24) TRAMPOLINE(25) TRAMPOLINE(26) TRAMPOLINE(27)
 TRAMPOLINE(28) TRAMPOLINE(29) TRAMPOLINE(30) TRAMPOLINE(31)
 
-static const esp_err_t (*s_trampolines[MAX_MCP_TOOLS])(const char *, char *, size_t) = {
+static esp_err_t (*s_trampolines[MAX_MCP_TOOLS])(const char *, char *, size_t) = {
     mcp_trampoline_0, mcp_trampoline_1, mcp_trampoline_2, mcp_trampoline_3,
     mcp_trampoline_4, mcp_trampoline_5, mcp_trampoline_6, mcp_trampoline_7,
     mcp_trampoline_8, mcp_trampoline_9, mcp_trampoline_10, mcp_trampoline_11,
@@ -172,12 +172,9 @@ static void handle_tools_list_response(mcp_source_t *src, cJSON *result)
 static void on_message(mcp_client_t *client, const char *json, size_t len)
 {
     mcp_source_t *src = (mcp_source_t *)mcp_client_get_ctx(client);
-    
-    // cJSON_ParseWithLength is better but we might have old cJSON
-    // Use parse buffer copy to be safe or ensure null term
-    cJSON *root = cJSON_Parse(json); // Assumes null-terminated? websocket data usually isn't!
-    // esp_websocket_client data is NOT null terminated.
-    // We must handle this.
+
+    // esp_websocket_client payload is not guaranteed to be null-terminated.
+    // Copy into a temporary buffer before parsing JSON.
     char *buf = malloc(len + 1);
     if (!buf) return;
     memcpy(buf, json, len);
