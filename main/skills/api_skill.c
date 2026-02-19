@@ -236,6 +236,8 @@ static esp_err_t api_endpoint_execute(const char *input_json, char *output, size
 esp_err_t api_skill_load(const char *name, const char *config_json)
 {
     if (!name || !config_json) return ESP_ERR_INVALID_ARG;
+    char skill_name_local[sizeof(s_skills[0].skill_name)];
+    snprintf(skill_name_local, sizeof(skill_name_local), "%s", name);
 
     /* Find free slot */
     int slot = -1;
@@ -255,7 +257,7 @@ esp_err_t api_skill_load(const char *name, const char *config_json)
 
     api_skill_t *sk = &s_skills[slot];
     memset(sk, 0, sizeof(*sk));
-    snprintf(sk->skill_name, sizeof(sk->skill_name), "%s", name);
+    snprintf(sk->skill_name, sizeof(sk->skill_name), "%s", skill_name_local);
 
     /* base_url */
     cJSON *base_url = cJSON_GetObjectItem(config, "base_url");
@@ -309,7 +311,7 @@ esp_err_t api_skill_load(const char *name, const char *config_json)
             if (cJSON_IsString(ep_path)) snprintf(e->path, sizeof(e->path), "%s", ep_path->valuestring);
 
             /* Tool name: <skill_name>_<endpoint_name> */
-            snprintf(e->tool_name, sizeof(e->tool_name), "%s_%s", name, e->name);
+            snprintf(e->tool_name, sizeof(e->tool_name), "%s_%s", skill_name_local, e->name);
 
             /* Build tool input schema from params */
             cJSON *params = cJSON_GetObjectItem(ep, "params");
@@ -320,7 +322,7 @@ esp_err_t api_skill_load(const char *name, const char *config_json)
                     "{\"type\":\"object\",\"properties\":{"
                     "\"_skill\":{\"type\":\"string\",\"const\":\"%s\"},"
                     "\"_endpoint\":{\"type\":\"integer\",\"const\":%d}",
-                    name, i);
+                    skill_name_local, i);
 
                 cJSON *param = NULL;
                 cJSON_ArrayForEach(param, params) {
@@ -336,7 +338,7 @@ esp_err_t api_skill_load(const char *name, const char *config_json)
                     "{\"type\":\"object\",\"properties\":{"
                     "\"_skill\":{\"type\":\"string\",\"const\":\"%s\"},"
                     "\"_endpoint\":{\"type\":\"integer\",\"const\":%d}"
-                    "}}", name, i);
+                    "}}", skill_name_local, i);
             }
 
             snprintf(e->input_schema_json, sizeof(e->input_schema_json), "%s", schema_buf);
@@ -358,7 +360,7 @@ esp_err_t api_skill_load(const char *name, const char *config_json)
     sk->active = true;
     cJSON_Delete(config);
 
-    ESP_LOGI(TAG, "API skill '%s' loaded (%d endpoints)", name, sk->endpoint_count);
+    ESP_LOGI(TAG, "API skill '%s' loaded (%d endpoints)", skill_name_local, sk->endpoint_count);
     return ESP_OK;
 }
 
