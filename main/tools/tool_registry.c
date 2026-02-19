@@ -6,6 +6,7 @@
 #include "tools/tool_hardware.h"
 #include "tools/tool_network.h"
 #include "tools/tool_skill_create.h"
+#include "tools/tool_skill_manage.h"
 #include "llm/llm_proxy.h"
 
 #include <string.h>
@@ -418,6 +419,20 @@ esp_err_t tool_registry_init(void)
         .execute = tool_skill_list_templates_execute,
     };
     tool_registry_register(&slt);
+
+    mimi_tool_t sm = {
+        .name = "skill_manage",
+        .description = "Manage installed skills: list, delete, or reload. Use delete to uninstall a skill by name. Use reload after manual file changes.",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{"
+            "\"action\":{\"type\":\"string\",\"description\":\"list, delete, or reload\"},"
+            "\"name\":{\"type\":\"string\",\"description\":\"Skill name (required for delete)\"}"
+            "},"
+            "\"required\":[\"action\"]}",
+        .execute = tool_skill_manage_execute,
+    };
+    tool_registry_register(&sm);
 
     tool_registry_rebuild_json();
 

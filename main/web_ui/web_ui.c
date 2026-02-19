@@ -479,7 +479,10 @@ static const char *HTML_PAGE =
 "        <div class='card' style='margin-top:16px;'>"
 "          <div style='display:flex;justify-content:space-between;align-items:center;'>"
 "            <span style='font-size:14px;'>已安装技能管理</span>"
-"            <button class='btn btn-sm btn-primary' onclick='switchView(\"installed\");loadInstalledSkills()'>管理</button>"
+"            <div style='display:flex;gap:8px;'>"
+"              <button class='btn btn-sm' onclick='reloadSkills()'>🚀 重载</button>"
+"              <button class='btn btn-sm btn-primary' onclick='switchView(\"installed\");loadInstalledSkills()'>管理</button>"
+"            </div>"
 "          </div>"
 "        </div>"
 "      </div>"
@@ -1156,7 +1159,22 @@ static const char *HTML_PAGE =
 "      }\n"
 "    }\n"
 "\n"
-"    function showSkillDetails(name) {\n"
+"    async function reloadSkills() {
+      if (!confirm('确定要重载技能引擎吗?')) return;
+      try {
+        const resp = await fetch('/api/skills/reload', { method: 'POST' });
+        if (resp.ok) {
+          showToast('技能引擎已重载', 'success');
+          await loadSkills();
+        } else {
+          showToast('重载失败', 'error');
+        }
+      } catch(e) {
+        showToast('重载请求失败: ' + e.message, 'error');
+      }
+    }
+
+    function showSkillDetails(name) {\n"
 "      const skill = allSkills.find(s => s.name === name);\n"
 "      if (!skill) return;\n"
 "      let details = '名称: ' + skill.name + '\\n';\n"
@@ -1786,6 +1804,18 @@ static esp_err_t skills_delete_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t skills_reload_handler(httpd_req_t *req)
+{
+    esp_err_t err = skill_engine_init();
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to reload engine");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
 static esp_err_t skills_install_history_delete_handler(httpd_req_t *req)
 {
     (void)req;
@@ -2145,6 +2175,13 @@ esp_err_t web_ui_init(void)
         .handler = skills_delete_handler,
     };
     httpd_register_uri_handler(server, &api_skills_delete);
+
+    httpd_uri_t api_skills_reload = {
+        .uri = "/api/skills/reload",
+        .method = HTTP_POST,
+        .handler = skills_reload_handler,
+    };
+    httpd_register_uri_handler(server, &api_skills_reload);
 
     httpd_uri_t api_peers_get = {
         .uri = "/api/peers",
