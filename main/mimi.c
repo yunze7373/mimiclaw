@@ -268,7 +268,8 @@ void app_main(void)
     comp_register("web_ui",    COMP_LAYER_ENTRY, false, true,
                   NULL, web_ui_init, NULL, ws_deps);
 
-    /* ── Phase 3: Initialize all ──────────────────────────────── */
+    /* ── Phase 3: Load config + Initialize all ──────────────────── */
+    comp_load_config();  /* Disable components per /spiffs/config/components.json */
     ESP_ERROR_CHECK(comp_init_all());
 
     /* Initialize RGB LED (lazy init in tool, but try here for early boot feedback) */

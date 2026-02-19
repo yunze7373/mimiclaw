@@ -119,3 +119,25 @@ char *comp_status_json(void);
  * Get total number of registered components.
  */
 int comp_get_count(void);
+
+/* ── Runtime Config ──────────────────────────────────────────────── */
+
+#define COMP_CONFIG_FILE  "/spiffs/config/components.json"
+
+/**
+ * Load config from SPIFFS. Marks components as DISABLED if config says so.
+ * Must be called AFTER all comp_register() and BEFORE comp_init_all().
+ */
+esp_err_t comp_load_config(void);
+
+/**
+ * Save current enable/disable state to SPIFFS.
+ */
+esp_err_t comp_save_config(void);
+
+/**
+ * Enable or disable a component by name.
+ * Changes take effect on next boot (saves to config file).
+ * @return ESP_OK, or ESP_ERR_NOT_FOUND
+ */
+esp_err_t comp_set_enabled(const char *name, bool enabled);

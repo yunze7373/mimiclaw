@@ -62,6 +62,9 @@ typedef struct {
     char entry[64];
 
     skill_permissions_t permissions;
+    skill_category_t category;
+    skill_type_t skill_type;
+    skill_bus_t bus;
     int env_ref;
 
     int tool_count;
@@ -1517,6 +1520,17 @@ static bool load_manifest(skill_slot_t *slot, const char *bundle_dir)
             }
         }
     }
+    /* Parse taxonomy classification */
+    cJSON *classification = cJSON_GetObjectItem(root, "classification");
+    if (cJSON_IsObject(classification)) {
+        cJSON *cat = cJSON_GetObjectItem(classification, "category");
+        cJSON *typ = cJSON_GetObjectItem(classification, "type");
+        cJSON *bus = cJSON_GetObjectItem(classification, "bus");
+        if (cJSON_IsString(cat)) slot->category = skill_category_from_str(cat->valuestring);
+        if (cJSON_IsString(typ)) slot->skill_type = skill_type_from_str(typ->valuestring);
+        if (cJSON_IsString(bus)) slot->bus = skill_bus_from_str(bus->valuestring);
+    }
+
     cJSON_Delete(root);
     return true;
 }
@@ -2534,6 +2548,12 @@ char *skill_engine_list_json(void)
             cJSON_AddItemToArray(events, cJSON_CreateString(s_slots[i].event_names[e]));
         }
         cJSON_AddItemToObject(obj, "events", events);
+
+        /* Taxonomy classification */
+        cJSON_AddStringToObject(obj, "category", skill_category_str(s_slots[i].category));
+        cJSON_AddStringToObject(obj, "type", skill_type_str(s_slots[i].skill_type));
+        cJSON_AddStringToObject(obj, "bus", skill_bus_str(s_slots[i].bus));
+
         cJSON_AddItemToArray(arr, obj);
     }
     char *json = cJSON_PrintUnformatted(arr);
@@ -2748,12 +2768,11 @@ bool skill_engine_signature_verification_enabled(void)
     return s_signature_verification_enabled && s_trusted_public_key[0] != '\0';
 }
 
-/* Simplified signature verification using HMAC-SHA256
- * Note: Full Ed25519 requires mbedtls with MBEDTLS_PK_ED25519 support
- * This is a placeholder that validates the signature format but always passes
- * For production, either enable Ed25519 in mbedtls or use a different approach */
-static esp_err_t __attribute__((unused)) verify_ed25519_signature(const uint8_t *data, size_t data_len,
-                                           const char *signature_hex)
+/* Real Ed25519 signature verification using TweetNaCl-based implementation */
+#include "crypto/ed25519_verify.h"
+
+static esp_err_t verify_ed25519_signature(const uint8_t *data, size_t data_len,
+                                          const char *signature_hex)
 {
     if (!data || !signature_hex) {
         return ESP_ERR_INVALID_ARG;
@@ -2764,32 +2783,37 @@ static esp_err_t __attribute__((unused)) verify_ed25519_signature(const uint8_t 
         return ESP_OK;  /* Skip verification if not enabled */
     }
 
-    /* Validate signature format: 64 hex characters = 32 bytes */
+    /* Ed25519 signature: 64 bytes = 128 hex characters */
     size_t sig_len = strlen(signature_hex);
-    if (sig_len != 64) {
-        ESP_LOGE(TAG, "Invalid signature length: %d (expected 64)", (int)sig_len);
+    if (sig_len != 128) {
+        ESP_LOGE(TAG, "Invalid signature length: %d (expected 128 hex chars)", (int)sig_len);
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* Validate hex format */
+    /* Parse signature hex */
     uint8_t signature[64];
     if (hex_to_bytes(signature_hex, signature, 64) != 0) {
         ESP_LOGE(TAG, "Invalid signature format (not valid hex)");
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* Validate public key format */
+    /* Parse public key hex */
     uint8_t public_key[32];
     if (hex_to_bytes(s_trusted_public_key, public_key, 32) != 0) {
         ESP_LOGE(TAG, "Invalid public key format");
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* TODO: Implement actual signature verification when mbedtls Ed25519 is available
-     * For now, we do a simple HMAC-SHA256 based check as placeholder */
-    ESP_LOGI(TAG, "Signature format validated (placeholder implementation)");
-    ESP_LOGI(TAG, "Trusted key: %.16s...", s_trusted_public_key);
+    /* Verify signature */
+    ESP_LOGI(TAG, "Verifying Ed25519 signature (%d bytes data)...", (int)data_len);
+    bool valid = ed25519_verify(signature, data, data_len, public_key);
 
+    if (!valid) {
+        ESP_LOGE(TAG, "Ed25519 signature INVALID — rejecting");
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    ESP_LOGI(TAG, "Ed25519 signature verified OK");
     return ESP_OK;
 }
 
@@ -2799,20 +2823,30 @@ esp_err_t skill_engine_install_with_signature(const char *url, const char *check
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* If signature is provided, verification is required */
-    if (signature_hex && signature_hex[0]) {
-        if (!skill_engine_signature_verification_enabled()) {
-            ESP_LOGW(TAG, "Signature provided but no trusted key set");
-            /* For now, we allow installation but log a warning */
+    /* If signature verification is enabled and signature is provided, verify */
+    if (signature_hex && signature_hex[0] && skill_engine_signature_verification_enabled()) {
+        /* Verify the signature against the checksum (the checksum IS the signed data).
+         * Flow: server signs SHA256(file) with Ed25519 private key.
+         * We verify: ed25519_verify(signature, SHA256_hex, pubkey) */
+        if (!checksum_hex || !checksum_hex[0]) {
+            ESP_LOGE(TAG, "Signature provided but no checksum — cannot verify");
+            return ESP_ERR_INVALID_ARG;
         }
+
+        esp_err_t sig_err = verify_ed25519_signature(
+            (const uint8_t *)checksum_hex, strlen(checksum_hex),
+            signature_hex);
+
+        if (sig_err != ESP_OK) {
+            ESP_LOGE(TAG, "Signature verification failed — installation blocked");
+            return sig_err;
+        }
+    } else if (signature_hex && signature_hex[0]) {
+        ESP_LOGW(TAG, "Signature provided but no trusted key set — cannot verify");
+        /* Still allow install for backwards compat, but warn */
     }
 
-    /* For now, delegate to the existing implementation */
-    /* In a full implementation, we would: */
-    /* 1. Download to temp storage */
-    /* 2. Compute SHA256 of downloaded file */
-    /* 3. Verify signature against SHA256 + public key */
-    /* 4. Only proceed if signature is valid */
-
+    /* Signature OK (or not required) — proceed with checksum-verified install */
     return skill_engine_install_with_checksum(url, checksum_hex);
 }
+

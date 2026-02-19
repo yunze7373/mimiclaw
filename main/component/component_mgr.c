@@ -312,3 +312,119 @@ int comp_get_count(void)
 {
     return s_count;
 }
+
+/* ── Runtime Config ──────────────────────────────────────────────── */
+
+esp_err_t comp_load_config(void)
+{
+    FILE *f = fopen(COMP_CONFIG_FILE, "r");
+    if (!f) {
+        ESP_LOGI(TAG, "No component config file, all enabled by default");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (len <= 0 || len > 2048) {
+        fclose(f);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    char *buf = malloc(len + 1);
+    if (!buf) { fclose(f); return ESP_ERR_NO_MEM; }
+
+    fread(buf, 1, len, f);
+    buf[len] = '\0';
+    fclose(f);
+
+    cJSON *root = cJSON_Parse(buf);
+    free(buf);
+    if (!root) {
+        ESP_LOGW(TAG, "Failed to parse component config JSON");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /* Format: { "disabled": ["telegram", "websocket"] } */
+    cJSON *disabled = cJSON_GetObjectItem(root, "disabled");
+    if (cJSON_IsArray(disabled)) {
+        int disabled_count = 0;
+        cJSON *item = NULL;
+        cJSON_ArrayForEach(item, disabled) {
+            if (!cJSON_IsString(item)) continue;
+            comp_entry_t *c = find_by_name(item->valuestring);
+            if (c) {
+                if (c->required) {
+                    ESP_LOGW(TAG, "Cannot disable required component '%s'", c->name);
+                    continue;
+                }
+                c->state = COMP_STATE_DISABLED;
+                disabled_count++;
+                ESP_LOGI(TAG, "Component '%s' disabled by config", c->name);
+            }
+        }
+        ESP_LOGI(TAG, "Config loaded: %d components disabled", disabled_count);
+    }
+
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+esp_err_t comp_save_config(void)
+{
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) return ESP_ERR_NO_MEM;
+
+    cJSON *disabled = cJSON_CreateArray();
+    for (int i = 0; i < s_count; i++) {
+        if (s_components[i].state == COMP_STATE_DISABLED) {
+            cJSON_AddItemToArray(disabled, cJSON_CreateString(s_components[i].name));
+        }
+    }
+    cJSON_AddItemToObject(root, "disabled", disabled);
+
+    char *str = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!str) return ESP_ERR_NO_MEM;
+
+    FILE *f = fopen(COMP_CONFIG_FILE, "w");
+    if (!f) {
+        free(str);
+        ESP_LOGE(TAG, "Failed to write component config");
+        return ESP_FAIL;
+    }
+
+    fputs(str, f);
+    fclose(f);
+    free(str);
+
+    ESP_LOGI(TAG, "Component config saved");
+    return ESP_OK;
+}
+
+esp_err_t comp_set_enabled(const char *name, bool enabled)
+{
+    comp_entry_t *c = find_by_name(name);
+    if (!c) return ESP_ERR_NOT_FOUND;
+
+    if (!enabled && c->required) {
+        ESP_LOGW(TAG, "Cannot disable required component '%s'", name);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    if (enabled) {
+        /* Mark as registered — will be initialized on next boot */
+        if (c->state == COMP_STATE_DISABLED) {
+            c->state = COMP_STATE_REGISTERED;
+            ESP_LOGI(TAG, "Component '%s' enabled (takes effect on next boot)", name);
+        }
+    } else {
+        c->state = COMP_STATE_DISABLED;
+        ESP_LOGI(TAG, "Component '%s' disabled (takes effect on next boot)", name);
+    }
+
+    return comp_save_config();
+}
+

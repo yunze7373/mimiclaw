@@ -458,6 +458,39 @@ static int cmd_comp_status(int argc, char **argv)
     return 0;
 }
 
+/* --- config_comp command --- */
+static int cmd_config_comp(int argc, char **argv)
+{
+    if (argc < 3) {
+        printf("Usage: config_comp <enable|disable> <name>\n");
+        printf("  Example: config_comp disable telegram\n");
+        printf("  Changes take effect on next boot.\n");
+        return 1;
+    }
+
+    bool enable = (strcmp(argv[1], "enable") == 0);
+    bool disable = (strcmp(argv[1], "disable") == 0);
+    if (!enable && !disable) {
+        printf("Unknown action '%s'. Use 'enable' or 'disable'.\n", argv[1]);
+        return 1;
+    }
+
+    esp_err_t err = comp_set_enabled(argv[2], enable);
+    if (err == ESP_ERR_NOT_FOUND) {
+        printf("Component '%s' not found.\n", argv[2]);
+        return 1;
+    } else if (err == ESP_ERR_NOT_SUPPORTED) {
+        printf("Cannot disable required component '%s'.\n", argv[2]);
+        return 1;
+    } else if (err != ESP_OK) {
+        printf("Error: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+
+    printf("Component '%s' %s. Restart to apply.\n", argv[2], enable ? "enabled" : "disabled");
+    return 0;
+}
+
 /* --- scan_audio command --- */
 #include "../audio/audio.h"
 
@@ -741,6 +774,14 @@ esp_err_t serial_cli_init(void)
         .func = &cmd_comp_status,
     };
     esp_console_cmd_register(&comp_status_cmd);
+
+    /* config_comp */
+    esp_console_cmd_t config_comp_cmd = {
+        .command = "config_comp",
+        .help = "Enable/disable component: config_comp <enable|disable> <name>",
+        .func = &cmd_config_comp,
+    };
+    esp_console_cmd_register(&config_comp_cmd);
 
     /* Start REPL */
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
