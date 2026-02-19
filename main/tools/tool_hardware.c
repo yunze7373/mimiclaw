@@ -289,8 +289,8 @@ esp_err_t tool_i2c_scan(const char *input, char *output, size_t out_len) {
     if (!s_i2c_scan_initialized) {
         i2c_config_t conf = {
             .mode = I2C_MODE_MASTER,
-            .sda_io_num = 48,  /* Same as IMU: I2C_Touch_SDA_IO */
-            .scl_io_num = 47,  /* Same as IMU: I2C_Touch_SCL_IO */
+            .sda_io_num = MIMI_PIN_I2C0_SDA,
+            .scl_io_num = MIMI_PIN_I2C0_SCL,
             .sda_pullup_en = GPIO_PULLUP_ENABLE,
             .scl_pullup_en = GPIO_PULLUP_ENABLE,
             .master.clk_speed = 400000,
