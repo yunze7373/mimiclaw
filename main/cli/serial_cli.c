@@ -443,6 +443,21 @@ static int cmd_safe_status(int argc, char **argv)
     return 0;
 }
 
+/* --- comp_status command --- */
+#include "component/component_mgr.h"
+
+static int cmd_comp_status(int argc, char **argv)
+{
+    char *json = comp_status_json();
+    if (json) {
+        printf("%s\n", json);
+        free(json);
+    } else {
+        printf("Failed to generate status.\n");
+    }
+    return 0;
+}
+
 /* --- scan_audio command --- */
 #include "../audio/audio.h"
 
@@ -718,6 +733,14 @@ esp_err_t serial_cli_init(void)
         .func = &cmd_safe_status,
     };
     esp_console_cmd_register(&safe_status_cmd);
+
+    /* comp_status */
+    esp_console_cmd_t comp_status_cmd = {
+        .command = "comp_status",
+        .help = "Show all component states (JSON)",
+        .func = &cmd_comp_status,
+    };
+    esp_console_cmd_register(&comp_status_cmd);
 
     /* Start REPL */
     ESP_ERROR_CHECK(esp_console_start_repl(repl));

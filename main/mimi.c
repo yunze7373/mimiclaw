@@ -34,6 +34,7 @@
 #include "heartbeat/heartbeat.h"
 #include "web_ui/web_ui.h"
 #include "skills/skill_engine.h"
+#include "component/component_mgr.h"
 
 static const char *TAG = "mimi";
 
@@ -193,7 +194,7 @@ void app_main(void)
     ESP_LOGI(TAG, "PSRAM free:    %d bytes",
              (int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
-    /* Display + input */
+    /* Display + input (pre-component init — these are HW-level) */
 #if MIMI_HAS_LCD
     ESP_ERROR_CHECK(display_init());
     display_show_banner();
@@ -206,20 +207,69 @@ void app_main(void)
     imu_manager_set_shake_callback(config_screen_toggle);
 #endif
 
-    /* Phase 1: Core infrastructure */
+    /* ── Phase 1: Core infrastructure (pre-component manager) ─── */
     ESP_ERROR_CHECK(init_nvs());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     ESP_ERROR_CHECK(init_spiffs());
 
-    /* Initialize subsystems */
-    ESP_ERROR_CHECK(message_bus_init());
-    ESP_ERROR_CHECK(memory_store_init());
-    ESP_ERROR_CHECK(session_mgr_init());
-    ESP_ERROR_CHECK(wifi_manager_init());
-    ESP_ERROR_CHECK(http_proxy_init());
-    ESP_ERROR_CHECK(telegram_bot_init());
-    ESP_ERROR_CHECK(llm_proxy_init());
-    ESP_ERROR_CHECK(tool_registry_init());
+    /* ── Phase 2: Register components ──────────────────────────── */
+
+    /* L0: Base — no deps */
+    comp_register("msg_bus",     COMP_LAYER_BASE, true,  false,
+                  message_bus_init, NULL, NULL, NULL);
+    comp_register("memory",     COMP_LAYER_BASE, true,  false,
+                  memory_store_init, NULL, NULL, NULL);
+    comp_register("session",    COMP_LAYER_BASE, true,  false,
+                  session_mgr_init, NULL, NULL, NULL);
+    comp_register("wifi",       COMP_LAYER_BASE, true,  false,
+                  wifi_manager_init, NULL, NULL, NULL);
+    comp_register("http_proxy", COMP_LAYER_BASE, false, false,
+                  http_proxy_init, NULL, NULL, NULL);
+
+    /* L1: Core — depends on base */
+    const char *core_deps[] = {"msg_bus", "memory", "session", NULL};
+    comp_register("llm",         COMP_LAYER_CORE, true,  false,
+                  llm_proxy_init, NULL, NULL, core_deps);
+    comp_register("tool_reg",    COMP_LAYER_CORE, true,  false,
+                  tool_registry_init, NULL, NULL, core_deps);
+
+    /* Skill engine depends on tool_reg + needs safe mode check */
+    const char *skill_deps[] = {"tool_reg", NULL};
+    if (!s_safe_mode) {
+        /* check_safe_mode must be called before registration */
+        s_safe_mode = check_safe_mode();
+    }
+    if (!s_safe_mode) {
+        comp_register("skill_engine", COMP_LAYER_CORE, false, false,
+                      skill_engine_init, NULL, NULL, skill_deps);
+    } else {
+        ESP_LOGW(TAG, "Skipping skill_engine registration — SAFE MODE");
+    }
+
+    const char *agent_deps[] = {"llm", "tool_reg", "msg_bus", NULL};
+    comp_register("cron",     COMP_LAYER_CORE, false, false,
+                  cron_service_init, cron_service_start, NULL, core_deps);
+    comp_register("heartbeat", COMP_LAYER_CORE, false, false,
+                  heartbeat_init, heartbeat_start, NULL, core_deps);
+    comp_register("agent",    COMP_LAYER_CORE, true,  true,
+                  agent_loop_init, agent_loop_start, NULL, agent_deps);
+
+    /* L2: Entry — depends on core, many need WiFi */
+    comp_register("cli",       COMP_LAYER_ENTRY, false, false,
+                  serial_cli_init, NULL, NULL, NULL);
+
+    const char *tg_deps[] = {"agent", "msg_bus", NULL};
+    comp_register("telegram",  COMP_LAYER_ENTRY, false, true,
+                  telegram_bot_init, telegram_bot_start, NULL, tg_deps);
+
+    const char *ws_deps[] = {"agent", NULL};
+    comp_register("websocket", COMP_LAYER_ENTRY, false, true,
+                  NULL, ws_server_start, NULL, ws_deps);
+    comp_register("web_ui",    COMP_LAYER_ENTRY, false, true,
+                  NULL, web_ui_init, NULL, ws_deps);
+
+    /* ── Phase 3: Initialize all ──────────────────────────────── */
+    ESP_ERROR_CHECK(comp_init_all());
 
     /* Initialize RGB LED (lazy init in tool, but try here for early boot feedback) */
     rgb_init();
@@ -232,22 +282,7 @@ void app_main(void)
         ssd1306_update();
     }
 
-    /* Load Lua hardware skills (must be after SPIFFS + tool_registry) */
-    s_safe_mode = check_safe_mode();
-    if (!s_safe_mode) {
-        ESP_ERROR_CHECK(skill_engine_init());
-    } else {
-        ESP_LOGW(TAG, "Skipping skill_engine_init() — SAFE MODE");
-    }
-
-    ESP_ERROR_CHECK(cron_service_init());
-    ESP_ERROR_CHECK(heartbeat_init());
-    ESP_ERROR_CHECK(agent_loop_init());
-
-    /* Start Serial CLI first (works without WiFi) */
-    ESP_ERROR_CHECK(serial_cli_init());
-
-    /* Start WiFi */
+    /* ── Phase 4: WiFi connect + start WiFi-dependents ────────── */
     esp_err_t wifi_err = wifi_manager_start();
     if (wifi_err == ESP_OK) {
         ESP_LOGI(TAG, "Scanning nearby APs on boot...");
@@ -256,23 +291,11 @@ void app_main(void)
         if (wifi_manager_wait_connected(30000) == ESP_OK) {
             ESP_LOGI(TAG, "WiFi connected: %s", wifi_manager_get_ip());
 
-            /* Start network-dependent services */
+            /* Start all WiFi-dependent components */
             ESP_LOGI(TAG, "Memory before services: %d KB free",
                      heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
-            ESP_ERROR_CHECK(telegram_bot_start());
-            ESP_LOGI(TAG, "Memory after telegram: %d KB free",
-                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
-            ESP_ERROR_CHECK(agent_loop_start());
-            ESP_LOGI(TAG, "Memory after agent: %d KB free",
-                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
-            cron_service_start();
-            heartbeat_start();
-            ESP_ERROR_CHECK(ws_server_start());
-            ESP_LOGI(TAG, "Memory after ws: %d KB free",
-                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
-            ESP_ERROR_CHECK(web_ui_init());
-            ESP_LOGI(TAG, "Memory after web_ui: %d KB free",
-                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
+
+            comp_start_wifi_dependents();
 
             /* Outbound dispatch task */
             xTaskCreatePinnedToCore(
@@ -280,6 +303,8 @@ void app_main(void)
                 MIMI_OUTBOUND_STACK, NULL,
                 MIMI_OUTBOUND_PRIO, NULL, MIMI_OUTBOUND_CORE);
 
+            ESP_LOGI(TAG, "Memory after all services: %d KB free",
+                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
             ESP_LOGI(TAG, "All services started!");
         } else {
             ESP_LOGW(TAG, "WiFi connection timeout. Check MIMI_SECRET_WIFI_SSID in mimi_secrets.h");
@@ -290,3 +315,4 @@ void app_main(void)
 
     ESP_LOGI(TAG, "MimiClaw ready. Type 'help' for CLI commands.");
 }
+
