@@ -1,12 +1,9 @@
 #include "tools/tool_skill_manage.h"
 #include "cJSON.h"
-#include "esp_log.h"
 #include "skills/skill_engine.h"
 #include "skills/skill_rollback.h"
 #include <string.h>
 #include <stdio.h>
-
-static const char *TAG = "tool_skill_manage";
 
 esp_err_t tool_skill_manage_execute(const char *input_json, char *output, size_t output_size)
 {
