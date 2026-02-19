@@ -33,9 +33,9 @@ esp_err_t tool_mcp_add(const char *input_json, char *output, size_t output_size)
         transport = t->valuestring;
     }
 
-    bool auto = cJSON_IsTrue(auto_connect);
+    bool auto_conn = cJSON_IsTrue(auto_connect);
 
-    int id = mcp_manager_add_source(name->valuestring, transport, url->valuestring, auto);
+    int id = mcp_manager_add_source(name->valuestring, transport, url->valuestring, auto_conn);
 
     cJSON_Delete(root);
 
