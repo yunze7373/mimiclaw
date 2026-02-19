@@ -157,7 +157,18 @@ char *skill_rollback_list_json(void)
             if (ent->d_type == DT_DIR && ent->d_name[0] != '.') {
                 /* Verify main.lua exists in this backup */
                 char check[96];
-                snprintf(check, sizeof(check), "%s/%s/main.lua", rb_dir, ent->d_name);
+                const char suffix[] = "/main.lua";
+                size_t rb_len = strlen(rb_dir);
+                size_t name_len = strlen(ent->d_name);
+                size_t need = rb_len + 1 + name_len + sizeof(suffix); /* +1 for '/' and suffix includes NUL */
+                if (need > sizeof(check)) {
+                    ESP_LOGW(TAG, "Rollback path too long, skip: %s/%s", rb_dir, ent->d_name);
+                    continue;
+                }
+                memcpy(check, rb_dir, rb_len);
+                check[rb_len] = '/';
+                memcpy(check + rb_len + 1, ent->d_name, name_len);
+                memcpy(check + rb_len + 1 + name_len, suffix, sizeof(suffix));
                 if (file_exists(check)) {
                     cJSON_AddItemToArray(arr, cJSON_CreateString(ent->d_name));
                 }
