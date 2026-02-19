@@ -302,7 +302,23 @@ int32_t skill_quota_calc_dir_size(const char *path)
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
 
         char full[256];
-        snprintf(full, sizeof(full), "%s/%s", path, ent->d_name);
+        size_t path_len = strlen(path);
+        size_t name_len = strlen(ent->d_name);
+        int need_sep = (path_len > 0 && path[path_len - 1] != '/');
+        size_t full_len = path_len + (size_t)need_sep + name_len + 1; /* +1 for '\0' */
+
+        if (full_len > sizeof(full)) {
+            ESP_LOGW(TAG, "Path too long, skipping: %s/%s", path, ent->d_name);
+            continue;
+        }
+
+        memcpy(full, path, path_len);
+        size_t off = path_len;
+        if (need_sep) {
+            full[off++] = '/';
+        }
+        memcpy(full + off, ent->d_name, name_len);
+        full[off + name_len] = '\0';
 
         struct stat st;
         if (stat(full, &st) != 0) continue;
