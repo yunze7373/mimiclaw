@@ -1,15 +1,21 @@
 #include "agent/mcp_client.h"
 #include "mimi_config.h"
+#include "esp_log.h"
+#include <string.h>
+
+#if CONFIG_MIMI_ENABLE_MCP && __has_include("esp_websocket_client.h")
+#define MIMI_MCP_IMPL_ENABLED 1
 #include "tools/tool_registry.h"
 #include "cJSON.h"
-#include "esp_log.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include <string.h>
+#else
+#define MIMI_MCP_IMPL_ENABLED 0
+#endif
 
-#if CONFIG_MIMI_ENABLE_MCP
+#if MIMI_MCP_IMPL_ENABLED
 
 static const char *TAG = "mcp_client";
 
@@ -282,9 +288,19 @@ esp_err_t mcp_client_send(const char *json_data)
 
 #else
 
-/* Dummy impl if disabled */
-esp_err_t mcp_client_init(void) { return ESP_OK; }
+/* Dummy impl if disabled or esp_websocket_client is unavailable */
+esp_err_t mcp_client_init(void)
+{
+#if CONFIG_MIMI_ENABLE_MCP
+    ESP_LOGW("mcp_client", "MCP enabled, but esp_websocket_client is unavailable; running disabled");
+#endif
+    return ESP_OK;
+}
 bool mcp_client_is_connected(void) { return false; }
-esp_err_t mcp_client_send(const char *json_data) { return ESP_FAIL; }
+esp_err_t mcp_client_send(const char *json_data)
+{
+    (void)json_data;
+    return ESP_FAIL;
+}
 
 #endif
