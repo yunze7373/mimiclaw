@@ -182,6 +182,12 @@
 #ifndef CONFIG_MIMI_ENABLE_MCP
 #define CONFIG_MIMI_ENABLE_MCP       0
 #endif
+#ifndef CONFIG_MIMI_ENABLE_HA
+#define CONFIG_MIMI_ENABLE_HA        1
+#endif
+#ifndef CONFIG_MIMI_ENABLE_ZIGBEE
+#define CONFIG_MIMI_ENABLE_ZIGBEE    0
+#endif
 
 /* MCP Client */
 #define MIMI_MCP_SERVER_URL          "ws://192.168.1.10:3000"

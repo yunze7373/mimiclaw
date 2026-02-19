@@ -62,6 +62,12 @@
 #if CONFIG_MIMI_ENABLE_MCP
 #include "agent/mcp_client.h"
 #endif
+#if CONFIG_MIMI_ENABLE_HA
+#include "extensions/ha_integration.h"
+#endif
+#if CONFIG_MIMI_ENABLE_ZIGBEE
+#include "extensions/zigbee_gateway.h"
+#endif
 #include "component/component_mgr.h"
 
 static const char *TAG = "mimi";
@@ -332,6 +338,17 @@ void app_main(void)
     const char *mcp_deps[] = {"wifi", "tool_reg", NULL};
     comp_register("mcp_client", COMP_LAYER_EXTENSION, false, true,
                   mcp_client_init, NULL, NULL, mcp_deps);
+#endif
+
+#if CONFIG_MIMI_ENABLE_HA
+    const char *ha_deps[] = {"wifi", NULL};
+    comp_register("ha_integration", COMP_LAYER_EXTENSION, false, true,
+                  ha_integration_init, ha_integration_start, NULL, ha_deps);
+#endif
+
+#if CONFIG_MIMI_ENABLE_ZIGBEE
+    comp_register("zigbee_gateway", COMP_LAYER_EXTENSION, false, false,
+                  zigbee_gateway_init, zigbee_gateway_start, NULL, NULL);
 #endif
 
     /* ── Phase 3: Load config + Initialize all ──────────────────── */
