@@ -566,6 +566,41 @@ static int cmd_scan_audio(int argc, char **argv)
     return 0;
 }
 
+/* --- skill_rollback commands --- */
+#include "skills/skill_rollback.h"
+
+static struct {
+    struct arg_str *name;
+    struct arg_end *end;
+} skill_rb_args;
+
+static int cmd_skill_rollback(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&skill_rb_args);
+    if (nerrors) {
+        arg_print_errors(stderr, skill_rb_args.end, argv[0]);
+        return 1;
+    }
+    const char *name = skill_rb_args.name->sval[0];
+    if (!skill_rollback_exists(name)) {
+        printf("No rollback backup for '%s'\n", name);
+        return 1;
+    }
+    esp_err_t err = skill_rollback_restore(name);
+    printf("%s\n", err == ESP_OK ? "Skill restored." : "Restore failed.");
+    return err == ESP_OK ? 0 : 1;
+}
+
+static int cmd_skill_rollback_list(int argc, char **argv)
+{
+    char *json = skill_rollback_list_json();
+    if (json) {
+        printf("%s\n", json);
+        free(json);
+    }
+    return 0;
+}
+
 esp_err_t serial_cli_init(void)
 {
     esp_console_repl_t *repl = NULL;
@@ -875,6 +910,25 @@ esp_err_t serial_cli_init(void)
         .func = &cmd_ota_rollback,
     };
     esp_console_cmd_register(&ota_rollback_cmd);
+
+    /* skill_rollback */
+    skill_rb_args.name = arg_str1(NULL, NULL, "<name>", "Skill name to rollback");
+    skill_rb_args.end = arg_end(1);
+    esp_console_cmd_t skill_rb_cmd = {
+        .command = "skill_rollback",
+        .help = "Restore a skill to its previous version",
+        .func = &cmd_skill_rollback,
+        .argtable = &skill_rb_args,
+    };
+    esp_console_cmd_register(&skill_rb_cmd);
+
+    /* skill_rollback_list */
+    esp_console_cmd_t skill_rb_list_cmd = {
+        .command = "skill_rollback_list",
+        .help = "List skills with rollback backups available",
+        .func = &cmd_skill_rollback_list,
+    };
+    esp_console_cmd_register(&skill_rb_list_cmd);
 
     /* Start REPL */
     ESP_ERROR_CHECK(esp_console_start_repl(repl));

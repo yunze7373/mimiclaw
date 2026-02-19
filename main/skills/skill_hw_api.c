@@ -21,6 +21,8 @@
 #include "skills/skill_resource_manager.h"
 #include "skills/skill_runtime.h"
 #include "skills/board_profile.h"
+#include "skills/skill_rate_limit.h"
+#include "esp_http_client.h"
 
 static const char *TAG = "skill_hw";
 
@@ -121,6 +123,9 @@ static int l_gpio_set_mode(lua_State *L)
     if (!has_perm_gpio(skill_id, pin, alias)) {
         return luaL_error(L, "permission denied: gpio %d", pin);
     }
+    if (!skill_rate_limit_check(skill_id, RATE_LIMIT_GPIO)) {
+        return luaL_error(L, "rate limit exceeded: gpio");
+    }
     if (skill_resmgr_acquire_gpio(skill_id, pin) != ESP_OK) {
         return luaL_error(L, "gpio conflict: %d", pin);
     }
@@ -148,6 +153,7 @@ static int l_gpio_read(lua_State *L)
     char alias[24] = {0};
     if (!resolve_gpio_arg(L, 1, &pin, alias, sizeof(alias))) return luaL_error(L, "invalid gpio pin/alias");
     if (!has_perm_gpio(skill_id, pin, alias)) return luaL_error(L, "permission denied: gpio %d", pin);
+    if (!skill_rate_limit_check(skill_id, RATE_LIMIT_GPIO)) return luaL_error(L, "rate limit exceeded: gpio");
     lua_pushinteger(L, gpio_get_level(pin));
     return 1;
 }
@@ -160,6 +166,7 @@ static int l_gpio_write(lua_State *L)
     if (!resolve_gpio_arg(L, 1, &pin, alias, sizeof(alias))) return luaL_error(L, "invalid gpio pin/alias");
     int val = (int)luaL_checkinteger(L, 2);
     if (!has_perm_gpio(skill_id, pin, alias)) return luaL_error(L, "permission denied: gpio %d", pin);
+    if (!skill_rate_limit_check(skill_id, RATE_LIMIT_GPIO)) return luaL_error(L, "rate limit exceeded: gpio");
     if (skill_resmgr_acquire_gpio(skill_id, pin) != ESP_OK) return luaL_error(L, "gpio conflict: %d", pin);
     gpio_set_level(pin, val ? 1 : 0);
     return 0;
@@ -191,6 +198,7 @@ static int l_i2c_init(lua_State *L)
     }
 
     if (!has_perm_i2c(skill_id, bus)) return luaL_error(L, "permission denied: i2c %s", bus);
+    if (!skill_rate_limit_check(skill_id, RATE_LIMIT_I2C)) return luaL_error(L, "rate limit exceeded: i2c");
     if (skill_resmgr_acquire_i2c(skill_id, bus, freq_hz) != ESP_OK) {
         return luaL_error(L, "i2c conflict: %s", bus);
     }
@@ -250,6 +258,7 @@ static int l_i2c_read(lua_State *L)
         len = (int)luaL_checkinteger(L, 3);
     }
     if (!has_perm_i2c(skill_id, bus)) return luaL_error(L, "permission denied: i2c %s", bus);
+    if (!skill_rate_limit_check(skill_id, RATE_LIMIT_I2C)) return luaL_error(L, "rate limit exceeded: i2c");
     i2c_ctx_t *ctx = &s_i2c_ctx[skill_id];
     if (!ctx->inited || strcmp(ctx->bus, bus) != 0) return luaL_error(L, "i2c not initialized: %s", bus);
     if (len <= 0 || len > 256) return luaL_error(L, "invalid i2c read len");
@@ -285,6 +294,7 @@ static int l_i2c_write(lua_State *L)
         payload = luaL_checklstring(L, 3, &len);
     }
     if (!has_perm_i2c(skill_id, bus)) return luaL_error(L, "permission denied: i2c %s", bus);
+    if (!skill_rate_limit_check(skill_id, RATE_LIMIT_I2C)) return luaL_error(L, "rate limit exceeded: i2c");
     i2c_ctx_t *ctx = &s_i2c_ctx[skill_id];
     if (!ctx->inited || strcmp(ctx->bus, bus) != 0) return luaL_error(L, "i2c not initialized: %s", bus);
 
@@ -305,6 +315,7 @@ static int l_uart_send(lua_State *L)
     size_t len = 0;
     const char *data = luaL_checklstring(L, 2, &len);
     if (!has_perm_uart(skill_id, port)) return luaL_error(L, "permission denied: uart%d", port);
+    if (!skill_rate_limit_check(skill_id, RATE_LIMIT_UART)) return luaL_error(L, "rate limit exceeded: uart");
     int n = uart_write_bytes(port, data, len);
     lua_pushinteger(L, n);
     return 1;
@@ -569,6 +580,125 @@ static int l_i2s_scan(lua_State *L)
     return 1;
 }
 
+/* ── HTTP Client API ─────────────────────────────────────────────── */
+
+typedef struct {
+    char *data;
+    int   len;
+    int   capacity;
+} http_buf_t;
+
+static esp_err_t http_event_handler(esp_http_client_event_t *evt)
+{
+    http_buf_t *buf = (http_buf_t *)evt->user_data;
+    if (evt->event_id == HTTP_EVENT_ON_DATA && buf) {
+        int avail = buf->capacity - buf->len - 1;
+        int copy = evt->data_len < avail ? evt->data_len : avail;
+        if (copy > 0) {
+            memcpy(buf->data + buf->len, evt->data, copy);
+            buf->len += copy;
+            buf->data[buf->len] = '\0';
+        }
+    }
+    return ESP_OK;
+}
+
+static int l_http_get(lua_State *L)
+{
+    int skill_id = up_skill_id(L);
+    const char *url = luaL_checkstring(L, 1);
+
+    if (!skill_rate_limit_check(skill_id, RATE_LIMIT_HTTP)) {
+        return luaL_error(L, "rate limit exceeded: http");
+    }
+
+    http_buf_t buf = {0};
+    buf.capacity = 8192;
+    buf.data = malloc(buf.capacity);
+    if (!buf.data) return luaL_error(L, "no memory");
+    buf.data[0] = '\0';
+
+    esp_http_client_config_t config = {
+        .url = url,
+        .event_handler = http_event_handler,
+        .user_data = &buf,
+        .timeout_ms = 10000,
+        .buffer_size = 2048,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) {
+        free(buf.data);
+        return luaL_error(L, "http client init failed");
+    }
+
+    esp_err_t err = esp_http_client_perform(client);
+    int status = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+
+    if (err != ESP_OK) {
+        free(buf.data);
+        return luaL_error(L, "http get failed: %s", esp_err_to_name(err));
+    }
+
+    /* Return: status_code, body */
+    lua_pushinteger(L, status);
+    lua_pushlstring(L, buf.data, buf.len);
+    free(buf.data);
+    return 2;
+}
+
+static int l_http_post(lua_State *L)
+{
+    int skill_id = up_skill_id(L);
+    const char *url = luaL_checkstring(L, 1);
+    size_t body_len = 0;
+    const char *body = luaL_checklstring(L, 2, &body_len);
+    const char *content_type = luaL_optstring(L, 3, "application/json");
+
+    if (!skill_rate_limit_check(skill_id, RATE_LIMIT_HTTP)) {
+        return luaL_error(L, "rate limit exceeded: http");
+    }
+
+    http_buf_t buf = {0};
+    buf.capacity = 8192;
+    buf.data = malloc(buf.capacity);
+    if (!buf.data) return luaL_error(L, "no memory");
+    buf.data[0] = '\0';
+
+    esp_http_client_config_t config = {
+        .url = url,
+        .event_handler = http_event_handler,
+        .user_data = &buf,
+        .timeout_ms = 10000,
+        .buffer_size = 2048,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) {
+        free(buf.data);
+        return luaL_error(L, "http client init failed");
+    }
+
+    esp_http_client_set_method(client, HTTP_METHOD_POST);
+    esp_http_client_set_header(client, "Content-Type", content_type);
+    esp_http_client_set_post_field(client, body, (int)body_len);
+
+    esp_err_t err = esp_http_client_perform(client);
+    int status = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+
+    if (err != ESP_OK) {
+        free(buf.data);
+        return luaL_error(L, "http post failed: %s", esp_err_to_name(err));
+    }
+
+    lua_pushinteger(L, status);
+    lua_pushlstring(L, buf.data, buf.len);
+    free(buf.data);
+    return 2;
+}
+
 typedef struct {
     const char *name;
     lua_CFunction fn;
@@ -603,6 +733,8 @@ void skill_hw_api_push_table(lua_State *L, int skill_id, const skill_permissions
         {"i2s_init", l_i2s_init},
         {"i2s_read", l_i2s_read},
         {"i2s_scan", l_i2s_scan},
+        {"http_get", l_http_get},
+        {"http_post", l_http_post},
     };
 
     lua_newtable(L);

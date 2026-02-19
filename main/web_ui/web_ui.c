@@ -5,6 +5,9 @@
 #include "../tools/tool_web_search.h"
 #include "../cron/cron_service.h"
 #include "../skills/skill_engine.h"
+#if CONFIG_MIMI_ENABLE_OTA
+#include "../ota/ota_manager.h"
+#endif
 #include "nvs.h"
 
 #include <string.h>
@@ -1789,6 +1792,123 @@ static esp_err_t skills_install_history_delete_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ── OTA / Firmware API handlers ──────────────────────────────── */
+
+#if CONFIG_MIMI_ENABLE_OTA
+static esp_err_t firmware_version_handler(httpd_req_t *req)
+{
+    const char *ver = ota_get_current_version();
+    char resp[128];
+    snprintf(resp, sizeof(resp), "{\"version\":\"%s\"}", ver ? ver : "unknown");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t firmware_status_handler(httpd_req_t *req)
+{
+    char *json = ota_status_json();
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+    free(json);
+    return ESP_OK;
+}
+
+static esp_err_t firmware_check_handler(httpd_req_t *req)
+{
+    char body[512];
+    int ret = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (ret <= 0) return ESP_FAIL;
+    body[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(body);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *url = cJSON_GetObjectItem(root, "url");
+    if (!cJSON_IsString(url)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing url");
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = ota_check_for_update(url->valuestring);
+    cJSON_Delete(root);
+
+    char resp[256];
+    if (err == ESP_OK) {
+        snprintf(resp, sizeof(resp),
+                 "{\"update_available\":true,\"version\":\"%s\",\"download_url\":\"%s\"}",
+                 ota_get_pending_version() ? ota_get_pending_version() : "",
+                 ota_get_pending_url() ? ota_get_pending_url() : "");
+    } else {
+        snprintf(resp, sizeof(resp),
+                 "{\"update_available\":false,\"current_version\":\"%s\"}",
+                 ota_get_current_version() ? ota_get_current_version() : "unknown");
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t firmware_update_handler(httpd_req_t *req)
+{
+    char body[512];
+    int ret = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (ret <= 0) return ESP_FAIL;
+    body[ret] = '\0';
+
+    cJSON *root = cJSON_Parse(body);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *url = cJSON_GetObjectItem(root, "url");
+    if (!cJSON_IsString(url)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing url");
+        return ESP_FAIL;
+    }
+
+    /* Respond first, OTA will reboot on success */
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"updating\":true}", HTTPD_RESP_USE_STRLEN);
+
+    /* Start OTA in the current context — will reboot on success */
+    ota_update_from_url(url->valuestring);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t firmware_confirm_handler(httpd_req_t *req)
+{
+    esp_err_t err = ota_confirm_running_firmware();
+    char resp[128];
+    snprintf(resp, sizeof(resp), "{\"success\":%s}",
+             err == ESP_OK ? "true" : "false");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t firmware_rollback_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"rolling_back\":true}", HTTPD_RESP_USE_STRLEN);
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+    ota_rollback();  /* will reboot */
+    return ESP_OK;
+}
+#endif /* CONFIG_MIMI_ENABLE_OTA */
+
 /* ── Server Init ───────────────────────────────────────────────── */
 
 esp_err_t web_ui_init(void)
@@ -1797,7 +1917,7 @@ esp_err_t web_ui_init(void)
     config.server_port = 80;
     config.ctrl_port = 32768;
     config.max_open_sockets = 3;  /* keep low — only serves HTML/JSON */
-    config.max_uri_handlers = 32;
+    config.max_uri_handlers = 40;
 
     httpd_handle_t server = NULL;
     esp_err_t ret = httpd_start(&server, &config);
@@ -1940,6 +2060,50 @@ esp_err_t web_ui_init(void)
     httpd_register_uri_handler(server, &api_skills_delete);
 
     tool_hardware_register_handlers(server);
+
+#if CONFIG_MIMI_ENABLE_OTA
+    httpd_uri_t api_fw_version = {
+        .uri = "/api/firmware/version",
+        .method = HTTP_GET,
+        .handler = firmware_version_handler,
+    };
+    httpd_register_uri_handler(server, &api_fw_version);
+
+    httpd_uri_t api_fw_status = {
+        .uri = "/api/firmware/status",
+        .method = HTTP_GET,
+        .handler = firmware_status_handler,
+    };
+    httpd_register_uri_handler(server, &api_fw_status);
+
+    httpd_uri_t api_fw_check = {
+        .uri = "/api/firmware/check",
+        .method = HTTP_POST,
+        .handler = firmware_check_handler,
+    };
+    httpd_register_uri_handler(server, &api_fw_check);
+
+    httpd_uri_t api_fw_update = {
+        .uri = "/api/firmware/update",
+        .method = HTTP_POST,
+        .handler = firmware_update_handler,
+    };
+    httpd_register_uri_handler(server, &api_fw_update);
+
+    httpd_uri_t api_fw_confirm = {
+        .uri = "/api/firmware/confirm",
+        .method = HTTP_POST,
+        .handler = firmware_confirm_handler,
+    };
+    httpd_register_uri_handler(server, &api_fw_confirm);
+
+    httpd_uri_t api_fw_rollback = {
+        .uri = "/api/firmware/rollback",
+        .method = HTTP_POST,
+        .handler = firmware_rollback_handler,
+    };
+    httpd_register_uri_handler(server, &api_fw_rollback);
+#endif
 
     ESP_LOGI(TAG, "Web UI started on port 80");
     return ESP_OK;

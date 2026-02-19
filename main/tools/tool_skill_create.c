@@ -9,6 +9,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include "esp_log.h"
+#include "skills/skill_rollback.h"
 
 #if CONFIG_MIMI_ENABLE_SKILLS
 #include "skills/skill_engine.h"
@@ -106,6 +107,15 @@ esp_err_t tool_skill_create_execute(const char *input_json, char *output, size_t
     char dir_path[80];
     snprintf(dir_path, sizeof(dir_path), "%s/skills/%s", MIMI_SPIFFS_BASE, name);
     mkdir(dir_path, 0755);  /* May fail if exists, that's OK on SPIFFS */
+
+    /* 2b. Backup existing skill before overwriting */
+    char existing_lua[96];
+    snprintf(existing_lua, sizeof(existing_lua), "%s/main.lua", dir_path);
+    struct stat st;
+    if (stat(existing_lua, &st) == 0) {
+        ESP_LOGI(TAG, "Backing up existing skill '%s' before overwrite", name);
+        skill_rollback_backup(name);
+    }
 
     /* 3. Write main.lua */
     char lua_path[96];
