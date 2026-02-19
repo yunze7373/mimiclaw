@@ -193,10 +193,19 @@ esp_err_t ha_integration_start(void)
         ESP_LOGW(TAG, "HTTP Server not ready, cannot register HA endpoints");
         return ESP_FAIL;
     }
-    
-    httpd_register_uri_handler(server, &ha_state_uri);
-    httpd_register_uri_handler(server, &ha_control_uri);
-    
+
+    esp_err_t err = httpd_register_uri_handler(server, &ha_state_uri);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register %s: %s", ha_state_uri.uri, esp_err_to_name(err));
+        return err;
+    }
+
+    err = httpd_register_uri_handler(server, &ha_control_uri);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register %s: %s", ha_control_uri.uri, esp_err_to_name(err));
+        return err;
+    }
+
     ESP_LOGI(TAG, "HA Integration started. Endpoints registered.");
     return ESP_OK;
 }

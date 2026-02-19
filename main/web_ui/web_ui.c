@@ -13,6 +13,7 @@
 #include "../skills/skill_rollback.h"
 #include "../discovery/mdns_service.h"
 #include "../tools/tool_registry.h"
+#include "../extensions/zigbee_gateway.h"
 #include "nvs.h"
 
 #include <string.h>
@@ -2241,7 +2242,8 @@ esp_err_t web_ui_init(void)
     config.server_port = 80;
     config.ctrl_port = 32768;
     config.max_open_sockets = 3;  /* keep low — only serves HTML/JSON */
-    config.max_uri_handlers = 40;
+    /* Keep headroom for optional modules (HA/MCP/etc.) to register endpoints later. */
+    config.max_uri_handlers = 64;
 
     esp_err_t ret = httpd_start(&s_http_server, &config);
     if (ret != ESP_OK) {
