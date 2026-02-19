@@ -22,7 +22,7 @@
 #include "mimi_config.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-/* remove driver/i2s.h to avoid header conflicts, we use audio.h */
+#include "../audio/audio.h"
 #include "mbedtls/base64.h"
 
 #define HW_NVS_NAMESPACE "hw_config"
@@ -797,8 +797,6 @@ esp_err_t tool_hardware_init(void) {
 
 /* --- I2S Driver Support (Phase 4) - Wrapper around audio.c --- */
 
-#include "../audio/audio.h"
-
 esp_err_t tool_i2s_read(const char *input, char *output, size_t out_len) {
     cJSON *in_json = cJSON_Parse(input);
     int bytes_to_read = 4096;
@@ -910,5 +908,4 @@ esp_err_t tool_i2s_write(const char *input, char *output, size_t out_len) {
     }
     return ESP_OK;
 }
-#endif
 
