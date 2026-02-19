@@ -321,7 +321,7 @@ void app_main(void)
     /* L3: Extensions — optional WiFi-dependent services */
 #if CONFIG_MIMI_ENABLE_MDNS
     const char *mdns_deps[] = {"wifi", NULL};
-    comp_register("mdns", COMP_LAYER_EXT, false, true,
+    comp_register("mdns", COMP_LAYER_EXTENSION, false, true,
                   mdns_service_init, mdns_service_start, NULL, mdns_deps);
 #endif
 
