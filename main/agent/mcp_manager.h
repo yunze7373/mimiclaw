@@ -43,3 +43,10 @@ char *mcp_manager_get_sources_json(void);
  * action: "connect", "disconnect"
  */
 esp_err_t mcp_manager_source_action(int id, const char *action);
+
+/**
+ * Get JSON string of MCP manager status.
+ * Returns: {"connected": N, "total": M, "tools": K}
+ * Caller must free.
+ */
+char *mcp_manager_get_status_json(void);

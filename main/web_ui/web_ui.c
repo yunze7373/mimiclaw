@@ -2384,6 +2384,19 @@ static esp_err_t tools_exec_handler(httpd_req_t *req)
 
 /* ── MCP Manager API ───────────────────────────────────────────── */
 
+static esp_err_t mcp_status_handler(httpd_req_t *req)
+{
+    char *json = mcp_manager_get_status_json();
+    if (json) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, json, strlen(json));
+        free(json);
+    } else {
+        httpd_resp_send_500(req);
+    }
+    return ESP_OK;
+}
+
 static esp_err_t mcp_sources_get_handler(httpd_req_t *req)
 {
     char *json = mcp_manager_get_sources_json();
@@ -2722,6 +2735,14 @@ esp_err_t web_ui_init(void)
         .handler = zigbee_control_handler,
     };
     httpd_register_uri_handler(s_http_server, &api_zb_ctrl);
+
+    /* Register MCP Status API */
+    httpd_uri_t api_mcp_status = {
+        .uri = "/api/mcp/status",
+        .method = HTTP_GET,
+        .handler = mcp_status_handler,
+    };
+    httpd_register_uri_handler(s_http_server, &api_mcp_status);
 
     /* Register MCP Manager API */
     httpd_uri_t api_mcp_sources = {

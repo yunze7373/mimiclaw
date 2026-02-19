@@ -421,6 +421,35 @@ char *mcp_manager_get_sources_json(void)
     return json;
 }
 
+char *mcp_manager_get_status_json(void)
+{
+    cJSON *root = cJSON_CreateObject();
+    int connected = 0;
+    int total = 0;
+    int tools = 0;
+
+    for (int i = 0; i < MAX_SOURCES; i++) {
+        if (s_sources[i].id != 0) {
+            total++;
+            if (s_sources[i].client) connected++;
+        }
+    }
+
+    for (int i = 0; i < MAX_MCP_TOOLS; i++) {
+        if (s_tool_slots[i].used) {
+            tools++;
+        }
+    }
+
+    cJSON_AddNumberToObject(root, "connected", connected);
+    cJSON_AddNumberToObject(root, "total", total);
+    cJSON_AddNumberToObject(root, "tools", tools);
+
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return json;
+}
+
 esp_err_t mcp_manager_source_action(int id, const char *action)
 {
     mcp_source_t *src = NULL;
