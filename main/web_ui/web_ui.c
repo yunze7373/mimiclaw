@@ -1933,7 +1933,7 @@ static esp_err_t skills_delete_handler(httpd_req_t *req)
     }
 
     esp_err_t err = skill_engine_uninstall(name);
-    if (err != ESP_OK) {
+    if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
         char resp[128];
         snprintf(resp, sizeof(resp), "{\"success\":false,\"error\":\"%s\"}", esp_err_to_name(err));
         httpd_resp_set_type(req, "application/json");
@@ -1942,7 +1942,11 @@ static esp_err_t skills_delete_handler(httpd_req_t *req)
     }
 
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+    if (err == ESP_ERR_NOT_FOUND) {
+        httpd_resp_send(req, "{\"success\":true,\"already_removed\":true}", HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_send(req, "{\"success\":true}", HTTPD_RESP_USE_STRLEN);
+    }
     return ESP_OK;
 }
 
@@ -2471,6 +2475,21 @@ esp_err_t web_ui_init(void)
     };
     httpd_register_uri_handler(s_http_server, &api_fw_rollback);
 #endif
+
+    /* Register Zigbee API */
+    httpd_uri_t api_zb_devs = {
+        .uri = "/api/zigbee/devices",
+        .method = HTTP_GET,
+        .handler = zigbee_devices_handler,
+    };
+    httpd_register_uri_handler(s_http_server, &api_zb_devs);
+
+    httpd_uri_t api_zb_ctrl = {
+        .uri = "/api/zigbee/control",
+        .method = HTTP_POST,
+        .handler = zigbee_control_handler,
+    };
+    httpd_register_uri_handler(s_http_server, &api_zb_ctrl);
 
     /* Register Federation API */
     federation_api_register(s_http_server);

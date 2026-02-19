@@ -41,8 +41,12 @@ esp_err_t tool_skill_manage_execute(const char *input_json, char *output, size_t
         } else {
             const char *name = name_item->valuestring;
             esp_err_t err = skill_engine_uninstall(name);
-            if (err == ESP_OK) {
+            if (err == ESP_OK || err == ESP_ERR_NOT_FOUND) {
+                if (err == ESP_ERR_NOT_FOUND) {
+                    snprintf(output, output_size, "Skill '%s' already removed (not found).", name);
+                } else {
                 snprintf(output, output_size, "Skill '%s' deleted successfully.", name);
+                }
             } else {
                 snprintf(output, output_size, "Failed to delete skill '%s': %s", name, esp_err_to_name(err));
                 ret = ESP_FAIL;

@@ -81,4 +81,27 @@ menu "MimiClaw Configuration"
             Advertise MimiClaw on the local network via mDNS.
             Accessible at mimiclaw.local after WiFi connects.
 
+    config MIMI_ENABLE_MCP
+        bool "Enable MCP (Model Context Protocol)"
+        default y
+        help
+            Include MCP client for connecting to external MCP servers.
+            Enables importing tools from MCP-compatible services.
+
+    config MIMI_ENABLE_HA
+        bool "Enable Home Assistant Integration"
+        default n
+        depends on MIMI_ENABLE_WEB_UI
+        depends on MIMI_ENABLE_WEBSOCKET
+        help
+            Include Home Assistant integration for smart home connectivity.
+            Exposes MimiClaw as HA entities via REST API or MQTT.
+
+    config MIMI_ENABLE_ZIGBEE
+        bool "Enable Zigbee Gateway"
+        default n
+        help
+            Include Zigbee gateway for connecting Zigbee devices.
+            Requires external Zigbee co-processor (e.g., CC2531).
+
 endmenu
