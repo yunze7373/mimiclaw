@@ -7,6 +7,7 @@
 #include "tools/tool_network.h"
 #include "tools/tool_skill_create.h"
 #include "tools/tool_skill_manage.h"
+#include "tools/tool_mcp.h"
 #include "llm/llm_proxy.h"
 
 #include <string.h>
@@ -444,6 +445,63 @@ esp_err_t tool_registry_init(void)
         .execute = tool_skill_manage_execute,
     };
     tool_registry_register(&sm);
+
+#if CONFIG_MIMI_ENABLE_MCP
+    /* MCP Source Management Tools */
+    mimi_tool_t mcp_add = {
+        .name = "mcp_add",
+        .description = "Add a new MCP (Model Context Protocol) source. MCP allows connecting to external AI tools and services.",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{"
+            "\"name\":{\"type\":\"string\",\"description\":\"Display name for the MCP source\"},"
+            "\"url\":{\"type\":\"string\",\"description\":\"WebSocket URL (ws:// or wss://)\"},"
+            "\"transport\":{\"type\":\"string\",\"description\":\"Transport protocol (default: websocket)\"},"
+            "\"auto_connect\":{\"type\":\"boolean\",\"description\":\"Auto-connect on startup (default: true)\"}"
+            "},"
+            "\"required\":[\"name\", \"url\"]}",
+        .execute = tool_mcp_add,
+    };
+    tool_registry_register(&mcp_add);
+
+    mimi_tool_t mcp_list = {
+        .name = "mcp_list",
+        .description = "List all configured MCP sources and their connection status.",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{},"
+            "\"additionalProperties\":false}",
+        .execute = tool_mcp_list,
+    };
+    tool_registry_register(&mcp_list);
+
+    mimi_tool_t mcp_remove = {
+        .name = "mcp_remove",
+        .description = "Remove an MCP source by ID.",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{"
+            "\"id\":{\"type\":\"integer\",\"description\":\"MCP source ID to remove\"}"
+            "},"
+            "\"required\":[\"id\"]}",
+        .execute = tool_mcp_remove,
+    };
+    tool_registry_register(&mcp_remove);
+
+    mimi_tool_t mcp_action = {
+        .name = "mcp_action",
+        .description = "Connect or disconnect an MCP source. Actions: connect, disconnect.",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{"
+            "\"id\":{\"type\":\"integer\",\"description\":\"MCP source ID\"},"
+            "\"action\":{\"type\":\"string\",\"description\":\"Action: connect or disconnect\"}"
+            "},"
+            "\"required\":[\"id\", \"action\"]}",
+        .execute = tool_mcp_action,
+    };
+    tool_registry_register(&mcp_action);
+#endif
 
     tool_registry_rebuild_json();
 
