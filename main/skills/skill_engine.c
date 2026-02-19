@@ -1475,6 +1475,16 @@ static bool load_manifest(skill_slot_t *slot, const char *bundle_dir)
     snprintf(slot->description, sizeof(slot->description), "%s", cJSON_IsString(desc) ? desc->valuestring : "");
     snprintf(slot->entry, sizeof(slot->entry), "%s", entry->valuestring);
     snprintf(slot->root_dir, sizeof(slot->root_dir), "%s", bundle_dir);
+    /* Taxonomy */
+    cJSON *cat = cJSON_GetObjectItem(root, "category");
+    slot->category = cJSON_IsString(cat) ? skill_category_from_str(cat->valuestring) : SKILL_CAT_UNKNOWN;
+
+    cJSON *typ = cJSON_GetObjectItem(root, "type");
+    slot->skill_type = cJSON_IsString(typ) ? skill_type_from_str(typ->valuestring) : SKILL_TYPE_UNKNOWN;
+
+    cJSON *bus = cJSON_GetObjectItem(root, "bus");
+    slot->bus = cJSON_IsString(bus) ? skill_bus_from_str(bus->valuestring) : SKILL_BUS_NONE;
+
     char entry_path[512];
     snprintf(entry_path, sizeof(entry_path), "%s/%s", slot->root_dir, slot->entry);
     if (!file_exists_regular(entry_path)) {
