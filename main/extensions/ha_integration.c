@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "cJSON.h"
 #include "esp_http_server.h"
+#include "esp_timer.h"
 #include "ha_integration.h"
 #include "mimi_config.h"
 #include "rgb/rgb.h"
