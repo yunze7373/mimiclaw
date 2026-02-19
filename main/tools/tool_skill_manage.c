@@ -27,29 +27,8 @@ esp_err_t tool_skill_manage_execute(const char *input_json, char *output, size_t
     esp_err_t ret = ESP_OK;
 
     if (strcmp(action, "list") == 0) {
-        /* List all installed skills */
-        /* Currently we don't have a public API for getting skill list as JSON object from engine.
-           But we can iterate SPIFFS or use an internal helper if available. 
-           Wait, there is `skill_engine_get_list_json()`? No? 
-           Let's check `web_ui.c` skills_get_handler implementation. 
-           It iterates the internal list. 
-           Actually `skill_engine.h` exposes `skill_engine_get_count` and `skill_engine_get_skill(i)`.
-           Let's use that.
-        */
-        cJSON *arr = cJSON_CreateArray();
-        int count = skill_engine_get_count();
-        for (int i = 0; i < count; i++) {
-            const skill_t *sk = skill_engine_get_skill(i);
-            if (sk) {
-                cJSON *obj = cJSON_CreateObject();
-                cJSON_AddStringToObject(obj, "name", sk->name);
-                cJSON_AddBoolToObject(obj, "enabled", sk->enabled);
-                cJSON_AddStringToObject(obj, "status", sk->status == SKILL_STATUS_RUNNING ? "running" : "stopped");
-                cJSON_AddItemToArray(arr, obj);
-            }
-        }
-        char *json = cJSON_PrintUnformatted(arr);
-        cJSON_Delete(arr);
+        /* List installed skills via current public engine API */
+        char *json = skill_engine_list_json();
         if (json) {
             snprintf(output, output_size, "%s", json);
             free(json);
