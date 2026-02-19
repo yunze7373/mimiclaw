@@ -385,7 +385,7 @@ static esp_err_t llm_http_direct(const char *post_data, http_req_ctx_t *ctx, int
         .url = llm_api_url(),
         .event_handler = http_event_handler,
         .user_data = ctx,
-        .timeout_ms = 120000,   /* 120s timeout for large prompts */
+        .timeout_ms = 300000,   /* 300s timeout for reasoning models */
         .buffer_size = 1024,    /* Increased for TLS reliability */
         .buffer_size_tx = 2048, /* Headers + body chunks */
         .crt_bundle_attach = esp_crt_bundle_attach,
@@ -419,7 +419,7 @@ static esp_err_t llm_http_direct(const char *post_data, http_req_ctx_t *ctx, int
 
 static esp_err_t llm_http_via_proxy(const char *post_data, http_req_ctx_t *ctx, int *out_status)
 {
-    proxy_conn_t *conn = proxy_conn_open(llm_api_host(), 443, 120000);
+    proxy_conn_t *conn = proxy_conn_open(llm_api_host(), 443, 300000);
     if (!conn) return ESP_ERR_HTTP_CONNECT;
 
     int body_len = strlen(post_data);
@@ -455,7 +455,7 @@ static esp_err_t llm_http_via_proxy(const char *post_data, http_req_ctx_t *ctx, 
     /* Read full response into buffer */
     char tmp[4096];
     while (1) {
-        int n = proxy_conn_read(conn, tmp, sizeof(tmp), 60000);
+        int n = proxy_conn_read(conn, tmp, sizeof(tmp), 300000);
         if (n <= 0) break;
         if (ctx->rb) {
             if (resp_buf_append(ctx->rb, tmp, n) != ESP_OK) break;
