@@ -310,8 +310,33 @@ esp_err_t api_skill_load(const char *name, const char *config_json)
             if (cJSON_IsString(ep_method)) snprintf(e->method, sizeof(e->method), "%s", ep_method->valuestring);
             if (cJSON_IsString(ep_path)) snprintf(e->path, sizeof(e->path), "%s", ep_path->valuestring);
 
-            /* Tool name: <skill_name>_<endpoint_name> */
-            snprintf(e->tool_name, sizeof(e->tool_name), "%s_%s", skill_name_local, e->name);
+            /* Tool name: <skill_name>_<endpoint_name> (bounded and overlap-safe) */
+            char endpoint_name_local[sizeof(e->name)];
+            snprintf(endpoint_name_local, sizeof(endpoint_name_local), "%s", e->name);
+
+            size_t skill_len = strnlen(skill_name_local, sizeof(skill_name_local));
+            size_t endpoint_len = strnlen(endpoint_name_local, sizeof(endpoint_name_local));
+            size_t max_len = sizeof(e->tool_name) - 1; /* reserve NUL */
+            size_t pos = 0;
+
+            size_t copy_skill = (skill_len < max_len) ? skill_len : max_len;
+            memcpy(e->tool_name + pos, skill_name_local, copy_skill);
+            pos += copy_skill;
+
+            if (pos < max_len) {
+                e->tool_name[pos++] = '_';
+            }
+
+            size_t remain = max_len - pos;
+            size_t copy_endpoint = (endpoint_len < remain) ? endpoint_len : remain;
+            memcpy(e->tool_name + pos, endpoint_name_local, copy_endpoint);
+            pos += copy_endpoint;
+            e->tool_name[pos] = '\0';
+
+            if (skill_len + 1 + endpoint_len > max_len) {
+                ESP_LOGW(TAG, "Truncated tool name for endpoint '%s': '%s'",
+                         endpoint_name_local, e->tool_name);
+            }
 
             /* Build tool input schema from params */
             cJSON *params = cJSON_GetObjectItem(ep, "params");
