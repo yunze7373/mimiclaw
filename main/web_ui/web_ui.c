@@ -9,6 +9,7 @@
 #include "../ota/ota_manager.h"
 #endif
 #include "../federation/peer_manager.h"
+#include "../discovery/mdns_service.h"
 #include "nvs.h"
 
 #include <string.h>
@@ -1926,7 +1927,9 @@ static esp_err_t peers_get_handler(httpd_req_t *req)
 static esp_err_t peers_sync_handler(httpd_req_t *req)
 {
     /* Trigger mDNS query */
+#if CONFIG_MIMI_ENABLE_MDNS
     mdns_service_query_peers();
+#endif
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"status\":\"ok\",\"message\":\"Scan started\"}", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;

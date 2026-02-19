@@ -22,3 +22,8 @@ esp_err_t mdns_service_start(void);
  * Call after skills are loaded/unloaded.
  */
 void mdns_service_update_skill_count(int count);
+
+/**
+ * Query peers advertising _mimiclaw._tcp and refresh peer manager entries.
+ */
+void mdns_service_query_peers(void);
