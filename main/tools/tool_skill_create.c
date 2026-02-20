@@ -361,16 +361,20 @@ esp_err_t tool_skill_get_template_execute(const char *input_json, char *output, 
     }
     
     cJSON *name = cJSON_GetObjectItem(root, "name");
-    if (!cJSON_IsString(name)) {
+    if (!cJSON_IsString(name) || !name->valuestring || !name->valuestring[0]) {
         cJSON_Delete(root);
         snprintf(output, output_size, "Error: 'name' parameter required");
         return ESP_FAIL;
     }
+
+    /* Copy before deleting root to avoid use-after-free on error paths. */
+    char template_name[64];
+    snprintf(template_name, sizeof(template_name), "%s", name->valuestring);
     
     int idx = -1;
     int count = sizeof(s_templates) / sizeof(s_templates[0]);
     for(int i=0; i<count; i++) {
-        if (strcmp(s_templates[i].name, name->valuestring) == 0) {
+        if (strcmp(s_templates[i].name, template_name) == 0) {
             idx = i;
             break;
         }
@@ -379,8 +383,14 @@ esp_err_t tool_skill_get_template_execute(const char *input_json, char *output, 
     cJSON_Delete(root);
     
     if (idx < 0) {
-        snprintf(output, output_size, "Error: Template '%s' not found", name->valuestring);
+        snprintf(output, output_size, "Error: Template '%s' not found", template_name);
         return ESP_OK; /* Not a system error, just not found */
+    }
+
+    int template_content_count = (int)(sizeof(s_template_content) / sizeof(s_template_content[0]));
+    if (idx >= template_content_count || !s_template_content[idx]) {
+        snprintf(output, output_size, "{\"error\":\"template content missing\"}");
+        return ESP_FAIL;
     }
     
     /* Return JSON object with code */
