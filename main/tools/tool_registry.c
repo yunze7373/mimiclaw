@@ -9,6 +9,7 @@
 #include "tools/tool_skill_manage.h"
 #include "tools/tool_mcp.h"
 #include "tools/tool_audio.h"
+#include "tools/tool_zigbee.h"
 #include "llm/llm_proxy.h"
 
 #include <string.h>
@@ -387,6 +388,9 @@ esp_err_t tool_registry_init(void)
 
     // Register Audio Tools (Phase 16)
     register_audio_tools();
+
+    // Register Zigbee Tools (Phase 17)
+    register_zigbee_tools();
 
     ESP_LOGI(TAG, "Tool registry initialized");
     return ESP_OK;
