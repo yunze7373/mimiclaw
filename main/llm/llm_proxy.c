@@ -25,9 +25,9 @@ static char s_ollama_host[64] = MIMI_SECRET_OLLAMA_HOST;
 static char s_ollama_port[8] = MIMI_SECRET_OLLAMA_PORT;
 
 /* Audio Voice APIs (Phase 1.3) */
-static char s_openai_api_key_audio[LLM_API_KEY_MAX_LEN] = MIMI_SECRET_OPENAI_API_KEY_AUDIO;
-static char s_asr_endpoint[256] = MIMI_SECRET_ASR_ENDPOINT;
-static char s_tts_endpoint[256] = MIMI_SECRET_TTS_ENDPOINT;
+char s_openai_api_key_audio[LLM_API_KEY_MAX_LEN] = MIMI_SECRET_OPENAI_API_KEY_AUDIO;
+char s_asr_endpoint[256] = MIMI_SECRET_ASR_ENDPOINT;
+char s_tts_endpoint[256] = MIMI_SECRET_TTS_ENDPOINT;
 static bool s_streaming = true; /* streaming enabled by default */
 
 /* Global status callback for forwarding HTTP progress to UI */

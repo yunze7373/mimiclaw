@@ -24,9 +24,8 @@ static esp_err_t _http_event_handle_tts(esp_http_client_event_t *evt) {
                 // For a robust implementation, we might want to skip the 44-byte WAV header
                 // But as a quick MVP we can push it all.
                 
-                size_t written;
                 // I2S write block
-                audio_i2s_write(evt->data, evt->data_len, &written, portMAX_DELAY);
+                audio_speaker_write((const uint8_t *)evt->data, (size_t)evt->data_len);
             }
             break;
         default:

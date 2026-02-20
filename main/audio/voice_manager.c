@@ -23,11 +23,6 @@ static void set_state(voice_state_t new_state) {
     ESP_LOGI(TAG, "Voice State -> %d", new_state);
 }
 
-// Memory tracking
-static size_t get_internal_sram_free() {
-    return heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-}
-
 // Helper to interact with the LLM via llm_proxy
 static esp_err_t proxy_llm_request(const char *user_text, char **out_response) {
     if (!user_text || !out_response) return ESP_ERR_INVALID_ARG;
@@ -89,15 +84,15 @@ static void voice_task(void *arg) {
             }
 
             // Record from I2S mic
-            size_t bytes_read = 0;
             size_t total_read = 0;
 
             // Optional: Start a beep here to indicate listening
 
             uint64_t start_time = esp_timer_get_time() / 1000ULL;
             while (s_current_state == VOICE_STATE_LISTENING && total_read < max_capture_size) {
-                if (audio_i2s_read((char *)audio_buf + total_read, 1024, &bytes_read, pdMS_TO_TICKS(100)) == ESP_OK) {
-                    total_read += bytes_read;
+                int chunk_read = audio_mic_read(audio_buf + total_read, 1024);
+                if (chunk_read > 0) {
+                    total_read += (size_t)chunk_read;
                 } else {
                     vTaskDelay(pdMS_TO_TICKS(10));
                 }

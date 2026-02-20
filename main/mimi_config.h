@@ -40,6 +40,15 @@
 #ifndef MIMI_SECRET_SEARCH_KEY
 #define MIMI_SECRET_SEARCH_KEY      ""
 #endif
+#ifndef MIMI_SECRET_OPENAI_API_KEY_AUDIO
+#define MIMI_SECRET_OPENAI_API_KEY_AUDIO ""
+#endif
+#ifndef MIMI_SECRET_ASR_ENDPOINT
+#define MIMI_SECRET_ASR_ENDPOINT    "https://api.openai.com/v1/audio/transcriptions"
+#endif
+#ifndef MIMI_SECRET_TTS_ENDPOINT
+#define MIMI_SECRET_TTS_ENDPOINT    "https://api.openai.com/v1/audio/speech"
+#endif
 
 /* WiFi */
 #define MIMI_WIFI_MAX_RETRY          10
