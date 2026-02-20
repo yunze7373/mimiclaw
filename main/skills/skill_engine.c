@@ -1959,6 +1959,15 @@ static bool load_legacy_lua_file(const char *filename, int slot_idx)
 
 static esp_err_t skill_engine_init_impl(void)
 {
+    /* Clean up previously registered tools */
+    for (int i = 0; i < SKILL_MAX_SLOTS; i++) {
+        if (s_slots[i].used) {
+            for (int j = 0; j < s_slots[i].tool_count; j++) {
+                tool_registry_unregister(s_slots[i].tool_names[j]);
+            }
+        }
+    }
+
     memset(s_slots, 0, sizeof(s_slots));
     memset(s_tool_ctx, 0, sizeof(s_tool_ctx));
     memset(s_timers, 0, sizeof(s_timers));
@@ -1992,6 +2001,7 @@ static esp_err_t skill_engine_init_impl(void)
         return ESP_ERR_NO_MEM;
     }
     luaL_requiref(s_L, "_G", luaopen_base, 1); lua_pop(s_L, 1);
+    luaL_requiref(s_L, "package", luaopen_package, 1); lua_pop(s_L, 1);
     luaL_requiref(s_L, "table", luaopen_table, 1); lua_pop(s_L, 1);
     luaL_requiref(s_L, "string", luaopen_string, 1); lua_pop(s_L, 1);
     luaL_requiref(s_L, "math", luaopen_math, 1); lua_pop(s_L, 1);
