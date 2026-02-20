@@ -16,7 +16,21 @@
 
 static const char *TAG = "tools";
 
-/* Inline tool: set_streaming */
+/* ── Built-in Tools Storage ────────────────────────────────────────── */
+
+#define MAX_TOOLS 48
+static mimi_tool_t s_tools[MAX_TOOLS];
+static int s_tool_count = 0;
+
+/* ── Tool Providers ────────────────────────────────────────────────── */
+
+#define MAX_PROVIDERS 8
+static tool_provider_t s_providers[MAX_PROVIDERS];
+static int s_provider_count = 0;
+
+static char *s_cached_json = NULL;
+
+/* ── Inline tool: set_streaming ────────────────────────────────────── */
 static esp_err_t tool_set_streaming_execute(const char *input_json, char *output, size_t output_size)
 {
     cJSON *root = cJSON_Parse(input_json);
@@ -31,11 +45,43 @@ static esp_err_t tool_set_streaming_execute(const char *input_json, char *output
     return ESP_OK;
 }
 
-#define MAX_TOOLS 48
+/* ── Built-in Provider (Legacy Wrapper) ────────────────────────────── */
 
-static mimi_tool_t s_tools[MAX_TOOLS];
-static int s_tool_count = 0;
-static char *s_tools_json = NULL;  /* cached JSON array string */
+static char *builtin_get_tools_json(void)
+{
+    cJSON *arr = cJSON_CreateArray();
+    for (int i = 0; i < s_tool_count; i++) {
+        cJSON *tool = cJSON_CreateObject();
+        cJSON_AddStringToObject(tool, "name", s_tools[i].name);
+        cJSON_AddStringToObject(tool, "description", s_tools[i].description);
+        cJSON *schema = cJSON_Parse(s_tools[i].input_schema_json);
+        if (schema) {
+            cJSON_AddItemToObject(tool, "input_schema", schema);
+        }
+        cJSON_AddItemToArray(arr, tool);
+    }
+    char *json = cJSON_PrintUnformatted(arr);
+    cJSON_Delete(arr);
+    return json;
+}
+
+static esp_err_t builtin_execute_tool(const char *tool_name, const char *input_json, char *output, size_t output_size)
+{
+    for (int i = 0; i < s_tool_count; i++) {
+        if (strcmp(s_tools[i].name, tool_name) == 0) {
+            return s_tools[i].execute(input_json, output, output_size);
+        }
+    }
+    return ESP_ERR_NOT_FOUND;
+}
+
+static const tool_provider_t s_builtin_provider = {
+    .name = "builtin",
+    .get_tools_json = builtin_get_tools_json,
+    .execute_tool = builtin_execute_tool
+};
+
+/* ── Registry API ──────────────────────────────────────────────────── */
 
 void tool_registry_register(const mimi_tool_t *tool)
 {
@@ -56,7 +102,6 @@ void tool_registry_register(const mimi_tool_t *tool)
 void tool_registry_unregister(const char *name)
 {
     if (!name || !name[0]) return;
-
     for (int i = 0; i < s_tool_count; i++) {
         if (strcmp(s_tools[i].name, name) == 0) {
             for (int j = i; j < s_tool_count - 1; j++) {
@@ -69,58 +114,105 @@ void tool_registry_unregister(const char *name)
     }
 }
 
+esp_err_t tool_registry_register_provider(const tool_provider_t *provider)
+{
+    if (s_provider_count >= MAX_PROVIDERS) return ESP_ERR_NO_MEM;
+    s_providers[s_provider_count++] = *provider;
+    ESP_LOGI(TAG, "Registered provider: %s", provider->name);
+    return ESP_OK;
+}
+
 void tool_registry_rebuild_json(void)
 {
-    cJSON *arr = cJSON_CreateArray();
+    // In provider model, we rebuild on get or invalidate cache here.
+    // For now, simple clear cache.
+    if (s_cached_json) {
+        free(s_cached_json);
+        s_cached_json = NULL;
+    }
+}
 
-    for (int i = 0; i < s_tool_count; i++) {
-        cJSON *tool = cJSON_CreateObject();
-        cJSON_AddStringToObject(tool, "name", s_tools[i].name);
-        cJSON_AddStringToObject(tool, "description", s_tools[i].description);
+const char *tool_registry_get_tools_json(void)
+{
+    if (s_cached_json) return s_cached_json;
 
-        cJSON *schema = cJSON_Parse(s_tools[i].input_schema_json);
-        if (schema) {
-            cJSON_AddItemToObject(tool, "input_schema", schema);
+    cJSON *root = cJSON_CreateObject();
+    cJSON *all_tools = cJSON_CreateArray();
+    cJSON_AddItemToObject(root, "type", cJSON_CreateString("function")); // Optional, for some LLM formats
+    // Actually, usually we return just the array or objects. The original code returned printed array.
+    // Let's stick to returning array of tools as root, unless LLM proxy expects otherwise.
+    // Original implementation: returned cJSON_PrintUnformatted(arr)
+    
+    // So let's create a big array.
+    cJSON_Delete(root);
+    all_tools = cJSON_CreateArray();
+
+    for (int i = 0; i < s_provider_count; i++) {
+        char *p_json = s_providers[i].get_tools_json();
+        if (p_json) {
+            cJSON *p_arr = cJSON_Parse(p_json);
+            if (p_arr && cJSON_IsArray(p_arr)) {
+                cJSON *item = NULL;
+                cJSON_ArrayForEach(item, p_arr) {
+                    cJSON *clone = cJSON_Duplicate(item, true);
+                    cJSON_AddItemToArray(all_tools, clone);
+                }
+            }
+            if (p_arr) cJSON_Delete(p_arr);
+            free(p_json);
         }
-
-        cJSON_AddItemToArray(arr, tool);
     }
 
-    free(s_tools_json);
-    s_tools_json = cJSON_PrintUnformatted(arr);
-    cJSON_Delete(arr);
-
-    ESP_LOGI(TAG, "Tools JSON built (%d tools)", s_tool_count);
+    s_cached_json = cJSON_PrintUnformatted(all_tools);
+    cJSON_Delete(all_tools);
+    return s_cached_json;
 }
+
+esp_err_t tool_registry_execute(const char *name, const char *input_json,
+                                char *output, size_t output_size)
+{
+    for (int i = 0; i < s_provider_count; i++) {
+        esp_err_t ret = s_providers[i].execute_tool(name, input_json, output, output_size);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "Executed tool '%s' via provider '%s'", name, s_providers[i].name);
+            return ESP_OK;
+        } else if (ret != ESP_ERR_NOT_FOUND) {
+            // Found but failed
+            return ret;
+        }
+    }
+
+    ESP_LOGW(TAG, "Unknown tool: %s", name);
+    snprintf(output, output_size, "Error: unknown tool '%s'", name);
+    return ESP_ERR_NOT_FOUND;
+}
+
+/* ── Init ──────────────────────────────────────────────────────────── */
 
 esp_err_t tool_registry_init(void)
 {
     s_tool_count = 0;
+    s_provider_count = 0;
+
+    /* Register Built-in Provider first */
+    tool_registry_register_provider(&s_builtin_provider);
 
     /* Register web_search */
     tool_web_search_init();
-
     mimi_tool_t ws = {
         .name = "web_search",
         .description = "Search the web for current information. Use this when you need up-to-date facts, news, weather, or anything beyond your training data.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"The search query\"}},"
-            "\"required\":[\"query\"]}",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"The search query\"}},\"required\":[\"query\"]}",
         .execute = tool_web_search_execute,
     };
     tool_registry_register(&ws);
 
     /* Register get_current_time */
     tool_time_init();
-
     mimi_tool_t gt = {
         .name = "get_current_time",
         .description = "Get the current date and time. Also sets the system clock. Call this when you need to know what time or date it is.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{},"
-            "\"required\":[]}",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
         .execute = tool_get_time_execute,
     };
     tool_registry_register(&gt);
@@ -128,11 +220,8 @@ esp_err_t tool_registry_init(void)
     /* Register set_timezone */
     mimi_tool_t stz = {
         .name = "set_timezone",
-        .description = "Set the system timezone. Use this when the user asks to change the timezone or location.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{\"timezone\":{\"type\":\"string\",\"description\":\"Timezone string (e.g. 'CST-8', 'EST5EDT', 'UTC')\"}},"
-            "\"required\":[\"timezone\"]}",
+        .description = "Set the system timezone.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"timezone\":{\"type\":\"string\",\"description\":\"Timezone string (e.g. 'CST-8', 'EST5EDT', 'UTC')\"}},\"required\":[\"timezone\"]}",
         .execute = tool_set_timezone_execute,
     };
     tool_registry_register(&stz);
@@ -140,11 +229,8 @@ esp_err_t tool_registry_init(void)
     /* Register set_streaming */
     mimi_tool_t stm = {
         .name = "set_streaming",
-        .description = "Enable or disable streaming mode. When streaming is enabled, responses appear token by token in real-time. When disabled, the full response is sent at once (faster overall but no live typing effect).",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{\"enable\":{\"type\":\"boolean\",\"description\":\"true to enable streaming, false to disable\"}},"
-            "\"required\":[\"enable\"]}",
+        .description = "Enable or disable streaming mode.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"enable\":{\"type\":\"boolean\"}},\"required\":[\"enable\"]}",
         .execute = tool_set_streaming_execute,
     };
     tool_registry_register(&stm);
@@ -152,11 +238,8 @@ esp_err_t tool_registry_init(void)
     /* Register read_file */
     mimi_tool_t rf = {
         .name = "read_file",
-        .description = "Read a file from SPIFFS storage. Path must start with /spiffs/.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"Absolute path starting with /spiffs/\"}},"
-            "\"required\":[\"path\"]}",
+        .description = "Read a file from SPIFFS storage.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}",
         .execute = tool_read_file_execute,
     };
     tool_registry_register(&rf);
@@ -164,12 +247,8 @@ esp_err_t tool_registry_init(void)
     /* Register write_file */
     mimi_tool_t wf = {
         .name = "write_file",
-        .description = "Write or overwrite a file on SPIFFS storage. Path must start with /spiffs/.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"Absolute path starting with /spiffs/\"},"
-            "\"content\":{\"type\":\"string\",\"description\":\"File content to write\"}},"
-            "\"required\":[\"path\",\"content\"]}",
+        .description = "Write a file to SPIFFS storage.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"]}",
         .execute = tool_write_file_execute,
     };
     tool_registry_register(&wf);
@@ -177,13 +256,8 @@ esp_err_t tool_registry_init(void)
     /* Register edit_file */
     mimi_tool_t ef = {
         .name = "edit_file",
-        .description = "Find and replace text in a file on SPIFFS. Replaces first occurrence of old_string with new_string.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"Absolute path starting with /spiffs/\"},"
-            "\"old_string\":{\"type\":\"string\",\"description\":\"Text to find\"},"
-            "\"new_string\":{\"type\":\"string\",\"description\":\"Replacement text\"}},"
-            "\"required\":[\"path\",\"old_string\",\"new_string\"]}",
+        .description = "Find and replace text in a file.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"old_string\":{\"type\":\"string\"},\"new_string\":{\"type\":\"string\"}},\"required\":[\"path\",\"old_string\",\"new_string\"]}",
         .execute = tool_edit_file_execute,
     };
     tool_registry_register(&ef);
@@ -191,36 +265,21 @@ esp_err_t tool_registry_init(void)
     /* Register list_dir */
     mimi_tool_t ld = {
         .name = "list_dir",
-        .description = "List files on SPIFFS storage, optionally filtered by path prefix.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{\"prefix\":{\"type\":\"string\",\"description\":\"Optional path prefix filter, e.g. /spiffs/memory/\"}},"
-            "\"required\":[]}",
+        .description = "List files on SPIFFS storage.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"prefix\":{\"type\":\"string\"}},\"required\":[]}",
         .execute = tool_list_dir_execute,
     };
     tool_registry_register(&ld);
 
-    /* Register cron_add */
+    /* Register cron tools */
     mimi_tool_t ca = {
         .name = "cron_add",
-        .description = "Schedule a recurring or one-shot task. The message will trigger an agent turn when the job fires.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{"
-            "\"name\":{\"type\":\"string\",\"description\":\"Short name for the job\"},"
-            "\"schedule_type\":{\"type\":\"string\",\"description\":\"'every' for recurring interval or 'at' for one-shot at a unix timestamp\"},"
-            "\"interval_s\":{\"type\":\"integer\",\"description\":\"Interval in seconds (required for 'every')\"},"
-            "\"at_epoch\":{\"type\":\"integer\",\"description\":\"Unix timestamp to fire at (required for 'at')\"},"
-            "\"message\":{\"type\":\"string\",\"description\":\"Message to inject when the job fires, triggering an agent turn\"},"
-            "\"channel\":{\"type\":\"string\",\"description\":\"Optional reply channel (e.g. 'telegram'). Defaults to 'system'\"},"
-            "\"chat_id\":{\"type\":\"string\",\"description\":\"Optional reply chat_id. Defaults to 'cron'\"}"
-            "},"
-            "\"required\":[\"name\",\"schedule_type\",\"message\"]}",
+        .description = "Schedule a recurring or one-shot task.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"schedule_type\":{\"type\":\"string\"},\"interval_s\":{\"type\":\"integer\"},\"at_epoch\":{\"type\":\"integer\"},\"message\":{\"type\":\"string\"},\"channel\":{\"type\":\"string\"},\"chat_id\":{\"type\":\"string\"}},\"required\":[\"name\",\"schedule_type\",\"message\"]}",
         .execute = tool_cron_add_execute,
     };
     tool_registry_register(&ca);
 
-    /* Register cron_list */
     mimi_tool_t cl = {
         .name = "cron_list",
         .description = "List all active cron jobs.",
@@ -229,23 +288,18 @@ esp_err_t tool_registry_init(void)
     };
     tool_registry_register(&cl);
 
-     /* Register cron_remove */
-    mimi_tool_t cr = {
+     mimi_tool_t cr = {
         .name = "cron_remove",
         .description = "Remove a cron job by ID.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{\"id\":{\"type\":\"string\",\"description\":\"Job ID\"}},"
-            "\"required\":[\"id\"]}",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}},\"required\":[\"id\"]}",
         .execute = tool_cron_remove_execute,
     };
     tool_registry_register(&cr);
 
-    /* --- Power / Hardware --- */
     /* Register system_status */
     mimi_tool_t ss = {
         .name = "system_status",
-        .description = "Get current system status (CPU, Memory, Temp, Uptime).",
+        .description = "Get current system status.",
         .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
         .execute = tool_system_status,
     };
@@ -254,11 +308,8 @@ esp_err_t tool_registry_init(void)
     /* Register gpio_control */
     mimi_tool_t gc = {
         .name = "gpio_control",
-        .description = "Control a GPIO pin (High/Low). Returns error if pin is restricted.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{\"pin\":{\"type\":\"integer\"},\"state\":{\"type\":\"boolean\"}},"
-            "\"required\":[\"pin\",\"state\"]}",
+        .description = "Control a GPIO pin.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"pin\":{\"type\":\"integer\"},\"state\":{\"type\":\"boolean\"}},\"required\":[\"pin\",\"state\"]}",
         .execute = tool_gpio_control,
     };
     tool_registry_register(&gc);
@@ -272,259 +323,66 @@ esp_err_t tool_registry_init(void)
     };
     tool_registry_register(&is);
 
-    /* --- Phase 1: New Hardware Tools --- */
-
-    /* Register adc_read */
-    mimi_tool_t ar = {
-        .name = "adc_read",
-        .description = "Read an ADC channel (0-9 on ADC1). Returns raw value and voltage in mV. Use to measure analog sensor values.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{\"channel\":{\"type\":\"integer\",\"description\":\"ADC channel number (0-9)\"}},"
-            "\"required\":[\"channel\"]}",
-        .execute = tool_adc_read,
-    };
+    /* Register ADC/PWM/RGB/UART */
+    mimi_tool_t ar = { "adc_read", "Read an ADC channel (0-9).", "{\"type\":\"object\",\"properties\":{\"channel\":{\"type\":\"integer\"}},\"required\":[\"channel\"]}", tool_adc_read };
     tool_registry_register(&ar);
 
-    /* Register pwm_control */
-    mimi_tool_t pwm = {
-        .name = "pwm_control",
-        .description = "Control PWM output on a GPIO pin using LEDC. Set frequency and duty cycle, or stop PWM. Up to 4 simultaneous channels.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{"
-            "\"pin\":{\"type\":\"integer\",\"description\":\"GPIO pin number\"},"
-            "\"freq_hz\":{\"type\":\"integer\",\"description\":\"PWM frequency in Hz (default 5000)\"},"
-            "\"duty_percent\":{\"type\":\"number\",\"description\":\"Duty cycle 0-100% (default 50)\"},"
-            "\"stop\":{\"type\":\"boolean\",\"description\":\"Set true to stop PWM on this pin\"}"
-            "},"
-            "\"required\":[\"pin\"]}",
-        .execute = tool_pwm_control,
-    };
+    mimi_tool_t pwm = { "pwm_control", "Control PWM output.", "{\"type\":\"object\",\"properties\":{\"pin\":{\"type\":\"integer\"},\"freq_hz\":{\"type\":\"integer\"},\"duty_percent\":{\"type\":\"number\"},\"stop\":{\"type\":\"boolean\"}},\"required\":[\"pin\"]}", tool_pwm_control };
     tool_registry_register(&pwm);
 
-    /* Register rgb_control */
-    mimi_tool_t rgb = {
-        .name = "rgb_control",
-        .description = "Set the on-board WS2812 RGB LED color. Each color channel is 0-255. Use {r:0,g:0,b:0} to turn off.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{"
-            "\"r\":{\"type\":\"integer\",\"description\":\"Red (0-255)\"},"
-            "\"g\":{\"type\":\"integer\",\"description\":\"Green (0-255)\"},"
-            "\"b\":{\"type\":\"integer\",\"description\":\"Blue (0-255)\"}"
-            "},"
-            "\"required\":[\"r\",\"g\",\"b\"]}",
-        .execute = tool_rgb_control,
-    };
+    mimi_tool_t rgb = { "rgb_control", "Set RGB LED color.", "{\"type\":\"object\",\"properties\":{\"r\":{\"type\":\"integer\"},\"g\":{\"type\":\"integer\"},\"b\":{\"type\":\"integer\"}},\"required\":[\"r\",\"g\",\"b\"]}", tool_rgb_control };
     tool_registry_register(&rgb);
 
-    /* --- Phase 2: Network Tools --- */
     tool_network_init();
-
-    /* Register wifi_scan */
-    mimi_tool_t wscan = {
-        .name = "wifi_scan",
-        .description = "Scan for nearby WiFi access points. Returns SSID, RSSI, channel, and auth type for each AP found.",
-        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
-        .execute = tool_wifi_scan,
-    };
+    mimi_tool_t wscan = { "wifi_scan", "Scan for WiFi APs.", "{\"type\":\"object\",\"properties\":{},\"required\":[]}", tool_wifi_scan };
     tool_registry_register(&wscan);
 
-    /* Register wifi_status */
-    mimi_tool_t wstat = {
-        .name = "wifi_status",
-        .description = "Get current WiFi connection status including SSID, IP address, RSSI, MAC, and gateway.",
-        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
-        .execute = tool_wifi_status,
-    };
+    mimi_tool_t wstat = { "wifi_status", "Get WiFi status.", "{\"type\":\"object\",\"properties\":{},\"required\":[]}", tool_wifi_status };
     tool_registry_register(&wstat);
 
 #ifdef CONFIG_BT_ENABLED
-    /* Register ble_scan */
-    mimi_tool_t bscan = {
-        .name = "ble_scan",
-        .description = "Scan for nearby Bluetooth Low Energy (BLE) devices. Returns device name, MAC address, and RSSI. Scan takes ~5 seconds.",
-        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
-        .execute = tool_ble_scan,
-    };
+    mimi_tool_t bscan = { "ble_scan", "Scan for BLE devices.", "{\"type\":\"object\",\"properties\":{},\"required\":[]}", tool_ble_scan };
     tool_registry_register(&bscan);
 #endif
 
-    /* --- Phase 3: System Tools --- */
-
-    /* Register uart_send */
-    mimi_tool_t us = {
-        .name = "uart_send",
-        .description = "Send data string via UART port. Default port is UART1. Use for serial communication with external devices.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{"
-            "\"data\":{\"type\":\"string\",\"description\":\"Data string to send\"},"
-            "\"port\":{\"type\":\"integer\",\"description\":\"UART port number (default 1)\"}"
-            "},"
-            "\"required\":[\"data\"]}",
-        .execute = tool_uart_send,
-    };
+    mimi_tool_t us = { "uart_send", "Send data via UART.", "{\"type\":\"object\",\"properties\":{\"data\":{\"type\":\"string\"},\"port\":{\"type\":\"integer\"}},\"required\":[\"data\"]}", tool_uart_send };
     tool_registry_register(&us);
 
-    /* Phase 4: I2S Tools */
-    mimi_tool_t ir = {
-        .name = "i2s_read",
-        .description = "Read raw PCM audio from Microphone (I2S0). Input: {bytes: int}. Output: Base64 encoded PCM data. Default 4096 bytes.",
-        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"bytes\":{\"type\":\"integer\"}},\"required\":[]}",
-        .execute = tool_i2s_read,
-    };
+    mimi_tool_t ir = { "i2s_read", "Read I2S audio.", "{\"type\":\"object\",\"properties\":{\"bytes\":{\"type\":\"integer\"}},\"required\":[]}", tool_i2s_read };
     tool_registry_register(&ir);
 
-    mimi_tool_t iw = {
-        .name = "i2s_write",
-        .description = "Write raw PCM audio to Amplifier (I2S1). Input: {data_base64: string}. Output: 'OK'.",
-        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"data_base64\":{\"type\":\"string\"}},\"required\":[\"data_base64\"]}",
-        .execute = tool_i2s_write,
-    };
+    mimi_tool_t iw = { "i2s_write", "Write I2S audio.", "{\"type\":\"object\",\"properties\":{\"data_base64\":{\"type\":\"string\"}},\"required\":[\"data_base64\"]}", tool_i2s_write };
     tool_registry_register(&iw);
 
-    /* Register system_restart (re-registering properly) */
-    mimi_tool_t sr = {
-        .name = "system_restart",
-        .description = "Restart the ESP32 system. Use only when necessary (e.g. after config changes). The device will reboot after a 500ms delay.",
-        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
-        .execute = tool_system_restart,
-    };
+    mimi_tool_t sr = { "system_restart", "Restart system.", "{\"type\":\"object\",\"properties\":{},\"required\":[]}", tool_system_restart };
     tool_registry_register(&sr);
 
-    /* --- Phase 6: Agent Skill Creation --- */
-    mimi_tool_t sc = {
-        .name = "skill_create",
-        .description = "Create a new hardware or software skill from Lua code. The skill is saved to SPIFFS and hot-loaded into the engine. Use skill_list_templates first to see available templates for reference.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{"
-            "\"name\":{\"type\":\"string\",\"description\":\"Skill name (lowercase, alphanumeric, underscores)\"},"
-            "\"description\":{\"type\":\"string\",\"description\":\"Human-readable description\"},"
-            "\"category\":{\"type\":\"string\",\"description\":\"hardware or software\"},"
-            "\"type\":{\"type\":\"string\",\"description\":\"sensor, actuator, communication, utility, or service\"},"
-            "\"bus\":{\"type\":\"string\",\"description\":\"i2c, gpio, spi, pwm, uart, rmt, or none\"},"
-            "\"code\":{\"type\":\"string\",\"description\":\"Complete Lua skill code with SKILL and TOOLS tables\"}"
-            "},"
-            "\"required\":[\"name\",\"code\"]}",
-        .execute = tool_skill_create_execute,
-    };
+    mimi_tool_t sc = { "skill_create", "Create a skill.", "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"code\":{\"type\":\"string\"}},\"required\":[\"name\",\"code\"]}", tool_skill_create_execute };
     tool_registry_register(&sc);
 
-    mimi_tool_t slt = {
-        .name = "skill_list_templates",
-        .description = "List available skill templates for creating new skills. Returns template names, descriptions, and categories. Use the template_path with read_file to see the full template code.",
-        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
-        .execute = tool_skill_list_templates_execute,
-    };
+    mimi_tool_t slt = { "skill_list_templates", "List skill templates.", "{\"type\":\"object\",\"properties\":{},\"required\":[]}", tool_skill_list_templates_execute };
     tool_registry_register(&slt);
 
-    mimi_tool_t sgt = {
-        .name = "skill_get_template",
-        .description = "Get the Lua source code for a skill template. Use this to start writing a new skill.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{\"name\":{\"type\":\"string\",\"description\":\"Template name (from skill_list_templates)\"}},"
-            "\"required\":[\"name\"]}",
-        .execute = tool_skill_get_template_execute,
-    };
+    mimi_tool_t sgt = { "skill_get_template", "Get skill template code.", "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"]}", tool_skill_get_template_execute };
     tool_registry_register(&sgt);
 
-    mimi_tool_t sm = {
-        .name = "skill_manage",
-        .description = "Manage installed skills: list, delete, or reload. Use delete to uninstall a skill by name. Use reload after manual file changes.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{"
-            "\"action\":{\"type\":\"string\",\"description\":\"list, delete, or reload\"},"
-            "\"name\":{\"type\":\"string\",\"description\":\"Skill name (required for delete)\"}"
-            "},"
-            "\"required\":[\"action\"]}",
-        .execute = tool_skill_manage_execute,
-    };
+    mimi_tool_t sm = { "skill_manage", "Manage skills.", "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"}},\"required\":[\"action\"]}", tool_skill_manage_execute };
     tool_registry_register(&sm);
 
 #if CONFIG_MIMI_ENABLE_MCP
-    /* MCP Source Management Tools */
-    mimi_tool_t mcp_add = {
-        .name = "mcp_add",
-        .description = "Add a new MCP (Model Context Protocol) source. MCP allows connecting to external AI tools and services.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{"
-            "\"name\":{\"type\":\"string\",\"description\":\"Display name for the MCP source\"},"
-            "\"url\":{\"type\":\"string\",\"description\":\"WebSocket URL (ws:// or wss://)\"},"
-            "\"transport\":{\"type\":\"string\",\"description\":\"Transport protocol (default: websocket)\"},"
-            "\"auto_connect\":{\"type\":\"boolean\",\"description\":\"Auto-connect on startup (default: true)\"}"
-            "},"
-            "\"required\":[\"name\", \"url\"]}",
-        .execute = tool_mcp_add,
-    };
+    mimi_tool_t mcp_add = { "mcp_add", "Add MCP source.", "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"url\":{\"type\":\"string\"}},\"required\":[\"name\",\"url\"]}", tool_mcp_add };
     tool_registry_register(&mcp_add);
 
-    mimi_tool_t mcp_list = {
-        .name = "mcp_list",
-        .description = "List all configured MCP sources and their connection status.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{},"
-            "\"additionalProperties\":false}",
-        .execute = tool_mcp_list,
-    };
+    mimi_tool_t mcp_list = { "mcp_list", "List MCP sources.", "{\"type\":\"object\",\"properties\":{},\"required\":[]}", tool_mcp_list };
     tool_registry_register(&mcp_list);
 
-    mimi_tool_t mcp_remove = {
-        .name = "mcp_remove",
-        .description = "Remove an MCP source by ID.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{"
-            "\"id\":{\"type\":\"integer\",\"description\":\"MCP source ID to remove\"}"
-            "},"
-            "\"required\":[\"id\"]}",
-        .execute = tool_mcp_remove,
-    };
+    mimi_tool_t mcp_remove = { "mcp_remove", "Remove MCP source.", "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\"}},\"required\":[\"id\"]}", tool_mcp_remove };
     tool_registry_register(&mcp_remove);
 
-    mimi_tool_t mcp_action = {
-        .name = "mcp_action",
-        .description = "Connect or disconnect an MCP source. Actions: connect, disconnect.",
-        .input_schema_json =
-            "{\"type\":\"object\","
-            "\"properties\":{"
-            "\"id\":{\"type\":\"integer\",\"description\":\"MCP source ID\"},"
-            "\"action\":{\"type\":\"string\",\"description\":\"Action: connect or disconnect\"}"
-            "},"
-            "\"required\":[\"id\", \"action\"]}",
-        .execute = tool_mcp_action,
-    };
+    mimi_tool_t mcp_action = { "mcp_action", "Connect/Disconnect MCP.", "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"integer\"},\"action\":{\"type\":\"string\"}},\"required\":[\"id\",\"action\"]}", tool_mcp_action };
     tool_registry_register(&mcp_action);
 #endif
 
-    tool_registry_rebuild_json();
-
     ESP_LOGI(TAG, "Tool registry initialized");
     return ESP_OK;
-}
-
-const char *tool_registry_get_tools_json(void)
-{
-    return s_tools_json;
-}
-
-esp_err_t tool_registry_execute(const char *name, const char *input_json,
-                                char *output, size_t output_size)
-{
-    for (int i = 0; i < s_tool_count; i++) {
-        if (strcmp(s_tools[i].name, name) == 0) {
-            ESP_LOGI(TAG, "Executing tool: %s", name);
-            return s_tools[i].execute(input_json, output, output_size);
-        }
-    }
-
-    ESP_LOGW(TAG, "Unknown tool: %s", name);
-    snprintf(output, output_size, "Error: unknown tool '%s'", name);
-    return ESP_ERR_NOT_FOUND;
 }

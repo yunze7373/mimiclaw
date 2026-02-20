@@ -16,7 +16,6 @@ static const char *TAG = "mcp_mgr";
 
 #define CONFIG_PATH "/spiffs/config/mcp_sources.json"
 #define MAX_SOURCES 4
-#define MAX_MCP_TOOLS 32
 
 typedef struct {
     int id;
@@ -26,53 +25,156 @@ typedef struct {
     bool auto_connect;
     bool enabled;
     mcp_client_t *client;
+    
+    /* Phase 10: Dynamic Tools Support */
+    char *cached_tools_json; /* The JSON array of tools string [{},{}] */
+    int cached_tools_count;
 } mcp_source_t;
 
 static mcp_source_t s_sources[MAX_SOURCES];
 static int s_source_id_counter = 1;
 static bool s_mcp_started = false;
 
-typedef struct {
-    int source_idx;
-    char original_name[64];
-    bool used;
-} mcp_tool_slot_t;
-
-static mcp_tool_slot_t s_tool_slots[MAX_MCP_TOOLS];
-
 /* Forward decls */
-static esp_err_t mcp_execute_tool(int slot_idx, const char *input_json, char *output, size_t output_size);
 static void save_config(void);
+static void mcp_source_clear_tools(mcp_source_t *src);
 
-/* ── Tool Trampoline System ──────────────────────────────────────── */
+/* ── Tool Provider Implementation ────────────────────────────────── */
 
-#define TRAMPOLINE(N) \
-    static esp_err_t mcp_trampoline_##N(const char *input, char *output, size_t len) { \
-        return mcp_execute_tool((N), input, output, len); \
+static char *mcp_provider_get_tools_json(void)
+{
+    cJSON *arr = cJSON_CreateArray();
+    
+    for (int i = 0; i < MAX_SOURCES; i++) {
+        mcp_source_t *src = &s_sources[i];
+        if (src->id != 0 && src->client && src->cached_tools_json) {
+            cJSON *src_tools = cJSON_Parse(src->cached_tools_json);
+            if (src_tools) {
+                if (cJSON_IsArray(src_tools)) {
+                     cJSON *item = NULL;
+                     cJSON_ArrayForEach(item, src_tools) {
+                         cJSON_AddItemToArray(arr, cJSON_Duplicate(item, true));
+                     }
+                }
+                cJSON_Delete(src_tools);
+            }
+        }
+    }
+    
+    char *json = cJSON_PrintUnformatted(arr);
+    cJSON_Delete(arr);
+    return json;
+}
+
+typedef struct {
+    SemaphoreHandle_t sema;
+    char *output_buf;
+    size_t output_len;
+} tool_exec_ctx_t;
+
+static void on_tool_call_result(void *ctx, int id, const char *json_result, esp_err_t err)
+{
+    tool_exec_ctx_t *tctx = (tool_exec_ctx_t *)ctx;
+    if (err == ESP_OK && json_result) {
+        cJSON *root = cJSON_Parse(json_result);
+        if (root) {
+            cJSON *content = cJSON_GetObjectItem(root, "content");
+            char *s = cJSON_PrintUnformatted(content ? content : root);
+            if (s) {
+                snprintf(tctx->output_buf, tctx->output_len, "%s", s);
+                free(s);
+            }
+            cJSON_Delete(root);
+        } else {
+             snprintf(tctx->output_buf, tctx->output_len, "{}");
+        }
+    } else {
+        snprintf(tctx->output_buf, tctx->output_len, "{\"error\":\"RPC Error or Timeout\"}");
+    }
+    xSemaphoreGive(tctx->sema);
+}
+
+static esp_err_t mcp_provider_execute_tool(const char *tool_name, const char *input_json, char *output, size_t output_size)
+{
+    /* Find which source has this tool */
+    mcp_source_t *target_src = NULL;
+
+    for (int i = 0; i < MAX_SOURCES; i++) {
+        mcp_source_t *src = &s_sources[i];
+        if (src->id != 0 && src->client && src->cached_tools_json) {
+            /* Quick check if tool is in this source's cache */
+            /* We have to parse to be sure, or string search? String search might match partial args */
+            /* Let's parse. Optimization: keep a list of names? For now parse. Phase 10 MVP */
+            cJSON *tools = cJSON_Parse(src->cached_tools_json);
+            if (tools) {
+                bool found = false;
+                cJSON *item = NULL;
+                cJSON_ArrayForEach(item, tools) {
+                    cJSON *nm = cJSON_GetObjectItem(item, "name");
+                    if (nm && cJSON_IsString(nm) && strcmp(nm->valuestring, tool_name) == 0) {
+                        found = true;
+                        break;
+                    }
+                }
+                cJSON_Delete(tools);
+                if (found) {
+                    target_src = src;
+                    break;
+                }
+            }
+        }
     }
 
-/* Generate 32 trampolines */
-TRAMPOLINE(0) TRAMPOLINE(1) TRAMPOLINE(2) TRAMPOLINE(3)
-TRAMPOLINE(4) TRAMPOLINE(5) TRAMPOLINE(6) TRAMPOLINE(7)
-TRAMPOLINE(8) TRAMPOLINE(9) TRAMPOLINE(10) TRAMPOLINE(11)
-TRAMPOLINE(12) TRAMPOLINE(13) TRAMPOLINE(14) TRAMPOLINE(15)
-TRAMPOLINE(16) TRAMPOLINE(17) TRAMPOLINE(18) TRAMPOLINE(19)
-TRAMPOLINE(20) TRAMPOLINE(21) TRAMPOLINE(22) TRAMPOLINE(23)
-TRAMPOLINE(24) TRAMPOLINE(25) TRAMPOLINE(26) TRAMPOLINE(27)
-TRAMPOLINE(28) TRAMPOLINE(29) TRAMPOLINE(30) TRAMPOLINE(31)
+    if (!target_src) {
+        return ESP_ERR_NOT_FOUND;
+    }
 
-static esp_err_t (*s_trampolines[MAX_MCP_TOOLS])(const char *, char *, size_t) = {
-    mcp_trampoline_0, mcp_trampoline_1, mcp_trampoline_2, mcp_trampoline_3,
-    mcp_trampoline_4, mcp_trampoline_5, mcp_trampoline_6, mcp_trampoline_7,
-    mcp_trampoline_8, mcp_trampoline_9, mcp_trampoline_10, mcp_trampoline_11,
-    mcp_trampoline_12, mcp_trampoline_13, mcp_trampoline_14, mcp_trampoline_15,
-    mcp_trampoline_16, mcp_trampoline_17, mcp_trampoline_18, mcp_trampoline_19,
-    mcp_trampoline_20, mcp_trampoline_21, mcp_trampoline_22, mcp_trampoline_23,
-    mcp_trampoline_24, mcp_trampoline_25, mcp_trampoline_26, mcp_trampoline_27,
-    mcp_trampoline_28, mcp_trampoline_29, mcp_trampoline_30, mcp_trampoline_31
+    /* Execute on target source */
+    tool_exec_ctx_t tctx = {
+        .sema = xSemaphoreCreateBinary(),
+        .output_buf = output,
+        .output_len = output_size
+    };
+    
+    cJSON *args = cJSON_Parse(input_json);
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "name", tool_name);
+    if (args) cJSON_AddItemToObject(params, "arguments", args);
+    char *params_str = cJSON_PrintUnformatted(params);
+    cJSON_Delete(params);
+    
+    ESP_LOGI(TAG, "Calling tool '%s' on source '%s'", tool_name, target_src->name);
+    esp_err_t err = mcp_client_send_request(target_src->client, "tools/call", params_str, on_tool_call_result, &tctx);
+    free(params_str);
+    
+    if (err == ESP_OK) {
+        if (xSemaphoreTake(tctx.sema, pdMS_TO_TICKS(15000)) != pdTRUE) { // 15s timeout
+             snprintf(output, output_size, "{\"error\":\"Timeout waiting for tool response\"}");
+        }
+    } else {
+        snprintf(output, output_size, "{\"error\":\"Failed to send request\"}");
+    }
+    
+    vSemaphoreDelete(tctx.sema);
+    return ESP_OK;
+}
+
+static const tool_provider_t s_mcp_provider = {
+    .name = "mcp",
+    .get_tools_json = mcp_provider_get_tools_json,
+    .execute_tool = mcp_provider_execute_tool
 };
 
 /* ── Tool Registration Logic ─────────────────────────────────────── */
+
+static void mcp_source_clear_tools(mcp_source_t *src)
+{
+    if (src->cached_tools_json) {
+        free(src->cached_tools_json);
+        src->cached_tools_json = NULL;
+    }
+    src->cached_tools_count = 0;
+}
 
 static void handle_tools_list_response(mcp_source_t *src, const char *json_result)
 {
@@ -85,51 +187,13 @@ static void handle_tools_list_response(mcp_source_t *src, const char *json_resul
         return;
     }
 
-    int src_idx = (int)(src - s_sources);
-    int tools_added = 0;
+    /* Update Cache */
+    mcp_source_clear_tools(src);
+    src->cached_tools_json = cJSON_PrintUnformatted(tools);
+    src->cached_tools_count = cJSON_GetArraySize(tools);
 
-    cJSON *tool = NULL;
-    cJSON_ArrayForEach(tool, tools) {
-        /* Find free slot */
-        int slot = -1;
-        for (int i = 0; i < MAX_MCP_TOOLS; i++) {
-            if (!s_tool_slots[i].used) {
-                slot = i;
-                break;
-            }
-        }
-        if (slot == -1) break;
-
-        cJSON *name = cJSON_GetObjectItem(tool, "name");
-        cJSON *desc = cJSON_GetObjectItem(tool, "description");
-        cJSON *schema = cJSON_GetObjectItem(tool, "inputSchema");
-
-        if (cJSON_IsString(name)) {
-            mcp_tool_slot_t *ts = &s_tool_slots[slot];
-            ts->source_idx = src_idx;
-            snprintf(ts->original_name, sizeof(ts->original_name), "%s", name->valuestring);
-            
-            char schema_str[1024] = "{}";
-            if (schema) {
-                char *s = cJSON_PrintUnformatted(schema);
-                if (s) {
-                    snprintf(schema_str, sizeof(schema_str), "%s", s);
-                    free(s);
-                }
-            }
-
-            mimi_tool_t t = {
-                .name = ts->original_name,
-                .description = cJSON_IsString(desc) ? desc->valuestring : "",
-                .input_schema_json = schema_str,
-                .execute = s_trampolines[slot]
-            };
-            tool_registry_register(&t);
-            ts->used = true;
-            tools_added++;
-        }
-    }
-    ESP_LOGI(TAG, "Added %d tools from %s", tools_added, src->name);
+    ESP_LOGI(TAG, "Cached %d tools from %s", src->cached_tools_count, src->name);
+    
     tool_registry_rebuild_json();
     cJSON_Delete(root);
 }
@@ -139,8 +203,6 @@ static void handle_tools_list_response(mcp_source_t *src, const char *json_resul
 static void on_message(mcp_client_t *client, const char *json, size_t len)
 {
     // Notifications (no ID) go here.
-    // Assuming mcp_client handles Response (ID) matching internally.
-    // ESP_LOGD(TAG, "Notification: %.*s", (int)len, json);
 }
 
 static void on_tools_list(void *ctx, int id, const char *json_result, esp_err_t err)
@@ -157,94 +219,15 @@ static void on_connect(mcp_client_t *client)
 {
     mcp_source_t *src = (mcp_source_t *)mcp_client_get_ctx(client);
     ESP_LOGI(TAG, "Source %s connected, refreshing tools...", src->name);
-    
-    // Request tools/list
     mcp_client_send_request(client, "tools/list", NULL, on_tools_list, src);
 }
 
 static void on_disconnect(mcp_client_t *client)
 {
     mcp_source_t *src = (mcp_source_t *)mcp_client_get_ctx(client);
-    ESP_LOGI(TAG, "Source %s disconnected cleaning up tools", src->name);
-    
-    // Cleanup tools logic
-    for (int i = 0; i < MAX_MCP_TOOLS; i++) {
-        if (s_tool_slots[i].used && s_tool_slots[i].source_idx == (src - s_sources)) {
-            s_tool_slots[i].used = false;
-        }
-    }
+    ESP_LOGI(TAG, "Source %s disconnected, clearing tools", src->name);
+    mcp_source_clear_tools(src);
     tool_registry_rebuild_json();
-}
-
-/* ── Tool Execution Wrapper ──────────────────────────────────────── */
-
-typedef struct {
-    SemaphoreHandle_t sema;
-    char *output_buf;
-    size_t output_len;
-} tool_exec_ctx_t;
-
-static void on_tool_call_result(void *ctx, int id, const char *json_result, esp_err_t err)
-{
-    tool_exec_ctx_t *tctx = (tool_exec_ctx_t *)ctx;
-    if (err == ESP_OK && json_result) {
-        // Extract content from result
-        cJSON *root = cJSON_Parse(json_result);
-        if (root) {
-            cJSON *content = cJSON_GetObjectItem(root, "content");
-            char *s = cJSON_PrintUnformatted(content ? content : root); // Content or full result? MCP says result has content.
-            if (s) {
-                snprintf(tctx->output_buf, tctx->output_len, "%s", s);
-                free(s);
-            }
-            cJSON_Delete(root);
-        } else {
-             snprintf(tctx->output_buf, tctx->output_len, "{}");
-        }
-    } else {
-        snprintf(tctx->output_buf, tctx->output_len, "{\"error\":\"RPC Error\"}");
-    }
-    xSemaphoreGive(tctx->sema);
-}
-
-static esp_err_t mcp_execute_tool(int slot_idx, const char *input_json, char *output, size_t output_size)
-{
-    if (slot_idx < 0 || slot_idx >= MAX_MCP_TOOLS || !s_tool_slots[slot_idx].used) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    mcp_tool_slot_t *slot = &s_tool_slots[slot_idx];
-    mcp_source_t *src = &s_sources[slot->source_idx];
-    
-    if (!src->client || !mcp_client_is_connected(src->client)) {
-         snprintf(output, output_size, "{\"error\":\"Server disconnected\"}");
-         return ESP_OK;
-    }
-
-    tool_exec_ctx_t tctx = {
-        .sema = xSemaphoreCreateBinary(),
-        .output_buf = output,
-        .output_len = output_size
-    };
-    
-    cJSON *args = cJSON_Parse(input_json);
-    cJSON *params = cJSON_CreateObject();
-    cJSON_AddStringToObject(params, "name", slot->original_name);
-    if (args) cJSON_AddItemToObject(params, "arguments", args);
-    char *params_str = cJSON_PrintUnformatted(params);
-    cJSON_Delete(params);
-    
-    esp_err_t err = mcp_client_send_request(src->client, "tools/call", params_str, on_tool_call_result, &tctx);
-    free(params_str);
-    
-    if (err == ESP_OK) {
-        xSemaphoreTake(tctx.sema, pdMS_TO_TICKS(10000)); // 10s timeout
-    } else {
-        snprintf(output, output_size, "{\"error\":\"Send failed\"}");
-    }
-    
-    vSemaphoreDelete(tctx.sema);
-    return ESP_OK;
 }
 
 /* ── Manager Internal ────────────────────────────────────────────── */
@@ -270,6 +253,8 @@ static int add_source_internal(const char *name, const char *transport, const ch
     src->auto_connect = auto_connect;
     src->enabled = true;
     src->client = NULL;
+    src->cached_tools_json = NULL;
+    src->cached_tools_count = 0;
 
     return src->id;
 }
@@ -345,6 +330,8 @@ static void save_config(void)
 esp_err_t mcp_manager_init(void)
 {
     load_config();
+    /* Register MCP Provider during init */
+    tool_registry_register_provider(&s_mcp_provider);
     return ESP_OK;
 }
 
@@ -376,7 +363,7 @@ esp_err_t mcp_manager_remove_source(int id)
     for (int i = 0; i < MAX_SOURCES; i++) {
         if (s_sources[i].id == id) {
             mcp_manager_source_action(id, "disconnect");
-            
+            /* Clear config */
             memset(&s_sources[i], 0, sizeof(mcp_source_t));
             save_config();
             return ESP_OK;
@@ -400,17 +387,7 @@ char *mcp_manager_get_sources_json(void)
             
             bool connected = (s_sources[i].client != NULL);
             cJSON_AddStringToObject(item, "status", connected ? "connected" : "disconnected");
-            
-            /* Count tools for this source */
-            int tool_count = 0;
-            if (connected) {
-                for (int t = 0; t < MAX_MCP_TOOLS; t++) {
-                    if (s_tool_slots[t].used && s_tool_slots[t].source_idx == i) {
-                        tool_count++;
-                    }
-                }
-            }
-            cJSON_AddNumberToObject(item, "tools_count", tool_count);
+            cJSON_AddNumberToObject(item, "tools_count", s_sources[i].cached_tools_count);
             
             cJSON_AddItemToArray(arr, item);
         }
@@ -432,12 +409,7 @@ char *mcp_manager_get_status_json(void)
         if (s_sources[i].id != 0) {
             total++;
             if (s_sources[i].client) connected++;
-        }
-    }
-
-    for (int i = 0; i < MAX_MCP_TOOLS; i++) {
-        if (s_tool_slots[i].used) {
-            tools++;
+            tools += s_sources[i].cached_tools_count;
         }
     }
 
@@ -481,11 +453,7 @@ esp_err_t mcp_manager_source_action(int id, const char *action)
             mcp_client_disconnect(src->client);
             mcp_client_destroy(src->client);
             src->client = NULL;
-            on_disconnect(NULL); // Force cleanup visual state? on_disconnect callback usually called by client destroy/event? 
-            // mcp_client_destroy calls stop, which might trigger event?
-            // Safer to call logic here if event didn't fire?
-            // Actually destroy might not fire event if loop stopped.
-            // Let's rely on event if possible, but force cleanup too.
+            on_disconnect(NULL); /* Cleanup */
         }
         return ESP_OK;
     }
