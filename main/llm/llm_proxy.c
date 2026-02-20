@@ -23,6 +23,11 @@ static char s_model[LLM_MODEL_MAX_LEN] = MIMI_LLM_DEFAULT_MODEL;
 static char s_provider[LLM_PROVIDER_MAX_LEN] = MIMI_LLM_PROVIDER_DEFAULT;
 static char s_ollama_host[64] = MIMI_SECRET_OLLAMA_HOST;
 static char s_ollama_port[8] = MIMI_SECRET_OLLAMA_PORT;
+
+/* Audio Voice APIs (Phase 1.3) */
+static char s_openai_api_key_audio[LLM_API_KEY_MAX_LEN] = MIMI_SECRET_OPENAI_API_KEY_AUDIO;
+static char s_asr_endpoint[256] = MIMI_SECRET_ASR_ENDPOINT;
+static char s_tts_endpoint[256] = MIMI_SECRET_TTS_ENDPOINT;
 static bool s_streaming = true; /* streaming enabled by default */
 
 /* Global status callback for forwarding HTTP progress to UI */
@@ -366,6 +371,24 @@ esp_err_t llm_proxy_init(void)
         if (nvs_get_u8(nvs, "streaming", &stream_val) == ESP_OK) {
             s_streaming = (stream_val != 0);
         }
+
+        // Phase 1.3 voice config
+        len = sizeof(tmp);
+        memset(tmp, 0, sizeof(tmp));
+        if (nvs_get_str(nvs, "openai_api_audio", tmp, &len) == ESP_OK && tmp[0]) {
+            safe_copy(s_openai_api_key_audio, sizeof(s_openai_api_key_audio), tmp);
+        }
+        len = sizeof(tmp);
+        memset(tmp, 0, sizeof(tmp));
+        if (nvs_get_str(nvs, "asr_endpoint", tmp, &len) == ESP_OK && tmp[0]) {
+            safe_copy(s_asr_endpoint, sizeof(s_asr_endpoint), tmp);
+        }
+        len = sizeof(tmp);
+        memset(tmp, 0, sizeof(tmp));
+        if (nvs_get_str(nvs, "tts_endpoint", tmp, &len) == ESP_OK && tmp[0]) {
+            safe_copy(s_tts_endpoint, sizeof(s_tts_endpoint), tmp);
+        }
+
         nvs_close(nvs);
     }
 

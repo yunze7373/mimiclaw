@@ -1,25 +1,22 @@
-# MimiClaw: Pocket AI Assistant on a $5 Chip
+# Esp32Claw: Pocket AI Assistant on a $5 Chip
 
 <p align="center">
-  <img src="assets/banner.png" alt="MimiClaw" width="500" />
+  <img src="assets/banner.png" alt="Esp32Claw" width="500" />
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-  <a href="https://deepwiki.com/memovai/mimiclaw"><img src="https://img.shields.io/badge/DeepWiki-mimiclaw-blue.svg" alt="DeepWiki"></a>
-  <a href="https://discord.gg/r8ZxSvB8Yr"><img src="https://img.shields.io/badge/Discord-mimiclaw-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://x.com/ssslvky"><img src="https://img.shields.io/badge/X-@ssslvky-black?logo=x" alt="X"></a>
 </p>
 
 <p align="center">
   <strong><a href="README.md">English</a> | <a href="README_CN.md">中文</a> | <a href="README_JA.md">日本語</a></strong>
 </p>
 
-**The world's first AI assistant(OpenClaw) on a $5 chip. No Linux. No Node.js. Just pure C**
+**An ESP32-S3 AI Assistant. No Linux. No Node.js. Just pure C**
 
-MimiClaw turns a tiny ESP32-S3 board into a personal AI assistant. Plug it into USB power, connect to WiFi, and talk to it through Telegram — it handles any task you throw at it and evolves over time with local memory — all on a chip the size of a thumb.
+Esp32Claw turns a tiny ESP32-S3 board into a personal AI assistant. Plug it into USB power, connect to WiFi, and talk to it through Telegram — it handles any task you throw at it and evolves over time with local memory — all on a chip the size of a thumb.
 
-## Meet MimiClaw
+## Meet Esp32Claw
 
 - **Tiny** — No Linux, no Node.js, no bloat — just pure C
 - **Handy** — Message it from Telegram, it handles the rest
@@ -56,7 +53,7 @@ idf.py set-target esp32s3
 
 ### Configure
 
-MimiClaw uses a **two-layer config** system: build-time defaults in `mimi_secrets.h`, with runtime overrides via the serial CLI. CLI values are stored in NVS flash and take priority over build-time values.
+Esp32Claw uses a **two-layer config** system: build-time defaults in `mimi_secrets.h`, with runtime overrides via the serial CLI. CLI values are stored in NVS flash and take priority over build-time values.
 
 ```bash
 cp main/mimi_secrets.h.example main/mimi_secrets.h
@@ -134,7 +131,7 @@ mimi> restart                     # reboot
 
 ## Memory
 
-MimiClaw stores everything as plain text files you can read and edit:
+Esp32Claw stores everything as plain text files you can read and edit:
 
 | File | What it is |
 |------|------------|
@@ -148,7 +145,7 @@ MimiClaw stores everything as plain text files you can read and edit:
 
 ## Tools
 
-MimiClaw supports tool calling for both Anthropic and OpenAI — the LLM can call tools during a conversation and loop until the task is done (ReAct pattern).
+Esp32Claw supports tool calling for both Anthropic and OpenAI — the LLM can call tools during a conversation and loop until the task is done (ReAct pattern).
 
 | Tool | Description |
 |------|-------------|
@@ -162,7 +159,7 @@ To enable web search, set a [Brave Search API key](https://brave.com/search/api/
 
 ## Cron Tasks
 
-MimiClaw has a built-in cron scheduler that lets the AI schedule its own tasks. The LLM can create recurring jobs ("every N seconds") or one-shot jobs ("at unix timestamp") via the `cron_add` tool. When a job fires, its message is injected into the agent loop — so the AI wakes up, processes the task, and responds.
+Esp32Claw has a built-in cron scheduler that lets the AI schedule its own tasks. The LLM can create recurring jobs ("every N seconds") or one-shot jobs ("at unix timestamp") via the `cron_add` tool. When a job fires, its message is injected into the agent loop — so the AI wakes up, processes the task, and responds.
 
 Jobs are persisted to SPIFFS (`cron.json`) and survive reboots. Example use cases: daily summaries, periodic reminders, scheduled check-ins.
 
@@ -170,7 +167,7 @@ Jobs are persisted to SPIFFS (`cron.json`) and survive reboots. Example use case
 
 The heartbeat service periodically reads `HEARTBEAT.md` from SPIFFS and checks for actionable tasks. If uncompleted items are found (anything that isn't an empty line, a header, or a checked `- [x]` box), it sends a prompt to the agent loop so the AI can act on them autonomously.
 
-This turns MimiClaw into a proactive assistant — write tasks to `HEARTBEAT.md` and the bot will pick them up on the next heartbeat cycle (default: every 30 minutes).
+This turns Esp32Claw into a proactive assistant — write tasks to `HEARTBEAT.md` and the bot will pick them up on the next heartbeat cycle (default: every 30 minutes).
 
 ## Also Included
 
@@ -196,7 +193,7 @@ MIT
 
 ## Acknowledgments
 
-Inspired by [OpenClaw](https://github.com/openclaw/openclaw) and [Nanobot](https://github.com/HKUDS/nanobot). MimiClaw reimplements the core AI agent architecture for embedded hardware — no Linux, no server, just a $5 chip.
+Inspired by [OpenClaw](https://github.com/openclaw/openclaw) and [Nanobot](https://github.com/HKUDS/nanobot). Esp32Claw reimplements the core AI agent architecture for embedded hardware — no Linux, no server, just a $5 chip.
 
 ## Star History
 

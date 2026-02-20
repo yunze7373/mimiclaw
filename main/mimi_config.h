@@ -1,6 +1,6 @@
 #pragma once
 
-/* MimiClaw Global Configuration */
+/* Esp32Claw Global Configuration */
 
 /* Build-time secrets (highest priority, override NVS) */
 #if __has_include("mimi_secrets.h")
@@ -133,7 +133,7 @@
 /* ========================================
  * Feature Gates (driven by Kconfig)
  *
- * Run `idf.py menuconfig` → MimiClaw Configuration
+ * Run `idf.py menuconfig` → Esp32Claw Configuration
  * to toggle these at build time.
  * Defaults below apply if Kconfig hasn't been configured.
  * ======================================== */

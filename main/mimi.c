@@ -1,185 +1,6 @@
 ﻿#include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_log.h"
-#include "esp_event.h"
-#include "esp_system.h"
-#include "esp_heap_caps.h"
-#include "esp_spiffs.h"
-#include "nvs_flash.h"
-#include "nvs.h"
-#include "esp_timer.h"
-#include "cJSON.h"
-
-#include "mimi_config.h"
-#include "bus/message_bus.h"
-#include "wifi/wifi_manager.h"
-#include "llm/llm_proxy.h"
-#include "agent/agent_loop.h"
-#include "memory/memory_store.h"
-#include "memory/session_mgr.h"
-#include "cli/serial_cli.h"
-#include "tools/tool_registry.h"
-#include "buttons/button_driver.h"
-#include "rgb/rgb.h"
-
-#if CONFIG_MIMI_ENABLE_TELEGRAM
-#include "telegram/telegram_bot.h"
-#endif
-#if CONFIG_MIMI_ENABLE_WEBSOCKET
-#include "gateway/ws_server.h"
-#endif
-#if CONFIG_MIMI_ENABLE_WEB_UI
-#include "web_ui/web_ui.h"
-#endif
-#if CONFIG_MIMI_ENABLE_HTTP_PROXY
-#include "proxy/http_proxy.h"
-#endif
-#if MIMI_HAS_LCD
-#include "display/display.h"
-#include "ui/config_screen.h"
-#include "imu/imu_manager.h"
-#endif
-#if CONFIG_MIMI_ENABLE_OLED
-#include "display/ssd1306.h"
-#endif
-#if CONFIG_MIMI_ENABLE_CRON
-#include "cron/cron_service.h"
-#endif
-#if CONFIG_MIMI_ENABLE_HEARTBEAT
-#include "heartbeat/heartbeat.h"
-#endif
-#if CONFIG_MIMI_ENABLE_SKILLS
-#include "skills/skill_engine.h"
-#endif
-#if CONFIG_MIMI_ENABLE_OTA
-#include "ota/ota_manager.h"
-#endif
-#if CONFIG_MIMI_ENABLE_MDNS
-#include "discovery/mdns_service.h"
-#endif
-#if CONFIG_MIMI_ENABLE_MCP
-#include "agent/mcp_manager.h"
-#endif
-#if CONFIG_MIMI_ENABLE_HA
-#include "extensions/ha_integration.h"
-#endif
-#if CONFIG_MIMI_ENABLE_ZIGBEE
-#include "extensions/mqtt_manager.h"
-#include "extensions/zigbee_gateway.h"
-#endif
-#include "tools/api_manager.h"
-#include "component/component_mgr.h"
-
-static const char *TAG = "mimi";
-
-
-/* PSRAM malloc wrapper for cJSON hooks */
-static void *psram_malloc(size_t sz) {
-    void *p = heap_caps_malloc(sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!p) {
-        /* Fallback to internal if PSRAM fails (should be rare) */
-        p = malloc(sz);
-    }
-    return p;
-}
-
-static esp_err_t init_nvs(void)
-{
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_LOGW(TAG, "NVS partition truncated, erasing...");
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    return ret;
-}
-
-static esp_err_t init_spiffs(void)
-{
-    esp_vfs_spiffs_conf_t conf = {
-        .base_path = MIMI_SPIFFS_BASE,
-        .partition_label = NULL,
-        .max_files = 10,
-        .format_if_mount_failed = true,
-    };
-
-    esp_err_t ret = esp_vfs_spiffs_register(&conf);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "SPIFFS mount failed: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    size_t total = 0, used = 0;
-    esp_spiffs_info(NULL, &total, &used);
-    ESP_LOGI(TAG, "SPIFFS: total=%d, used=%d", (int)total, (int)used);
-
-    return ESP_OK;
-}
-
-/* 笏笏 System Manager handles Safe Mode & Health 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏 */
-#include "system_manager.h"
-
-/* Outbound dispatch task: reads from outbound queue and routes to channels */
-static void outbound_dispatch_task(void *arg)
-{
-    ESP_LOGI(TAG, "Outbound dispatch started");
-
-    while (1) {
-        mimi_msg_t msg;
-        if (message_bus_pop_outbound(&msg, UINT32_MAX) != ESP_OK) continue;
-
-        ESP_LOGI(TAG, "Dispatching response to %s:%s", msg.channel, msg.chat_id);
-
-#if CONFIG_MIMI_ENABLE_TELEGRAM
-        if (strcmp(msg.channel, MIMI_CHAN_TELEGRAM) == 0) {
-            telegram_send_message(msg.chat_id, msg.content);
-        } else
-#endif
-#if CONFIG_MIMI_ENABLE_WEBSOCKET
-        if (strcmp(msg.channel, MIMI_CHAN_WEBSOCKET) == 0) {
-            ws_server_send(msg.chat_id, msg.content);
-        } else
-#endif
-        if (strcmp(msg.channel, MIMI_CHAN_SYSTEM) == 0) {
-            ESP_LOGI(TAG, "System message [%s]: %.128s", msg.chat_id, msg.content);
-        } else {
-            ESP_LOGW(TAG, "Unknown channel: %s", msg.channel);
-        }
-
-        free(msg.content);
-    }
-}
-
-void app_main(void)
-{
-    /* 笏笏 Redirect cJSON to PSRAM 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏 */
-    /* This is critical: cJSON uses malloc() internally for ALL JSON
-     * operations. Without this, every JSON parse/build/serialize eats
-     * internal SRAM, leaving nothing for TLS/AES DMA buffers. */
-    cJSON_Hooks hooks = {
-        .malloc_fn = psram_malloc,
-        .free_fn = free
-    };
-    cJSON_InitHooks(&hooks);
-
-    /* Silence noisy components */
-    esp_log_level_set("esp-x509-crt-bundle", ESP_LOG_WARN);
-
-    ESP_LOGI(TAG, "========================================");
-    ESP_LOGI(TAG, "  MimiClaw - ESP32-S3 AI Agent");
-    ESP_LOGI(TAG, "========================================");
-
-    /* Print memory info */
-    ESP_LOGI(TAG, "Internal free: %d bytes",
-             (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-    ESP_LOGI(TAG, "PSRAM free:    %d bytes",
-             (int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-
-    /* Display + input (pre-component init 窶・these are HW-level) */
-#if MIMI_HAS_LCD
-    ESP_ERROR_CHECK(display_init());
     display_show_banner();
 #endif
 
@@ -316,7 +137,7 @@ void app_main(void)
     if (ssd1306_is_connected()) {
         ssd1306_init();
         ssd1306_clear();
-        ssd1306_draw_string(0, 0, "MimiClaw Ready!");
+        ssd1306_draw_string(0, 0, "Esp32Claw Ready!");
         ssd1306_update();
     }
 #endif
@@ -352,5 +173,5 @@ void app_main(void)
         ESP_LOGW(TAG, "No WiFi credentials. Set MIMI_SECRET_WIFI_SSID in mimi_secrets.h");
     }
 
-    ESP_LOGI(TAG, "MimiClaw ready. Type 'help' for CLI commands.");
+    ESP_LOGI(TAG, "Esp32Claw ready. Type 'help' for CLI commands.");
 }

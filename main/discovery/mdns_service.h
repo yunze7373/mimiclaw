@@ -3,12 +3,12 @@
 #include "esp_err.h"
 
 /**
- * Initialize mDNS service and advertise MimiClaw on the local network.
+ * Initialize mDNS service and advertise Esp32Claw on the local network.
  *
- * Registers hostname "mimiclaw" and a _mimiclaw._tcp service with
+ * Registers hostname "esp32claw" and a _esp32claw._tcp service with
  * TXT records for version, skill count, and WebSocket port.
  *
- * Accessible at: http://mimiclaw.local
+ * Accessible at: http://esp32claw.local
  */
 esp_err_t mdns_service_init(void);
 

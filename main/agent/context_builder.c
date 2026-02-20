@@ -30,8 +30,8 @@ esp_err_t context_build_system_prompt(char *buf, size_t size)
     size_t off = 0;
 
     off += snprintf(buf + off, size - off,
-        "# MimiClaw\n"
-        "You are MimiClaw on ESP32-S3. Be helpful, accurate, and concise.\n\n"
+        "# Esp32Claw\n"
+        "You are Esp32Claw on ESP32-S3. Be helpful, accurate, and concise.\n\n"
         "## Tools\n"
         "- web_search: Search web for facts/news.\n"
         "- get_current_time: Get date/time. Use this instead of guessing.\n"

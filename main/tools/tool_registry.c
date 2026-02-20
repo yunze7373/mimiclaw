@@ -1,6 +1,9 @@
 #include "tool_registry.h"
 #include "tools/tool_web_search.h"
 #include "tools/tool_get_time.h"
+#include "tool_registry.h"
+#include "tools/tool_web_search.h"
+#include "tools/tool_get_time.h"
 #include "tools/tool_files.h"
 #include "tools/tool_cron.h"
 #include "tools/tool_hardware.h"
@@ -8,6 +11,7 @@
 #include "tools/tool_skill_create.h"
 #include "tools/tool_skill_manage.h"
 #include "tools/tool_mcp.h"
+#include "tools/tool_voice.h"
 #include "llm/llm_proxy.h"
 
 #include <string.h>
@@ -383,6 +387,9 @@ esp_err_t tool_registry_init(void)
     tool_registry_register(&mcp_action);
     tool_registry_register(&mcp_action);
 #endif
+
+    // Audio Voice Tools
+    register_voice_tools();
 
     ESP_LOGI(TAG, "Tool registry initialized");
     return ESP_OK;

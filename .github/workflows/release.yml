@@ -70,7 +70,7 @@ jobs:
               0x20000 mimiclaw-${{ github.ref_name }}.bin
             ```
 
-            ### 3. OTA update (for devices already running MimiClaw)
+            ### 3. OTA update (for devices already running Esp32Claw)
 
             Upload `mimiclaw-${{ github.ref_name }}.bin` via the OTA endpoint.
 

@@ -1,4 +1,4 @@
--- example_gpio.lua — Example hardware skill for MimiClaw
+-- example_gpio.lua — Example hardware skill for Esp32Claw
 --
 -- Demonstrates the Lua skill format:
 --   SKILL table: metadata (name, version, description)

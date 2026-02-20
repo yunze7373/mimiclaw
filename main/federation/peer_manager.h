@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 /**
- * Peer Manager: Tracks discoverable MimiClaw devices on the local network.
+ * Peer Manager: Tracks discoverable Esp32Claw devices on the local network.
  * Stores IP, hostname, and last seen timestamp.
  * Used for multi-device federation and swarm capabilities.
  */

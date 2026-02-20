@@ -75,7 +75,7 @@ static void publish_ha_discovery(void)
         cJSON *root = cJSON_CreateObject();
         
         char name_buf[64];
-        snprintf(name_buf, sizeof(name_buf), "MimiClaw %s %s", s_device_id, safe_name);
+        snprintf(name_buf, sizeof(name_buf), "Esp32Claw %s %s", s_device_id, safe_name);
         cJSON_AddStringToObject(root, "name", name_buf);
         
         char uniq_id[64];
@@ -85,8 +85,8 @@ static void publish_ha_discovery(void)
         // Device Info
         cJSON *dev = cJSON_CreateObject();
         cJSON_AddStringToObject(dev, "identifiers", s_device_id);
-        cJSON_AddStringToObject(dev, "name", "MimiClaw S3");
-        cJSON_AddStringToObject(dev, "manufacturer", "MimiClaw");
+        cJSON_AddStringToObject(dev, "name", "Esp32Claw S3");
+        cJSON_AddStringToObject(dev, "manufacturer", "Esp32Claw");
         cJSON_AddItemToObject(root, "device", dev);
 
         // State / Command Topics

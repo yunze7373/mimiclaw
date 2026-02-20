@@ -18,9 +18,9 @@ static const char *ssdp_response_template =
     "CACHE-CONTROL: max-age=1800\r\n"
     "EXT:\r\n"
     "LOCATION: http://%s:%d/description.xml\r\n"
-    "SERVER: ESP32/1.0 UPnP/1.0 MimiClaw/1.0\r\n"
+    "SERVER: ESP32/1.0 UPnP/1.0 Esp32Claw/1.0\r\n"
     "ST: urn:schemas-upnp-org:device:Basic:1\r\n"
-    "USN: uuid:mimiclaw-esp32-s3::urn:schemas-upnp-org:device:Basic:1\r\n"
+    "USN: uuid:esp32claw-esp32-s3::urn:schemas-upnp-org:device:Basic:1\r\n"
     "\r\n";
 
 static void ssdp_task(void *pvParameters)

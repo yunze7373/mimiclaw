@@ -1,14 +1,11 @@
-# MimiClaw: $5チップで動くポケットAIアシスタント
+# Esp32Claw: $5チップで動くポケットAIアシスタント
 
 <p align="center">
-  <img src="assets/banner.png" alt="MimiClaw" width="500" />
+  <img src="assets/banner.png" alt="Esp32Claw" width="500" />
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-  <a href="https://deepwiki.com/memovai/mimiclaw"><img src="https://img.shields.io/badge/DeepWiki-mimiclaw-blue.svg" alt="DeepWiki"></a>
-  <a href="https://discord.gg/r8ZxSvB8Yr"><img src="https://img.shields.io/badge/Discord-mimiclaw-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://x.com/ssslvky"><img src="https://img.shields.io/badge/X-@ssslvky-black?logo=x" alt="X"></a>
 </p>
 
 <p align="center">
@@ -17,9 +14,9 @@
 
 **$5チップ上の世界初のAIアシスタント（OpenClaw）。Linuxなし、Node.jsなし、純粋なCのみ。**
 
-MimiClawは小さなESP32-S3ボードをパーソナルAIアシスタントに変えます。USB電源に接続し、WiFiにつなげて、Telegramから話しかけるだけ — どんなタスクも処理し、ローカルメモリで時間とともに成長します — すべて親指サイズのチップ上で。
+Esp32Clawは小さなESP32-S3ボードをパーソナルAIアシスタントに変えます。USB電源に接続し、WiFiにつなげて、Telegramから話しかけるだけ — どんなタスクも処理し、ローカルメモリで時間とともに成長します — すべて親指サイズのチップ上で。
 
-## MimiClawの特徴
+## Esp32Clawの特徴
 
 - **超小型** — Linux不要、Node.js不要、無駄なし — 純粋なCのみ
 - **便利** — Telegramでメッセージを送るだけ、あとはお任せ
@@ -56,7 +53,7 @@ idf.py set-target esp32s3
 
 ### 設定
 
-MimiClawは**2層設定**を採用しています：`mimi_secrets.h`でビルド時のデフォルト値を設定し、シリアルCLIで実行時にオーバーライドできます。CLI設定値はNVS Flashに保存され、ビルド時の値より優先されます。
+Esp32Clawは**2層設定**を採用しています：`mimi_secrets.h`でビルド時のデフォルト値を設定し、シリアルCLIで実行時にオーバーライドできます。CLI設定値はNVS Flashに保存され、ビルド時の値より優先されます。
 
 ```bash
 cp main/mimi_secrets.h.example main/mimi_secrets.h
@@ -134,7 +131,7 @@ mimi> restart                     # 再起動
 
 ## メモリ
 
-MimiClawはすべてのデータをプレーンテキストファイルとして保存します。直接読み取り・編集可能です：
+Esp32Clawはすべてのデータをプレーンテキストファイルとして保存します。直接読み取り・編集可能です：
 
 | ファイル | 説明 |
 |----------|------|
@@ -148,7 +145,7 @@ MimiClawはすべてのデータをプレーンテキストファイルとして
 
 ## ツール
 
-MimiClawはAnthropicとOpenAI両方のツール呼び出しをサポート — LLMは会話中にツールを呼び出し、タスクが完了するまでループします（ReActパターン）。
+Esp32ClawはAnthropicとOpenAI両方のツール呼び出しをサポート — LLMは会話中にツールを呼び出し、タスクが完了するまでループします（ReActパターン）。
 
 | ツール | 説明 |
 |--------|------|
@@ -162,7 +159,7 @@ MimiClawはAnthropicとOpenAI両方のツール呼び出しをサポート — L
 
 ## Cronタスク
 
-MimiClawにはcronスケジューラが内蔵されており、AIが自律的にタスクをスケジュールできます。LLMは`cron_add`ツールで定期ジョブ（「N秒ごと」）や単発ジョブ（「UNIXタイムスタンプで指定」）を作成できます。ジョブが発火すると、メッセージがエージェントループに注入され、AIが起動してタスクを処理・応答します。
+Esp32Clawにはcronスケジューラが内蔵されており、AIが自律的にタスクをスケジュールできます。LLMは`cron_add`ツールで定期ジョブ（「N秒ごと」）や単発ジョブ（「UNIXタイムスタンプで指定」）を作成できます。ジョブが発火すると、メッセージがエージェントループに注入され、AIが起動してタスクを処理・応答します。
 
 ジョブはSPIFFS（`cron.json`）に永続化され、再起動後も保持されます。活用例：日次サマリー、定期リマインダー、スケジュールチェック。
 
@@ -170,7 +167,7 @@ MimiClawにはcronスケジューラが内蔵されており、AIが自律的に
 
 ハートビートサービスはSPIFFS上の`HEARTBEAT.md`を定期的に読み取り、アクション可能なタスクがあるかチェックします。未完了の項目（空行、見出し、チェック済み`- [x]`以外）が見つかると、エージェントループにプロンプトを送信し、AIが自律的に処理します。
 
-これによりMimiClawはプロアクティブなアシスタントになります — `HEARTBEAT.md`にタスクを書き込めば、次のハートビートサイクルで自動的に拾い上げて実行します（デフォルト：30分ごと）。
+これによりEsp32Clawはプロアクティブなアシスタントになります — `HEARTBEAT.md`にタスクを書き込めば、次のハートビートサイクルで自動的に拾い上げて実行します（デフォルト：30分ごと）。
 
 ## その他の機能
 
@@ -196,7 +193,7 @@ MIT
 
 ## 謝辞
 
-[OpenClaw](https://github.com/openclaw/openclaw)と[Nanobot](https://github.com/HKUDS/nanobot)にインスパイアされました。MimiClawはコアAIエージェントアーキテクチャを組み込みハードウェア向けに再実装しました — Linuxなし、サーバーなし、$5のチップだけ。
+[OpenClaw](https://github.com/openclaw/openclaw)と[Nanobot](https://github.com/HKUDS/nanobot)にインスパイアされました。Esp32ClawはコアAIエージェントアーキテクチャを組み込みハードウェア向けに再実装しました — Linuxなし、サーバーなし、$5のチップだけ。
 
 ## Star History
 

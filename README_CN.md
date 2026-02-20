@@ -1,14 +1,11 @@
-# MimiClaw: $5 芯片上的口袋 AI 助理
+# Esp32Claw: $5 芯片上的口袋 AI 助理
 
 <p align="center">
-  <img src="assets/banner.png" alt="MimiClaw" width="500" />
+  <img src="assets/banner.png" alt="Esp32Claw" width="500" />
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-  <a href="https://deepwiki.com/memovai/mimiclaw"><img src="https://img.shields.io/badge/DeepWiki-mimiclaw-blue.svg" alt="DeepWiki"></a>
-  <a href="https://discord.gg/r8ZxSvB8Yr"><img src="https://img.shields.io/badge/Discord-mimiclaw-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://x.com/ssslvky"><img src="https://img.shields.io/badge/X-@ssslvky-black?logo=x" alt="X"></a>
 </p>
 
 <p align="center">
@@ -17,9 +14,9 @@
 
 **$5 芯片上的 AI 助理（OpenClaw）。没有 Linux，没有 Node.js，纯 C。**
 
-MimiClaw 把一块小小的 ESP32-S3 开发板变成你的私人 AI 助理。插上 USB 供电，连上 WiFi，通过 Telegram 跟它对话 — 它能处理你丢给它的任何任务，还会随时间积累本地记忆不断进化 — 全部跑在一颗拇指大小的芯片上。
+Esp32Claw 把一块小小的 ESP32-S3 开发板变成你的私人 AI 助理。插上 USB 供电，连上 WiFi，通过 Telegram 跟它对话 — 它能处理你丢给它的任何任务，还会随时间积累本地记忆不断进化 — 全部跑在一颗拇指大小的芯片上。
 
-## 认识 MimiClaw
+## 认识 Esp32Claw
 
 - **小巧** — 没有 Linux，没有 Node.js，没有臃肿依赖 — 纯 C
 - **好用** — 在 Telegram 发消息，剩下的它来搞定
@@ -56,7 +53,7 @@ idf.py set-target esp32s3
 
 ### 配置
 
-MimiClaw 使用**两层配置**：`mimi_secrets.h` 提供编译时默认值，串口 CLI 可在运行时覆盖。CLI 设置的值存在 NVS Flash 中，优先级高于编译时值。
+Esp32Claw 使用**两层配置**：`mimi_secrets.h` 提供编译时默认值，串口 CLI 可在运行时覆盖。CLI 设置的值存在 NVS Flash 中，优先级高于编译时值。
 
 ```bash
 cp main/mimi_secrets.h.example main/mimi_secrets.h
@@ -101,7 +98,7 @@ idf.py -p PORT flash monitor
 
 ### 代理配置（国内用户）
 
-在国内需要代理才能访问 Telegram 和 Anthropic API。MimiClaw 内置 HTTP CONNECT 隧道支持。
+在国内需要代理才能访问 Telegram 和 Anthropic API。Esp32Claw 内置 HTTP CONNECT 隧道支持。
 
 **前提**：局域网内有一个支持 HTTP CONNECT 的代理（Clash Verge、V2Ray 等），并开启了「允许局域网连接」。
 
@@ -149,7 +146,7 @@ mimi> restart                     # 重启
 
 ## 记忆
 
-MimiClaw 把所有数据存为纯文本文件，可以直接读取和编辑：
+Esp32Claw 把所有数据存为纯文本文件，可以直接读取和编辑：
 
 | 文件 | 说明 |
 |------|------|
@@ -163,7 +160,7 @@ MimiClaw 把所有数据存为纯文本文件，可以直接读取和编辑：
 
 ## 工具
 
-MimiClaw 同时支持 Anthropic 和 OpenAI 的工具调用 — LLM 在对话中可以调用工具，循环执行直到任务完成（ReAct 模式）。
+Esp32Claw 同时支持 Anthropic 和 OpenAI 的工具调用 — LLM 在对话中可以调用工具，循环执行直到任务完成（ReAct 模式）。
 
 | 工具 | 说明 |
 |------|------|
@@ -177,7 +174,7 @@ MimiClaw 同时支持 Anthropic 和 OpenAI 的工具调用 — LLM 在对话中�
 
 ## 定时任务（Cron）
 
-MimiClaw 内置 cron 调度器，让 AI 可以自主安排任务。LLM 可以通过 `cron_add` 工具创建周期性任务（"每 N 秒"）或一次性任务（"在某个时间戳"）。任务触发时，消息会注入到 Agent 循环 — AI 自动醒来、处理任务并回复。
+Esp32Claw 内置 cron 调度器，让 AI 可以自主安排任务。LLM 可以通过 `cron_add` 工具创建周期性任务（"每 N 秒"）或一次性任务（"在某个时间戳"）。任务触发时，消息会注入到 Agent 循环 — AI 自动醒来、处理任务并回复。
 
 任务持久化存储在 SPIFFS（`cron.json`），重启后不会丢失。典型用途：每日总结、定时提醒、定期巡检。
 
@@ -185,7 +182,7 @@ MimiClaw 内置 cron 调度器，让 AI 可以自主安排任务。LLM 可以通
 
 心跳服务会定期读取 SPIFFS 上的 `HEARTBEAT.md`，检查是否有待办事项。如果发现未完成的条目（非空行、非标题、非已勾选的 `- [x]`），就会向 Agent 循环发送提示，让 AI 自主处理。
 
-这让 MimiClaw 变成一个主动型助理 — 把任务写入 `HEARTBEAT.md`，机器人会在下一次心跳周期自动拾取执行（默认每 30 分钟）。
+这让 Esp32Claw 变成一个主动型助理 — 把任务写入 `HEARTBEAT.md`，机器人会在下一次心跳周期自动拾取执行（默认每 30 分钟）。
 
 ## 其他功能
 
@@ -211,7 +208,7 @@ MIT
 
 ## 致谢
 
-灵感来自 [OpenClaw](https://github.com/openclaw/openclaw) 和 [Nanobot](https://github.com/HKUDS/nanobot)。MimiClaw 为嵌入式硬件重新实现了核心 AI Agent 架构 — 没有 Linux，没有服务器，只有一颗 $5 的芯片。
+灵感来自 [OpenClaw](https://github.com/openclaw/openclaw) 和 [Nanobot](https://github.com/HKUDS/nanobot)。Esp32Claw 为嵌入式硬件重新实现了核心 AI Agent 架构 — 没有 Linux，没有服务器，只有一颗 $5 的芯片。
 
 ## Star History
 

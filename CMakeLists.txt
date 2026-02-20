@@ -34,6 +34,6 @@ if(DEFINED ENV{MIMI_ENABLE_ZIGBEE_SDK} AND "$ENV{MIMI_ENABLE_ZIGBEE_SDK}" STREQU
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(mimiclaw)
+project(esp32claw)
 
 spiffs_create_partition_image(spiffs spiffs_data FLASH_IN_PROJECT)

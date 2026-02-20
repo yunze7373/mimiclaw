@@ -10,9 +10,9 @@
 
 static const char *TAG = "mdns_svc";
 
-#define MDNS_HOSTNAME    "mimiclaw"
-#define MDNS_INSTANCE    "MimiClaw AI Agent"
-#define MDNS_SERVICE     "_mimiclaw"
+#define MDNS_HOSTNAME    "esp32claw"
+#define MDNS_INSTANCE    "Esp32Claw AI Agent"
+#define MDNS_SERVICE     "_esp32claw"
 #define MDNS_PROTO       "_tcp"
 
 esp_err_t mdns_service_init(void)

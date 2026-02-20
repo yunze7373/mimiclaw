@@ -1,4 +1,4 @@
-menu "MimiClaw Configuration"
+menu "Esp32Claw Configuration"
 
     config MIMI_ENABLE_TELEGRAM
         bool "Enable Telegram Bot"
@@ -78,7 +78,7 @@ menu "MimiClaw Configuration"
         bool "Enable mDNS Discovery"
         default y
         help
-            Advertise MimiClaw on the local network via mDNS.
+            Advertise Esp32Claw on the local network via mDNS.
             Accessible at mimiclaw.local after WiFi connects.
 
     config MIMI_ENABLE_MCP
@@ -95,7 +95,7 @@ menu "MimiClaw Configuration"
         depends on MIMI_ENABLE_WEBSOCKET
         help
             Include Home Assistant integration for smart home connectivity.
-            Exposes MimiClaw as HA entities via REST API or MQTT.
+            Exposes Esp32Claw as HA entities via REST API or MQTT.
 
     config MIMI_ENABLE_ZIGBEE
         bool "Enable Zigbee Gateway"
