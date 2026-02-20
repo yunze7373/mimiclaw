@@ -50,7 +50,7 @@ void system_manager_init(void)
     
     // Check if button is pressed (Active Low)
     if (gpio_get_level(PIN_BOOT_BUTTON) == 0) {
-        ESP_LOGw(TAG, "BOOT Button held detected! Forcing Safe Mode.");
+        ESP_LOGW(TAG, "BOOT Button held detected! Forcing Safe Mode.");
         s_safe_mode = true;
     }
 
