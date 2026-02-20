@@ -532,8 +532,8 @@ static const char *HTML_PAGE =
 "          <div style='display:flex;gap:8px;'>"
 "            <button id='hub-btn-market' class='btn btn-sm btn-primary' onclick='switchHubTab(\"market\")'>应用市场 (Mock)</button>"
 "            <button id='hub-btn-installed' class='btn btn-sm' onclick='switchHubTab(\"installed\")'>已安装管理</button>"
-"            <button id='hub-btn-sources' class='btn btn-sm' onclick='switchHubTab(\"sources\")'>MCP 源</button>
-            <button id='hub-btn-fleet' class='btn btn-sm' onclick='switchHubTab(\"fleet\")'>集群 (Fleet)</button>"
+"            <button id='hub-btn-sources' class='btn btn-sm' onclick='switchHubTab(\"sources\")'>MCP 源</button>"
+"            <button id='hub-btn-fleet' class='btn btn-sm' onclick='switchHubTab(\"fleet\")'>集群 (Fleet)</button>"
 "          </div>"
 "        </div>"
 "        <!-- Tab: Market (Original SkillHub) -->"
