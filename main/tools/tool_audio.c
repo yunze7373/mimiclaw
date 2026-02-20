@@ -10,12 +10,12 @@ static const char *TAG = "tool_audio";
  * Tool: audio_play_url
  * Input: {"url": "https://..."}
  * ------------------------------------------------------------------------- */
-static void tool_audio_play_url(const char *input, char *output, size_t out_len)
+static esp_err_t tool_audio_play_url(const char *input, char *output, size_t out_len)
 {
     cJSON *root = cJSON_Parse(input);
     if (!root) {
         snprintf(output, out_len, "Error: Invalid JSON");
-        return;
+        return ESP_ERR_INVALID_ARG;
     }
 
     cJSON *url_item = cJSON_GetObjectItem(root, "url");
@@ -26,27 +26,32 @@ static void tool_audio_play_url(const char *input, char *output, size_t out_len)
         } else {
             snprintf(output, out_len, "Failed to start playback (Error %d)", err);
         }
+        cJSON_Delete(root);
+        return err;
     } else {
         snprintf(output, out_len, "Error: 'url' parameter missing");
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_ARG;
     }
-    cJSON_Delete(root);
 }
 
 /* -------------------------------------------------------------------------
  * Tool: audio_stop
  * Input: {}
  * ------------------------------------------------------------------------- */
-static void tool_audio_stop(const char *input, char *output, size_t out_len)
+static esp_err_t tool_audio_stop(const char *input, char *output, size_t out_len)
 {
+    (void)input;
     audio_manager_stop();
     snprintf(output, out_len, "Audio stopped.");
+    return ESP_OK;
 }
 
 /* -------------------------------------------------------------------------
  * Tool: audio_volume
  * Input: {"volume": 50}
  * ------------------------------------------------------------------------- */
-static void tool_audio_volume(const char *input, char *output, size_t out_len)
+static esp_err_t tool_audio_volume(const char *input, char *output, size_t out_len)
 {
     cJSON *root = cJSON_Parse(input);
     int vol = -1;
@@ -61,9 +66,11 @@ static void tool_audio_volume(const char *input, char *output, size_t out_len)
     if (vol >= 0 && vol <= 100) {
         audio_manager_set_volume(vol);
         snprintf(output, out_len, "Volume set to %d", vol);
+        return ESP_OK;
     } else {
         snprintf(output, out_len, "Current volume: %d (Usage: {\"volume\": 0-100})", 
                  audio_manager_get_volume());
+        return ESP_OK;
     }
 }
 
@@ -72,12 +79,27 @@ static void tool_audio_volume(const char *input, char *output, size_t out_len)
  * ------------------------------------------------------------------------- */
 void register_audio_tools(void)
 {
-    tool_registry_register("audio_play_url", tool_audio_play_url, 
-        "Play audio from a URL. Input: {\"url\": \"https://...\"}. Supports MP3.");
-        
-    tool_registry_register("audio_stop", tool_audio_stop,
-        "Stop current audio playback.");
-        
-    tool_registry_register("audio_volume", tool_audio_volume,
-        "Set audio volume. Input: {\"volume\": 0-100}.");
+    static const mimi_tool_t tool_play_url = {
+        .name = "audio_play_url",
+        .description = "Play audio from a URL. Input: {\"url\": \"https://...\"}. Supports MP3.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"required\":[\"url\"]}",
+        .execute = tool_audio_play_url,
+    };
+    static const mimi_tool_t tool_stop = {
+        .name = "audio_stop",
+        .description = "Stop current audio playback.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
+        .execute = tool_audio_stop,
+    };
+    static const mimi_tool_t tool_volume = {
+        .name = "audio_volume",
+        .description = "Set audio volume. Input: {\"volume\": 0-100}.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"volume\":{\"type\":\"integer\"}},\"required\":[]}",
+        .execute = tool_audio_volume,
+    };
+
+    tool_registry_register(&tool_play_url);
+    tool_registry_register(&tool_stop);
+    tool_registry_register(&tool_volume);
+    ESP_LOGI(TAG, "Audio tools registered");
 }
