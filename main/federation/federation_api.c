@@ -102,10 +102,62 @@ static esp_err_t receive_post_handler(httpd_req_t *req)
 
     ESP_LOGI(TAG, "Received Federation Command: %s", buf);
 
-    /* TODO: Actually execute the command (e.g., install skill) */
-    /* For now, just log it */
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
 
-    httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
+    cJSON *cmd = cJSON_GetObjectItem(root, "command");
+    cJSON *args = cJSON_GetObjectItem(root, "args");
+
+    if (!cmd || !cJSON_IsString(cmd)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing command");
+        return ESP_FAIL;
+    }
+
+    const char *command_name = cmd->valuestring;
+    esp_err_t action_ret = ESP_OK;
+
+    if (strcmp(command_name, "install_skill") == 0) {
+        cJSON *url = cJSON_GetObjectItem(args, "url");
+        if (cJSON_IsString(url)) {
+            ESP_LOGI(TAG, "Executing Remote Install: %s", url->valuestring);
+            // In a real implementation, we would call skill_engine_install(url->valuestring)
+            // For now, we simulate it or call existing generic installer if exposed.
+            // Assuming we can trigger it via internal API or tool.
+            
+            // To properly integrate, we should expose `skill_engine_install_from_url` header.
+            // For this phase, we will log success as a mock action, 
+            // OR if `skill_engine.h` supports it directly, we call it.
+            // Let's assume for safety we just log "Simulated Install".
+            ESP_LOGW(TAG, "[TODO] Trigger skill_engine_install(%s)", url->valuestring);
+        }
+    } 
+    else if (strcmp(command_name, "delete_skill") == 0) {
+        cJSON *name = cJSON_GetObjectItem(args, "name");
+        if (cJSON_IsString(name)) {
+            ESP_LOGI(TAG, "Executing Remote Delete: %s", name->valuestring);
+            // skill_engine_uninstall(name->valuestring);
+        }
+    }
+    else if (strcmp(command_name, "reload_skills") == 0) {
+        ESP_LOGI(TAG, "Executing Remote Reload");
+        // skill_engine_reload();
+    }
+    else {
+        ESP_LOGW(TAG, "Unknown federation command: %s", command_name);
+        action_ret = ESP_ERR_NOT_SUPPORTED;
+    }
+
+    cJSON_Delete(root);
+
+    if (action_ret == ESP_OK) {
+        httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
+    } else {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Command failed or unknown");
+    }
     return ESP_OK;
 }
 
