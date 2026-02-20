@@ -60,6 +60,7 @@ idf_component_register(
         "discovery/ssdp_service.c"
         "extensions/ha_integration.c"
         "extensions/zigbee_gateway.c"
+        "extensions/mqtt_manager.c"
     INCLUDE_DIRS
         "."
     EMBED_FILES

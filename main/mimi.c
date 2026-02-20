@@ -66,7 +66,26 @@
 #include "extensions/ha_integration.h"
 #endif
 #if CONFIG_MIMI_ENABLE_ZIGBEE
+#include "extensions/mqtt_manager.h"
 #include "extensions/zigbee_gateway.h"
+// ... (existing includes)
+
+// ...
+
+    /* L3: Extensions — optional WiFi-dependent services */
+#if CONFIG_MIMI_ENABLE_MDNS
+    const char *mdns_deps[] = {"wifi", NULL};
+    comp_register("mdns", COMP_LAYER_EXTENSION, false, true,
+                  mdns_service_init, mdns_service_start, NULL, mdns_deps);
+#endif
+
+    // MQTT Manager (Phase 15)
+    // Needs WiFi, and ideally Tool Registry if it wants to execute tools
+    const char *mqtt_deps[] = {"wifi", "tool_reg", NULL};
+    comp_register("mqtt_manager", COMP_LAYER_EXTENSION, false, true,
+                  mqtt_manager_init, mqtt_manager_start, NULL, mqtt_deps);
+
+#if CONFIG_MIMI_ENABLE_MCP
 #endif
 #include "tools/api_manager.h"
 #include "component/component_mgr.h"
@@ -270,6 +289,11 @@ void app_main(void)
     comp_register("mdns", COMP_LAYER_EXTENSION, false, true,
                   mdns_service_init, mdns_service_start, NULL, mdns_deps);
 #endif
+
+    // MQTT Manager (Phase 15)
+    const char *mqtt_deps[] = {"wifi", "tool_reg", NULL};
+    comp_register("mqtt_manager", COMP_LAYER_EXTENSION, false, true,
+                  mqtt_manager_init, mqtt_manager_start, NULL, mqtt_deps);
 
 #if CONFIG_MIMI_ENABLE_MCP
     const char *mcp_deps[] = {"wifi", "tool_reg", NULL};
