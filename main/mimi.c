@@ -1,4 +1,4 @@
-#include <stdio.h>
+﻿#include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -68,24 +68,6 @@
 #if CONFIG_MIMI_ENABLE_ZIGBEE
 #include "extensions/mqtt_manager.h"
 #include "extensions/zigbee_gateway.h"
-// ... (existing includes)
-
-// ...
-
-    /* L3: Extensions — optional WiFi-dependent services */
-#if CONFIG_MIMI_ENABLE_MDNS
-    const char *mdns_deps[] = {"wifi", NULL};
-    comp_register("mdns", COMP_LAYER_EXTENSION, false, true,
-                  mdns_service_init, mdns_service_start, NULL, mdns_deps);
-#endif
-
-    // MQTT Manager (Phase 15)
-    // Needs WiFi, and ideally Tool Registry if it wants to execute tools
-    const char *mqtt_deps[] = {"wifi", "tool_reg", NULL};
-    comp_register("mqtt_manager", COMP_LAYER_EXTENSION, false, true,
-                  mqtt_manager_init, mqtt_manager_start, NULL, mqtt_deps);
-
-#if CONFIG_MIMI_ENABLE_MCP
 #endif
 #include "tools/api_manager.h"
 #include "component/component_mgr.h"
@@ -136,7 +118,7 @@ static esp_err_t init_spiffs(void)
     return ESP_OK;
 }
 
-/* ── System Manager handles Safe Mode & Health ──────────────────── */
+/* 笏笏 System Manager handles Safe Mode & Health 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏 */
 #include "system_manager.h"
 
 /* Outbound dispatch task: reads from outbound queue and routes to channels */
@@ -172,7 +154,7 @@ static void outbound_dispatch_task(void *arg)
 
 void app_main(void)
 {
-    /* ── Redirect cJSON to PSRAM ──────────────────────────────── */
+    /* 笏笏 Redirect cJSON to PSRAM 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏 */
     /* This is critical: cJSON uses malloc() internally for ALL JSON
      * operations. Without this, every JSON parse/build/serialize eats
      * internal SRAM, leaving nothing for TLS/AES DMA buffers. */
@@ -195,7 +177,7 @@ void app_main(void)
     ESP_LOGI(TAG, "PSRAM free:    %d bytes",
              (int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
-    /* Display + input (pre-component init — these are HW-level) */
+    /* Display + input (pre-component init 窶・these are HW-level) */
 #if MIMI_HAS_LCD
     ESP_ERROR_CHECK(display_init());
     display_show_banner();
@@ -208,7 +190,7 @@ void app_main(void)
     imu_manager_set_shake_callback(config_screen_toggle);
 #endif
 
-    /* ── Phase 1: Core infrastructure (pre-component manager) ─── */
+    /* 笏笏 Phase 1: Core infrastructure (pre-component manager) 笏笏笏 */
     ESP_ERROR_CHECK(init_nvs());
     
     // Initialize System Manager (Safe Mode / Boot Loop Check)
@@ -217,9 +199,9 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     ESP_ERROR_CHECK(init_spiffs());
 
-    /* ── Phase 2: Register components ──────────────────────────── */
+    /* 笏笏 Phase 2: Register components 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏 */
 
-    /* L0: Base — no deps */
+    /* L0: Base 窶・no deps */
     comp_register("msg_bus",     COMP_LAYER_BASE, true,  false,
                   message_bus_init, NULL, NULL, NULL);
     comp_register("memory",     COMP_LAYER_BASE, true,  false,
@@ -233,7 +215,7 @@ void app_main(void)
                   http_proxy_init, NULL, NULL, NULL);
 #endif
 
-    /* L1: Core — depends on base */
+    /* L1: Core 窶・depends on base */
     const char *core_deps[] = {"msg_bus", "memory", "session", NULL};
     comp_register("llm",         COMP_LAYER_CORE, true,  false,
                   llm_proxy_init, NULL, NULL, core_deps);
@@ -247,7 +229,7 @@ void app_main(void)
         comp_register("skill_engine", COMP_LAYER_CORE, false, false,
                       skill_engine_init, NULL, NULL, skill_deps);
     } else {
-        ESP_LOGW(TAG, "Skipping skill_engine registration — SAFE MODE");
+        ESP_LOGW(TAG, "Skipping skill_engine registration 窶・SAFE MODE");
     }
 #endif
 
@@ -263,7 +245,7 @@ void app_main(void)
     comp_register("agent",    COMP_LAYER_CORE, true,  true,
                   agent_loop_init, agent_loop_start, NULL, agent_deps);
 
-    /* L2: Entry — depends on core, many need WiFi */
+    /* L2: Entry 窶・depends on core, many need WiFi */
     comp_register("cli",       COMP_LAYER_ENTRY, false, false,
                   serial_cli_init, NULL, NULL, NULL);
 
@@ -283,7 +265,7 @@ void app_main(void)
 #endif
 #endif
 
-    /* L3: Extensions — optional WiFi-dependent services */
+    /* L3: Extensions 窶・optional WiFi-dependent services */
 #if CONFIG_MIMI_ENABLE_MDNS
     const char *mdns_deps[] = {"wifi", NULL};
     comp_register("mdns", COMP_LAYER_EXTENSION, false, true,
@@ -320,7 +302,7 @@ void app_main(void)
     comp_register("api_manager", COMP_LAYER_EXTENSION, true, false,
                   api_manager_init, NULL, NULL, api_deps);
 
-    /* ── Phase 3: Load config + Initialize all ──────────────────── */
+    /* 笏笏 Phase 3: Load config + Initialize all 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏 */
     comp_load_config();  /* Disable components per /spiffs/config/components.json */
     ESP_ERROR_CHECK(comp_init_all());
 
@@ -337,7 +319,7 @@ void app_main(void)
     }
 #endif
 
-    /* ── Phase 4: WiFi connect + start WiFi-dependents ────────── */
+    /* 笏笏 Phase 4: WiFi connect + start WiFi-dependents 笏笏笏笏笏笏笏笏笏笏 */
     esp_err_t wifi_err = wifi_manager_start();
     if (wifi_err == ESP_OK) {
         ESP_LOGI(TAG, "Scanning nearby APs on boot...");

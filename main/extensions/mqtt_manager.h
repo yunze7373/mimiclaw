@@ -1,6 +1,7 @@
 #ifndef MQTT_MANAGER_H
 #define MQTT_MANAGER_H
 
+#include <stdbool.h>
 #include "esp_err.h"
 
 #ifdef __cplusplus
