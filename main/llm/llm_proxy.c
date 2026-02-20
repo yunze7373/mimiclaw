@@ -646,11 +646,11 @@ static cJSON *convert_messages_openai(const char *system_prompt, cJSON *messages
                         }
                     }
                 } else if (btype && cJSON_IsString(btype) && strcmp(btype->valuestring, "tool_use") == 0) {
-                    if (!tool_calls) tool_calls = cJSON_CreateArray();
                     cJSON *id = cJSON_GetObjectItem(block, "id");
                     cJSON *name = cJSON_GetObjectItem(block, "name");
                     cJSON *input = cJSON_GetObjectItem(block, "input");
-                    if (!name || !cJSON_IsString(name)) continue;
+                    if (!name || !cJSON_IsString(name) || !name->valuestring || !name->valuestring[0]) continue;
+                    if (!tool_calls) tool_calls = cJSON_CreateArray();
 
                     cJSON *tc = cJSON_CreateObject();
                     if (id && cJSON_IsString(id)) {
@@ -664,7 +664,11 @@ static cJSON *convert_messages_openai(const char *system_prompt, cJSON *messages
                         if (args) {
                             cJSON_AddStringToObject(func, "arguments", args);
                             free(args);
+                        } else {
+                            cJSON_AddStringToObject(func, "arguments", "{}");
                         }
+                    } else {
+                        cJSON_AddStringToObject(func, "arguments", "{}");
                     }
                     cJSON_AddItemToObject(tc, "function", func);
                     cJSON_AddItemToArray(tool_calls, tc);

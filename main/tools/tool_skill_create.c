@@ -55,6 +55,16 @@ static void to_fs_skill_name(const char *in, char out[SKILL_FS_NAME_MAX + 1])
     snprintf(out, SKILL_FS_NAME_MAX + 1, "%.7s_%02x", in, (unsigned)h);
 }
 
+/* Reject legacy/unsupported Lua APIs to prevent crash-loop skill generation. */
+static const char *detect_unsupported_api(const char *code)
+{
+    if (!code) return "empty skill code";
+    if (strstr(code, "mimi.")) return "unsupported namespace 'mimi'";
+    if (strstr(code, "rgb.")) return "unsupported namespace 'rgb'";
+    if (strstr(code, "timer_start(") || strstr(code, ".timer_start(")) return "unsupported API 'timer_start'";
+    return NULL;
+}
+
 /* Write a file to SPIFFS, creating parent dir if needed */
 static esp_err_t write_file(const char *path, const char *content)
 {
@@ -132,6 +142,16 @@ esp_err_t tool_skill_create_execute(const char *input_json, char *output, size_t
     to_fs_skill_name(name, skill_name);
     if (strcmp(name, skill_name) != 0) {
         ESP_LOGW(TAG, "Skill name '%s' normalized to '%s' due to SPIFFS path length limit", name, skill_name);
+    }
+
+    const char *unsupported = detect_unsupported_api(code);
+    if (unsupported) {
+        snprintf(output, output_size,
+                 "Error: %s. Use only sandbox APIs: hw.*, console.log, agent.emit_event, struct.* "
+                 "(timers: hw.timer_every/hw.timer_once/hw.timer_cancel).",
+                 unsupported);
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_ARG;
     }
 
     /* 2. Create skill directory */
@@ -226,10 +246,10 @@ static const char *s_template_content[] = {
     "    local dev_addr = 0x40\n"
     "    local i2c_num = 0\n"
     "    -- Write register address\n"
-    "    local ok = mimi.i2c_write(i2c_num, dev_addr, string.char(reg))\n"
-    "    if not ok then return nil, \"write failed\" end\n"
-    "    -- Read 1 byte\n"
-    "    local data = mimi.i2c_read(i2c_num, dev_addr, 1)\n"
+    "    local ok = hw.i2c_init(\"i2c0\")\n"
+    "    if not ok then return nil, \"i2c init failed\" end\n"
+    "    -- Read 1 byte from register\n"
+    "    local data = hw.i2c_read(\"i2c0\", dev_addr, reg, 1)\n"
     "    if not data then return nil, \"read failed\" end\n"
     "    return string.byte(data, 1)\n"
     "end\n\n"
@@ -257,8 +277,8 @@ static const char *s_template_content[] = {
     "}\n\n"
     "local PIN = 18\n\n"
     "function set_state(on)\n"
-    "    mimi.gpio_set_direction(PIN, mimi.GPIO_MODE_OUTPUT)\n"
-    "    mimi.gpio_set_level(PIN, on and 1 or 0)\n"
+    "    hw.gpio_set_mode(PIN, \"output\")\n"
+    "    hw.gpio_write(PIN, on and 1 or 0)\n"
     "    return true\n"
     "end\n\n"
     "TOOLS = {\n"
@@ -286,8 +306,8 @@ static const char *s_template_content[] = {
     "    count = count + 1\n"
     "    print(\"Timer tick: \" .. count)\n"
     "end\n\n"
-    "-- Timer ID 0, 5000ms interval, periodic=true\n"
-    "mimi.timer_start(0, 5000, true, \"on_timer\")\n\n"
+    "-- Start periodic timer every 5000ms\n"
+    "local timer_id = hw.timer_every(5000, on_timer)\n\n"
     "TOOLS = {\n"
     "    {\n"
     "        name = \"get_count\",\n"

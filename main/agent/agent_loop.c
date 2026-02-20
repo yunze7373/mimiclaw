@@ -54,12 +54,14 @@ static cJSON *build_assistant_content(const llm_response_t *resp)
     /* Tool use blocks */
     for (int i = 0; i < resp->call_count; i++) {
         const llm_tool_call_t *call = &resp->calls[i];
+        if (!call->name[0]) continue;
         cJSON *tool_block = cJSON_CreateObject();
         cJSON_AddStringToObject(tool_block, "type", "tool_use");
         cJSON_AddStringToObject(tool_block, "id", call->id);
         cJSON_AddStringToObject(tool_block, "name", call->name);
 
-        cJSON *input = cJSON_Parse(call->input);
+        const char *input_json = (call->input && call->input[0]) ? call->input : "{}";
+        cJSON *input = cJSON_Parse(input_json);
         if (input) {
             cJSON_AddItemToObject(tool_block, "input", input);
         } else {
@@ -112,6 +114,10 @@ static cJSON *build_tool_results(const llm_response_t *resp, char *tool_output, 
 
     for (int i = 0; i < resp->call_count; i++) {
         const llm_tool_call_t *call = &resp->calls[i];
+        if (!call->name[0]) {
+            ESP_LOGW(TAG, "Skip empty tool call at index %d", i);
+            continue;
+        }
 
         /* Notify frontend */
         char status_buf[64];
@@ -120,7 +126,8 @@ static cJSON *build_tool_results(const llm_response_t *resp, char *tool_output, 
 
         /* Execute tool */
         tool_output[0] = '\0';
-        tool_registry_execute(call->name, call->input, tool_output, tool_output_size);
+        const char *input_json = (call->input && call->input[0]) ? call->input : "{}";
+        tool_registry_execute(call->name, input_json, tool_output, tool_output_size);
 
         ESP_LOGI(TAG, "Tool %s result: %d bytes", call->name, (int)strlen(tool_output));
 
