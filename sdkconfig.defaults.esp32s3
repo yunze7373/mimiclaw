@@ -49,3 +49,6 @@ CONFIG_BT_ENABLED=n
 
 # Suppress legacy driver warnings
 CONFIG_I2S_SUPPRESS_DEPRECATE_WARN=y
+
+# ADF compatibility (uses legacy FreeRTOS types/APIs in some components)
+CONFIG_FREERTOS_ENABLE_BACKWARD_COMPATIBILITY=y
