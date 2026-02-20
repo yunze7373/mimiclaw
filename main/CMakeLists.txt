@@ -36,6 +36,7 @@ idf_component_register(
         "tools/tool_skill_create.c"
         "tools/tool_skill_manage.c"
         "tools/tool_mcp.c"
+        "tools/api_manager.c"
         "skills/skill_engine.c"
         "skills/skill_hw_api.c"
         "skills/skill_rollback.c"

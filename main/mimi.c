@@ -68,6 +68,7 @@
 #if CONFIG_MIMI_ENABLE_ZIGBEE
 #include "extensions/zigbee_gateway.h"
 #endif
+#include "tools/api_manager.h"
 #include "component/component_mgr.h"
 
 static const char *TAG = "mimi";
@@ -354,6 +355,10 @@ void app_main(void)
     comp_register("zigbee_gateway", COMP_LAYER_EXTENSION, false, false,
                   zigbee_gateway_init, zigbee_gateway_start, NULL, NULL);
 #endif
+
+    const char *api_deps[] = {"wifi", "tool_reg", NULL};
+    comp_register("api_manager", COMP_LAYER_EXTENSION, true, false,
+                  api_manager_init, NULL, NULL, api_deps);
 
     /* ── Phase 3: Load config + Initialize all ──────────────────── */
     comp_load_config();  /* Disable components per /spiffs/config/components.json */
