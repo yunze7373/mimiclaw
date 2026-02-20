@@ -17,7 +17,7 @@
 
 static const char *TAG = "tool_skill_create";
 /* SPIFFS object name limit is 32, and "/skills/<name>/manifest.json" must fit. */
-#define SKILL_FS_NAME_MAX 10
+#define SKILL_FS_NAME_MAX 9
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
@@ -51,8 +51,26 @@ static void to_fs_skill_name(const char *in, char out[SKILL_FS_NAME_MAX + 1])
     }
 
     uint8_t h = name_hash8(in);
-    /* 7 chars + '_' + 2 hex chars = 10 chars */
-    snprintf(out, SKILL_FS_NAME_MAX + 1, "%.7s_%02x", in, (unsigned)h);
+    /* 6 chars + '_' + 2 hex chars = 9 chars */
+    snprintf(out, SKILL_FS_NAME_MAX + 1, "%.6s_%02x", in, (unsigned)h);
+}
+
+static bool has_unqualified_call(const char *code, const char *func_name)
+{
+    if (!code || !func_name || !func_name[0]) return false;
+    const char *p = code;
+    size_t name_len = strlen(func_name);
+    while ((p = strstr(p, func_name)) != NULL) {
+        char prev = (p == code) ? '\0' : *(p - 1);
+        /* treat identifier chars and '.' as qualified/embedded usage */
+        if (!(isalnum((unsigned char)prev) || prev == '_' || prev == '.')) {
+            const char *q = p + name_len;
+            while (*q == ' ' || *q == '\t' || *q == '\r' || *q == '\n') q++;
+            if (*q == '(') return true;
+        }
+        p += name_len;
+    }
+    return false;
 }
 
 /* Reject legacy/unsupported Lua APIs to prevent crash-loop skill generation. */
@@ -62,6 +80,10 @@ static const char *detect_unsupported_api(const char *code)
     if (strstr(code, "mimi.")) return "unsupported namespace 'mimi'";
     if (strstr(code, "rgb.")) return "unsupported namespace 'rgb'";
     if (strstr(code, "timer_start(") || strstr(code, ".timer_start(")) return "unsupported API 'timer_start'";
+    if (has_unqualified_call(code, "i2s_read")) return "unsupported global call 'i2s_read' (use hw.i2s_read)";
+    if (has_unqualified_call(code, "i2s_write")) return "unsupported global call 'i2s_write'";
+    if (has_unqualified_call(code, "rgb_control")) return "unsupported global call 'rgb_control'";
+    if (has_unqualified_call(code, "gpio_control")) return "unsupported global call 'gpio_control'";
     return NULL;
 }
 

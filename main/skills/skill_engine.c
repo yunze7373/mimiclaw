@@ -835,7 +835,7 @@ static void build_safe_stdlib(void)
 {
     lua_newtable(s_L);
     const char *funcs[] = {
-        "assert", "error", "ipairs", "next", "pairs", "pcall",
+        "assert", "error", "ipairs", "next", "pairs", "pcall", "print",
         "select", "tonumber", "tostring", "type", "xpcall", NULL
     };
     for (int i = 0; funcs[i]; i++) {
