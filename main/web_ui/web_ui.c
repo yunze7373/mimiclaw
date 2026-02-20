@@ -16,6 +16,7 @@
 #include "../discovery/mdns_service.h"
 #include "../tools/tool_registry.h"
 #include "../extensions/zigbee_gateway.h"
+#include "../system_manager.h"
 #include "nvs.h"
 
 #include <string.h>
@@ -158,6 +159,8 @@ static const char *HTML_PAGE =
 "  </style>"
 "</head>"
 "<body>\n"
+"  <div id='safeModeBanner' style='display:none;background:#ef4444;color:white;text-align:center;padding:10px;font-weight:bold;'>⚠ SAFE MODE - Limited Functionality</div>"
+
 "  <script>\n"
 "    /* Core Functions */\n"
 "    function showToast(msg, type) {\n"
@@ -180,6 +183,18 @@ static const char *HTML_PAGE =
 "    }\n"
 "\n"
 "    /* Status */\n"
+"    async function checkSafeMode() {\n"
+"      try {\n"
+"        const resp = await fetch('/api/system/health');\n"
+"        const data = await resp.json();\n"
+"        if (data.safe_mode) {\n"
+"          const banner = document.getElementById('safeModeBanner');\n"
+"          if (banner) banner.style.display = 'block';\n"
+"          showToast('⚠ SAFE MODE ACTIVE', 'warning');\n"
+"        }\n"
+"      } catch(e) {}\n"
+"    }\n"
+"    \n"
 "    async function refreshStatus() {\n"
 "      try {\n"
 "        const resp = await fetch('/api/status');\n"
@@ -214,7 +229,7 @@ static const char *HTML_PAGE =
 "      const pageTitle = document.getElementById('pageTitle');\n"
 "      if(pageTitle) pageTitle.textContent = titles[view] || view;\n"
 "    }\n"
-"  </script>\n"
+"    window.onload = function() { checkSafeMode(); refreshStatus(); };\n""  </script>\n"
 "  <!-- Sidebar -->"
 "  <div class='sidebar'>"
 "    <div class='logo'>"
@@ -1520,7 +1535,7 @@ static const char *HTML_PAGE =
 "    loadCronJobs();\n"
 "    loadPinConfig();\n"
 "    connectWS();\n"
-"  </script>\n"
+"    window.onload = function() { checkSafeMode(); refreshStatus(); };\n""  </script>\n"
 "</body>"
 "</html>";
 
@@ -2484,6 +2499,19 @@ static esp_err_t mcp_source_action_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t system_health_handler(httpd_req_t *req)
+{
+    char *json = system_get_health_json();
+    if (json) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, json, strlen(json));
+        free(json);
+    } else {
+        httpd_resp_send_500(req);
+    }
+    return ESP_OK;
+}
+
 /* ── Server Init ───────────────────────────────────────────────── */
 
 esp_err_t web_ui_init(void)
@@ -2521,6 +2549,13 @@ esp_err_t web_ui_init(void)
         .handler = status_handler,
     };
     httpd_register_uri_handler(s_http_server, &api_status_uri);
+
+    httpd_uri_t api_system_health = {
+        .uri = "/api/system/health",
+        .method = HTTP_GET,
+        .handler = system_health_handler,
+    };
+    httpd_register_uri_handler(s_http_server, &api_system_health);
 
     httpd_uri_t api_config_get_uri = {
         .uri = "/api/config",

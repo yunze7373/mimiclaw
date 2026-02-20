@@ -73,12 +73,6 @@
 
 static const char *TAG = "mimi";
 
-#define SAFEMODE_NVS_NS       "safe_mode"
-#define SAFEMODE_NVS_KEY      "boot_cnt"
-#define SAFEMODE_THRESHOLD    3        /* 3 consecutive rapid reboots → safe mode */
-#define SAFEMODE_STABLE_MS    60000    /* 60s uptime = stable boot */
-static bool s_safe_mode = false;
-static esp_timer_handle_t s_stability_timer = NULL;
 
 /* PSRAM malloc wrapper for cJSON hooks */
 static void *psram_malloc(size_t sz) {
@@ -123,66 +117,8 @@ static esp_err_t init_spiffs(void)
     return ESP_OK;
 }
 
-/* ── Safe Mode: crash loop detection ────────────────────────────── */
-static void stability_timer_cb(void *arg)
-{
-    (void)arg;
-    /* We survived 60s → reset boot counter */
-    nvs_handle_t nvs;
-    if (nvs_open(SAFEMODE_NVS_NS, NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_set_u8(nvs, SAFEMODE_NVS_KEY, 0);
-        nvs_commit(nvs);
-        nvs_close(nvs);
-        ESP_LOGI(TAG, "Stable boot confirmed — boot counter reset");
-    }
-
-#if CONFIG_MIMI_ENABLE_OTA
-    /* Also confirm OTA firmware if pending verification */
-    ota_confirm_running_firmware();
-#endif
-}
-
-static bool check_safe_mode(void)
-{
-    nvs_handle_t nvs;
-    uint8_t boot_cnt = 0;
-
-    if (nvs_open(SAFEMODE_NVS_NS, NVS_READWRITE, &nvs) != ESP_OK) {
-        return false;  /* Can't determine — assume normal */
-    }
-
-    nvs_get_u8(nvs, SAFEMODE_NVS_KEY, &boot_cnt);  /* 0 if not found */
-    boot_cnt++;
-    ESP_LOGI(TAG, "Boot count: %d (threshold: %d)", (int)boot_cnt, SAFEMODE_THRESHOLD);
-
-    nvs_set_u8(nvs, SAFEMODE_NVS_KEY, boot_cnt);
-    nvs_commit(nvs);
-    nvs_close(nvs);
-
-    if (boot_cnt >= SAFEMODE_THRESHOLD) {
-        ESP_LOGW(TAG, "⚠ SAFE MODE ACTIVE — Skills disabled due to %d consecutive rapid reboots", (int)boot_cnt);
-        ESP_LOGW(TAG, "  Use 'safe_reset' CLI command to clear and reboot normally");
-        return true;
-    }
-
-    /* Start stability timer — if we survive 60s, clear counter */
-    esp_timer_create_args_t args = {
-        .callback = stability_timer_cb,
-        .arg = NULL,
-        .dispatch_method = ESP_TIMER_TASK,
-        .name = "safe_stab",
-    };
-    if (esp_timer_create(&args, &s_stability_timer) == ESP_OK) {
-        esp_timer_start_once(s_stability_timer, (uint64_t)SAFEMODE_STABLE_MS * 1000ULL);
-    }
-
-    return false;
-}
-
-bool mimi_is_safe_mode(void)
-{
-    return s_safe_mode;
-}
+/* ── System Manager handles Safe Mode & Health ──────────────────── */
+#include "system_manager.h"
 
 /* Outbound dispatch task: reads from outbound queue and routes to channels */
 static void outbound_dispatch_task(void *arg)
@@ -255,6 +191,10 @@ void app_main(void)
 
     /* ── Phase 1: Core infrastructure (pre-component manager) ─── */
     ESP_ERROR_CHECK(init_nvs());
+    
+    // Initialize System Manager (Safe Mode / Boot Loop Check)
+    system_manager_init();
+    
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     ESP_ERROR_CHECK(init_spiffs());
 
@@ -284,11 +224,7 @@ void app_main(void)
     /* Skill engine depends on tool_reg + needs safe mode check */
 #if CONFIG_MIMI_ENABLE_SKILLS
     const char *skill_deps[] = {"tool_reg", NULL};
-    if (!s_safe_mode) {
-        /* check_safe_mode must be called before registration */
-        s_safe_mode = check_safe_mode();
-    }
-    if (!s_safe_mode) {
+    if (!system_is_safe_mode()) {
         comp_register("skill_engine", COMP_LAYER_CORE, false, false,
                       skill_engine_init, NULL, NULL, skill_deps);
     } else {
