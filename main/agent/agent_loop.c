@@ -254,8 +254,6 @@ void agent_loop_task(void *pvParameters)
         return;
     }
 
-    const char *tools_json = tool_registry_get_tools_json();
-
     while (1) {
         mimi_msg_t msg;
         esp_err_t err = message_bus_pop_inbound_prefer_websocket(&msg, UINT32_MAX);
@@ -287,6 +285,8 @@ void agent_loop_task(void *pvParameters)
         bool use_stream = is_ws && llm_get_streaming();
 
         while (iteration < MIMI_AGENT_MAX_TOOL_ITER) {
+            const char *tools_json = tool_registry_get_tools_json();
+
             /* Send "working" indicator before each API call */
             agent_stream_ctx_t stream_ctx = {0};
             

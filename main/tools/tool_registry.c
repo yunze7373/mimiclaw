@@ -34,6 +34,14 @@ static int s_provider_count = 0;
 
 static char *s_cached_json = NULL;
 
+static void invalidate_tools_cache(void)
+{
+    if (s_cached_json) {
+        free(s_cached_json);
+        s_cached_json = NULL;
+    }
+}
+
 /* ── Inline tool: set_streaming ────────────────────────────────────── */
 static esp_err_t tool_set_streaming_execute(const char *input_json, char *output, size_t output_size)
 {
@@ -100,6 +108,7 @@ void tool_registry_register(const mimi_tool_t *tool)
         return;
     }
     s_tools[s_tool_count++] = *tool;
+    invalidate_tools_cache();
     ESP_LOGI(TAG, "Registered tool: %s", tool->name);
 }
 
@@ -112,6 +121,7 @@ void tool_registry_unregister(const char *name)
                 s_tools[j] = s_tools[j + 1];
             }
             s_tool_count--;
+            invalidate_tools_cache();
             ESP_LOGI(TAG, "Unregistered tool: %s", name);
             return;
         }
@@ -122,18 +132,14 @@ esp_err_t tool_registry_register_provider(const tool_provider_t *provider)
 {
     if (s_provider_count >= MAX_PROVIDERS) return ESP_ERR_NO_MEM;
     s_providers[s_provider_count++] = *provider;
+    invalidate_tools_cache();
     ESP_LOGI(TAG, "Registered provider: %s", provider->name);
     return ESP_OK;
 }
 
 void tool_registry_rebuild_json(void)
 {
-    // In provider model, we rebuild on get or invalidate cache here.
-    // For now, simple clear cache.
-    if (s_cached_json) {
-        free(s_cached_json);
-        s_cached_json = NULL;
-    }
+    invalidate_tools_cache();
 }
 
 const char *tool_registry_get_tools_json(void)
@@ -197,6 +203,7 @@ esp_err_t tool_registry_init(void)
 {
     s_tool_count = 0;
     s_provider_count = 0;
+    invalidate_tools_cache();
 
     /* Register Built-in Provider first */
     tool_registry_register_provider(&s_builtin_provider);
