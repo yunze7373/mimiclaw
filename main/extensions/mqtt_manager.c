@@ -266,7 +266,7 @@ esp_err_t mqtt_manager_start(void)
 esp_err_t mqtt_manager_publish(const char *topic, const char *payload, int qos, int retain)
 {
     if (s_client) {
-        esp_mqtt_client_publish(s_client, topic, payload, qos, retain);
+        esp_mqtt_client_publish(s_client, topic, payload, 0, qos, retain);
         return ESP_OK;
     }
     return ESP_FAIL;
