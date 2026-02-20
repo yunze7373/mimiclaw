@@ -6,10 +6,12 @@ cmake_minimum_required(VERSION 3.16)
 #   export ADF_PATH=~/esp/esp-adf
 #   export ESP_ZIGBEE_SDK_PATH=~/esp/esp-zigbee-sdk
 if(DEFINED ENV{ADF_PATH} AND EXISTS "$ENV{ADF_PATH}")
-    list(APPEND EXTRA_COMPONENT_DIRS
-        "$ENV{ADF_PATH}/components"
-        "$ENV{ADF_PATH}/extra_components"
-    )
+    if(EXISTS "$ENV{ADF_PATH}/components")
+        list(APPEND EXTRA_COMPONENT_DIRS "$ENV{ADF_PATH}/components")
+    endif()
+    if(EXISTS "$ENV{ADF_PATH}/extra_components")
+        list(APPEND EXTRA_COMPONENT_DIRS "$ENV{ADF_PATH}/extra_components")
+    endif()
 endif()
 
 if(DEFINED ENV{ESP_ZIGBEE_SDK_PATH} AND EXISTS "$ENV{ESP_ZIGBEE_SDK_PATH}")
