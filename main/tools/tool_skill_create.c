@@ -77,6 +77,14 @@ static bool has_unqualified_call(const char *code, const char *func_name)
 static const char *detect_unsupported_api(const char *code)
 {
     if (!code) return "empty skill code";
+    if (has_unqualified_call(code, "require")) return "unsupported global call 'require'";
+    if (has_unqualified_call(code, "dofile")) return "unsupported global call 'dofile'";
+    if (has_unqualified_call(code, "loadfile")) return "unsupported global call 'loadfile'";
+    if (has_unqualified_call(code, "loadstring")) return "unsupported global call 'loadstring'";
+    if (strstr(code, "package.")) return "unsupported namespace 'package'";
+    if (strstr(code, "os.")) return "unsupported namespace 'os'";
+    if (strstr(code, "io.")) return "unsupported namespace 'io'";
+    if (strstr(code, "debug.")) return "unsupported namespace 'debug'";
     if (strstr(code, "mimi.")) return "unsupported namespace 'mimi'";
     if (strstr(code, "rgb.")) return "unsupported namespace 'rgb'";
     if (strstr(code, "timer_start(") || strstr(code, ".timer_start(")) return "unsupported API 'timer_start'";

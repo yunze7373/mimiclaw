@@ -34,6 +34,11 @@ esp_err_t voice_manager_stop(void);
  */
 voice_state_t voice_manager_get_state(void);
 
+/**
+ * @brief Enable or disable VAD (Voice Activity Detection)
+ */
+esp_err_t voice_vad_enable(bool enable);
+
 #ifdef __cplusplus
 }
 #endif

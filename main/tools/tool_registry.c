@@ -368,7 +368,12 @@ esp_err_t tool_registry_init(void)
     mimi_tool_t sr = { "system_restart", "Restart system.", "{\"type\":\"object\",\"properties\":{},\"required\":[]}", tool_system_restart };
     tool_registry_register(&sr);
 
-    mimi_tool_t sc = { "skill_create", "Create a skill.", "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"code\":{\"type\":\"string\"}},\"required\":[\"name\",\"code\"]}", tool_skill_create_execute };
+    mimi_tool_t sc = {
+        "skill_create",
+        "Create/update a Lua skill for current sandbox runtime. Code must define SKILL and TOOLS and use only hw.*, console.log, agent.emit_event, struct.*. Forbidden: require/dofile/loadfile/loadstring, os.*, io.*, debug.*, package.*, mimi.*, rgb.*, and unqualified i2s_read/i2s_write. Prefer calling skill_list_templates and skill_get_template first, then adapt template.",
+        "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"code\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"},\"category\":{\"type\":\"string\"},\"type\":{\"type\":\"string\"},\"bus\":{\"type\":\"string\"}},\"required\":[\"name\",\"code\"]}",
+        tool_skill_create_execute
+    };
     tool_registry_register(&sc);
 
     mimi_tool_t slt = { "skill_list_templates", "List skill templates.", "{\"type\":\"object\",\"properties\":{},\"required\":[]}", tool_skill_list_templates_execute };

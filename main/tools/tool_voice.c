@@ -58,14 +58,28 @@ void register_voice_tools(void) {
     };
     static const mimi_tool_t tool_status = {
         .name = "voice_status",
-        .description = "Get current voice assistant state (idle, listening, processing, speaking).",
+        .description = "Get current voice assistant state (idle, listening, processing, speaking) and VAD status.",
         .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
         .execute = tool_voice_status,
+    };
+    static const mimi_tool_t tool_vad_en = {
+        .name = "voice_vad_enable",
+        .description = "Enable Hands-free Voice Activity Detection (VAD). Will automatically start listening when loud noise is detected.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
+        .execute = tool_vad_enable,
+    };
+    static const mimi_tool_t tool_vad_dis = {
+        .name = "voice_vad_disable",
+        .description = "Disable Hands-free Voice Activity Detection (VAD).",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{},\"required\":[]}",
+        .execute = tool_vad_disable,
     };
 
     tool_registry_register(&tool_start);
     tool_registry_register(&tool_stop);
     tool_registry_register(&tool_status);
+    tool_registry_register(&tool_vad_en);
+    tool_registry_register(&tool_vad_dis);
     
     ESP_LOGI(TAG, "Voice tools registered");
 }
