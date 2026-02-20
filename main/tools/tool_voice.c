@@ -43,6 +43,28 @@ static esp_err_t tool_voice_status(const char *args_json, char *result_buf, size
     return ESP_OK;
 }
 
+static esp_err_t tool_vad_enable(const char *args_json, char *result_buf, size_t result_size) {
+    (void)args_json;
+    esp_err_t err = voice_vad_enable(true);
+    if (err == ESP_OK) {
+        snprintf(result_buf, result_size, "{\"vad\": \"enabled\"}");
+    } else {
+        snprintf(result_buf, result_size, "{\"error\": \"%s\"}", esp_err_to_name(err));
+    }
+    return err;
+}
+
+static esp_err_t tool_vad_disable(const char *args_json, char *result_buf, size_t result_size) {
+    (void)args_json;
+    esp_err_t err = voice_vad_enable(false);
+    if (err == ESP_OK) {
+        snprintf(result_buf, result_size, "{\"vad\": \"disabled\"}");
+    } else {
+        snprintf(result_buf, result_size, "{\"error\": \"%s\"}", esp_err_to_name(err));
+    }
+    return err;
+}
+
 void register_voice_tools(void) {
     static const mimi_tool_t tool_start = {
         .name = "voice_start",

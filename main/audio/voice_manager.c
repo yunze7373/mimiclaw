@@ -16,6 +16,7 @@ static const char *TAG = "voice_mgr";
 
 static voice_state_t s_current_state = VOICE_STATE_IDLE;
 static TaskHandle_t s_voice_task = NULL;
+static bool s_vad_enabled = false;
 
 // Helper to set state
 static void set_state(voice_state_t new_state) {
@@ -174,4 +175,10 @@ esp_err_t voice_manager_stop(void) {
 
 voice_state_t voice_manager_get_state(void) {
     return s_current_state;
+}
+
+esp_err_t voice_vad_enable(bool enable) {
+    s_vad_enabled = enable;
+    ESP_LOGI(TAG, "VAD %s", s_vad_enabled ? "enabled" : "disabled");
+    return ESP_OK;
 }
