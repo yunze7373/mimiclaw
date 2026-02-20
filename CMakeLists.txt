@@ -2,6 +2,17 @@
 # CMakeLists in this exact order for cmake to work correctly
 cmake_minimum_required(VERSION 3.16)
 
+# ADF compatibility fallback for boards without SD 4-bit/CD/WP pin definitions.
+# -1 means "unused pin" in ESP-IDF SDMMC context.
+add_compile_definitions(
+    ESP_SD_PIN_D4=-1
+    ESP_SD_PIN_D5=-1
+    ESP_SD_PIN_D6=-1
+    ESP_SD_PIN_D7=-1
+    ESP_SD_PIN_CD=-1
+    ESP_SD_PIN_WP=-1
+)
+
 # Optional local SDK paths (set in shell):
 #   export ADF_PATH=~/esp/esp-adf
 #   export ESP_ZIGBEE_SDK_PATH=~/esp/esp-zigbee-sdk
