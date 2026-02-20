@@ -14,9 +14,10 @@ add_compile_definitions(
 )
 
 # Optional local SDK paths (set in shell):
+#   export MIMI_ENABLE_ADF=1
 #   export ADF_PATH=~/esp/esp-adf
 #   export ESP_ZIGBEE_SDK_PATH=~/esp/esp-zigbee-sdk
-if(DEFINED ENV{ADF_PATH} AND EXISTS "$ENV{ADF_PATH}")
+if(DEFINED ENV{MIMI_ENABLE_ADF} AND "$ENV{MIMI_ENABLE_ADF}" STREQUAL "1" AND DEFINED ENV{ADF_PATH} AND EXISTS "$ENV{ADF_PATH}")
     if(EXISTS "$ENV{ADF_PATH}/components")
         list(APPEND EXTRA_COMPONENT_DIRS "$ENV{ADF_PATH}/components")
     endif()

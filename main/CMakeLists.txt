@@ -2,7 +2,6 @@ idf_component_register(
     SRCS
         "mimi.c"
         "audio/audio.c"
-        "audio/audio_manager.c"
         "display/display.c"
         "display/Vernon_ST7789T/Vernon_ST7789T.c"
         "display/ssd1306.c"
@@ -37,7 +36,6 @@ idf_component_register(
         "tools/tool_skill_create.c"
         "tools/tool_skill_manage.c"
         "tools/tool_mcp.c"
-        "tools/tool_audio.c"
         "tools/api_manager.c"
         "skills/skill_engine.c"
         "skills/skill_hw_api.c"

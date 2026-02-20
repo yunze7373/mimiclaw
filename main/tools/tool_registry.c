@@ -8,7 +8,6 @@
 #include "tools/tool_skill_create.h"
 #include "tools/tool_skill_manage.h"
 #include "tools/tool_mcp.h"
-#include "tools/tool_audio.h"
 #include "llm/llm_proxy.h"
 
 #include <string.h>
@@ -384,9 +383,6 @@ esp_err_t tool_registry_init(void)
     tool_registry_register(&mcp_action);
     tool_registry_register(&mcp_action);
 #endif
-
-    // Register Audio Tools (Phase 16)
-    register_audio_tools();
 
     ESP_LOGI(TAG, "Tool registry initialized");
     return ESP_OK;
