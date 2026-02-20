@@ -272,10 +272,12 @@ void app_main(void)
                   mdns_service_init, mdns_service_start, NULL, mdns_deps);
 #endif
 
+#if CONFIG_MIMI_ENABLE_ZIGBEE
     // MQTT Manager (Phase 15)
     const char *mqtt_deps[] = {"wifi", "tool_reg", NULL};
     comp_register("mqtt_manager", COMP_LAYER_EXTENSION, false, true,
                   mqtt_manager_init, mqtt_manager_start, NULL, mqtt_deps);
+#endif
 
 #if CONFIG_MIMI_ENABLE_MCP
     const char *mcp_deps[] = {"wifi", "tool_reg", NULL};
