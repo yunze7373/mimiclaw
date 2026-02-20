@@ -13,6 +13,7 @@
 #include "federation/peer_manager.h"
 #include "discovery/mdns_service.h"
 #include "federation/peer_control.h"
+#include "system_manager.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -432,8 +433,6 @@ static int cmd_safe_reset(int argc, char **argv)
 }
 
 /* --- safe_status command --- */
-extern bool mimi_is_safe_mode(void);
-
 static int cmd_safe_status(int argc, char **argv)
 {
     nvs_handle_t nvs;
@@ -442,7 +441,7 @@ static int cmd_safe_status(int argc, char **argv)
         nvs_get_u8(nvs, "boot_cnt", &boot_cnt);
         nvs_close(nvs);
     }
-    printf("Safe mode: %s\n", mimi_is_safe_mode() ? "ACTIVE" : "inactive");
+    printf("Safe mode: %s\n", system_is_safe_mode() ? "ACTIVE" : "inactive");
     printf("Boot counter: %d/3\n", (int)boot_cnt);
     return 0;
 }
