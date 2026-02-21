@@ -39,8 +39,8 @@ esp_err_t tts_speak(const char *text) {
     const char *endpoint = llm_get_tts_endpoint();
 
     if (!text || strlen(text) == 0) return ESP_ERR_INVALID_ARG;
-    if (!api_key || strlen(api_key) == 0) {
-        ESP_LOGE(TAG, "Audio API key not configured");
+    if (!endpoint || strlen(endpoint) == 0) {
+        ESP_LOGE(TAG, "TTS endpoint not configured");
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -56,11 +56,12 @@ esp_err_t tts_speak(const char *text) {
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) return ESP_FAIL;
 
-    char auth_header[256];
-    snprintf(auth_header, sizeof(auth_header), "Bearer %s", api_key);
-
     esp_http_client_set_header(client, "Content-Type", "application/json");
-    esp_http_client_set_header(client, "Authorization", auth_header);
+    if (api_key && strlen(api_key) > 0) {
+        char auth_header[256];
+        snprintf(auth_header, sizeof(auth_header), "Bearer %s", api_key);
+        esp_http_client_set_header(client, "Authorization", auth_header);
+    }
 
     cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "model", "tts-1");

@@ -14,8 +14,8 @@ esp_err_t asr_recognize(const uint8_t *audio_data, size_t len, char **out_text) 
     const char *endpoint = llm_get_asr_endpoint();
 
     if (!audio_data || len == 0 || !out_text) return ESP_ERR_INVALID_ARG;
-    if (!api_key || strlen(api_key) == 0) {
-        ESP_LOGE(TAG, "Audio API key not configured");
+    if (!endpoint || strlen(endpoint) == 0) {
+        ESP_LOGE(TAG, "ASR endpoint not configured");
         return ESP_ERR_INVALID_STATE;
     }
     if (!endpoint || strlen(endpoint) == 0) {
@@ -40,11 +40,12 @@ esp_err_t asr_recognize(const uint8_t *audio_data, size_t len, char **out_text) 
     char content_type[128];
     snprintf(content_type, sizeof(content_type), "multipart/form-data; boundary=%s", boundary);
 
-    char auth_header[256];
-    snprintf(auth_header, sizeof(auth_header), "Bearer %s", api_key);
-
     esp_http_client_set_header(client, "Content-Type", content_type);
-    esp_http_client_set_header(client, "Authorization", auth_header);
+    if (api_key && strlen(api_key) > 0) {
+        char auth_header[256];
+        snprintf(auth_header, sizeof(auth_header), "Bearer %s", api_key);
+        esp_http_client_set_header(client, "Authorization", auth_header);
+    }
 
     // Build the payload
     // Part 1: model

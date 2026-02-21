@@ -2,7 +2,6 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/task.h"
 #include "mimi_config.h"
 
 // Check if ADF is available
@@ -46,7 +45,6 @@ static audio_event_iface_handle_t s_evt = NULL;
 static TaskHandle_t s_mp3_task = NULL;
 static volatile bool s_mp3_stop = false;
 static char *s_current_url = NULL;
-static mp3dec_t s_mp3d;
 #endif // MIMI_HAS_ADF
 
 static bool s_is_playing = false;
@@ -79,6 +77,16 @@ static audio_element_handle_t create_mp3_decoder(void)
 #endif
 
 #if !MIMI_HAS_ADF
+static bool wait_mp3_task_exit(uint32_t timeout_ms)
+{
+    uint32_t waited = 0;
+    while (s_mp3_task != NULL && waited < timeout_ms) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+        waited += 20;
+    }
+    return (s_mp3_task == NULL);
+}
+
 static void mp3_player_task(void *pvParameters)
 {
     ESP_LOGI(TAG, "Native MP3 player task started");
@@ -123,7 +131,8 @@ static void mp3_player_task(void *pvParameters)
     int content_length = esp_http_client_fetch_headers(client);
     ESP_LOGI(TAG, "HTTP stream opened, length: %d", content_length);
 
-    mp3dec_init(&s_mp3d);
+    mp3dec_t mp3d;
+    mp3dec_init(&mp3d);
     
     #define MP3_BUF_SIZE 16384
     uint8_t *in_buf = malloc(MP3_BUF_SIZE);
@@ -157,7 +166,7 @@ static void mp3_player_task(void *pvParameters)
 
         if (bytes_in_buf == 0 && eof) break; 
 
-        int samples = mp3dec_decode_frame(&s_mp3d, in_buf, bytes_in_buf, pcm, &info);
+        int samples = mp3dec_decode_frame(&mp3d, in_buf, bytes_in_buf, pcm, &info);
         
         if (info.frame_bytes > 0 && info.frame_bytes <= bytes_in_buf) {
             bytes_in_buf -= info.frame_bytes;
@@ -292,9 +301,19 @@ esp_err_t audio_manager_play_url(const char *url)
     s_is_playing = true;
     return ESP_OK;
 #else
+    // Stop old playback task first and wait for a clean handover.
+    if (s_mp3_task != NULL) {
+        s_mp3_stop = true;
+        if (!wait_mp3_task_exit(3000)) {
+            ESP_LOGE(TAG, "Previous MP3 task did not exit in time");
+            return ESP_ERR_TIMEOUT;
+        }
+    }
+
     s_mp3_stop = false;
     if (s_current_url) {
         free(s_current_url);
+        s_current_url = NULL;
     }
     s_current_url = strdup(url);
     if (!s_current_url) {
@@ -326,6 +345,11 @@ esp_err_t audio_manager_stop(void)
     if (s_is_playing) {
         ESP_LOGI(TAG, "Stopping playback");
         _audio_stop_pipeline();
+#if !MIMI_HAS_ADF
+        if (!wait_mp3_task_exit(3000)) {
+            ESP_LOGW(TAG, "MP3 task still running after stop timeout");
+        }
+#endif
     }
     return ESP_OK;
 }
