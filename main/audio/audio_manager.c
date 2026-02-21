@@ -108,7 +108,7 @@ static void mp3_player_task(void *pvParameters)
 
     mp3dec_init(&s_mp3d);
     
-    #define MP3_BUF_SIZE 4096
+    #define MP3_BUF_SIZE 16384
     uint8_t *in_buf = malloc(MP3_BUF_SIZE);
     short *pcm = malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(short) * 2);
     
@@ -142,7 +142,7 @@ static void mp3_player_task(void *pvParameters)
 
         int samples = mp3dec_decode_frame(&s_mp3d, in_buf, bytes_in_buf, pcm, &info);
         
-        if (info.frame_bytes > 0) {
+        if (info.frame_bytes > 0 && info.frame_bytes <= bytes_in_buf) {
             bytes_in_buf -= info.frame_bytes;
             memmove(in_buf, in_buf + info.frame_bytes, bytes_in_buf);
         } else if (info.frame_bytes == 0) {
