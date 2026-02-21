@@ -33,6 +33,19 @@ static audio_element_handle_t s_mp3_decoder = NULL;
 static audio_element_handle_t s_aac_decoder = NULL;
 static audio_element_handle_t s_wav_decoder = NULL;
 static audio_event_iface_handle_t s_evt = NULL;
+#else
+#include "audio.h"
+#include "esp_http_client.h"
+
+// MINIMP3_IMPLEMENTATION must be defined in exactly one C file
+#define MINIMP3_IMPLEMENTATION
+#include "minimp3.h"
+#include <string.h>
+
+static TaskHandle_t s_mp3_task = NULL;
+static volatile bool s_mp3_stop = false;
+static char *s_current_url = NULL;
+static mp3dec_t s_mp3d;
 #endif // MIMI_HAS_ADF
 
 static bool s_is_playing = false;
@@ -63,6 +76,114 @@ static audio_element_handle_t create_mp3_decoder(void)
     return mp3_decoder_init(&mp3_cfg);
 }
 #endif
+
+#if !MIMI_HAS_ADF
+static void mp3_player_task(void *pvParameters)
+{
+    ESP_LOGI(TAG, "Native MP3 player task started");
+    s_is_playing = true;
+    
+    esp_http_client_config_t config = {
+        .url = s_current_url,
+        .buffer_size = 4096,
+        .timeout_ms = 10000,
+        .cert_pem = NULL, 
+    };
+    
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) {
+        ESP_LOGE(TAG, "Failed to init HTTP client");
+        goto cleanup;
+    }
+
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
+        goto cleanup_client;
+    }
+    
+    int content_length = esp_http_client_fetch_headers(client);
+    ESP_LOGI(TAG, "HTTP stream opened, length: %d", content_length);
+
+    mp3dec_init(&s_mp3d);
+    
+    #define MP3_BUF_SIZE 4096
+    uint8_t *in_buf = malloc(MP3_BUF_SIZE);
+    short *pcm = malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(short) * 2);
+    
+    if (!in_buf || !pcm) {
+        ESP_LOGE(TAG, "Failed to allocate MP3 buffers");
+        if(in_buf) free(in_buf);
+        if(pcm) free(pcm);
+        goto cleanup_client;
+    }
+
+    int bytes_in_buf = 0;
+    bool eof = false;
+    bool rate_set = false;
+    mp3dec_frame_info_t info;
+
+    while (!s_mp3_stop && !eof) {
+        if (bytes_in_buf < MP3_BUF_SIZE / 2) {
+            int to_read = MP3_BUF_SIZE - bytes_in_buf;
+            int read_len = esp_http_client_read(client, (char*)in_buf + bytes_in_buf, to_read);
+            if (read_len < 0) {
+                ESP_LOGE(TAG, "HTTP read error");
+                break;
+            } else if (read_len == 0) {
+                eof = true;
+            } else {
+                bytes_in_buf += read_len;
+            }
+        }
+
+        if (bytes_in_buf == 0 && eof) break; 
+
+        int samples = mp3dec_decode_frame(&s_mp3d, in_buf, bytes_in_buf, pcm, &info);
+        
+        if (info.frame_bytes > 0) {
+            bytes_in_buf -= info.frame_bytes;
+            memmove(in_buf, in_buf + info.frame_bytes, bytes_in_buf);
+        } else if (info.frame_bytes == 0) {
+            if (eof) break;
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+
+        if (samples > 0) {
+            if (!rate_set) {
+                ESP_LOGI(TAG, "MP3 format: %d Hz, %d channels", info.hz, info.channels);
+                audio_set_sample_rate(info.hz);
+                rate_set = true;
+            }
+            
+            if (info.channels == 2) {
+                for (int i = 0; i < samples; i++) {
+                    pcm[i] = (short)(((int)pcm[i*2] + (int)pcm[i*2 + 1]) / 2);
+                }
+            }
+            audio_speaker_write((uint8_t*)pcm, samples * sizeof(short));
+        }
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+
+    free(in_buf);
+    free(pcm);
+
+cleanup_client:
+    esp_http_client_cleanup(client);
+    
+cleanup:
+    ESP_LOGI(TAG, "MP3 player task finished");
+    if (s_current_url) {
+        free(s_current_url);
+        s_current_url = NULL;
+    }
+    s_is_playing = false;
+    s_mp3_task = NULL;
+    vTaskDelete(NULL);
+}
+#endif // !MIMI_HAS_ADF
 
 esp_err_t audio_manager_init(void)
 {
@@ -113,7 +234,7 @@ esp_err_t audio_manager_init(void)
     s_evt = audio_event_iface_init(&evt_cfg);
     audio_pipeline_set_listener(s_pipeline, s_evt);
 #else
-    ESP_LOGW(TAG, "Audio Manager: ESP-ADF not present. Functionality disabled.");
+    ESP_LOGI(TAG, "Audio Manager: Native MP3 streaming enabled via minimp3.");
 #endif
     return ESP_OK;
 }
@@ -125,6 +246,11 @@ static void _audio_stop_pipeline(void)
     audio_pipeline_wait_for_stop(s_pipeline);
     audio_pipeline_terminate(s_pipeline);
     audio_pipeline_unlink(s_pipeline);
+#else
+    if (s_mp3_task != NULL) {
+        s_mp3_stop = true;
+        // The background task will stop on the next iteration and clear playing state.
+    }
 #endif
     s_is_playing = false;
 }
@@ -150,8 +276,20 @@ esp_err_t audio_manager_play_url(const char *url)
     s_is_playing = true;
     return ESP_OK;
 #else
-    ESP_LOGE(TAG, "Audio Playback failed: ADF missing");
-    return ESP_ERR_NOT_SUPPORTED;
+    s_mp3_stop = false;
+    if (s_current_url) {
+        free(s_current_url);
+    }
+    s_current_url = strdup(url);
+    
+    if (xTaskCreate(mp3_player_task, "mp3_player", 16384, NULL, 5, &s_mp3_task) == pdPASS) {
+        return ESP_OK;
+    } else {
+        ESP_LOGE(TAG, "Failed to create mp3_player task");
+        free(s_current_url);
+        s_current_url = NULL;
+        return ESP_FAIL;
+    }
 #endif
 }
 
