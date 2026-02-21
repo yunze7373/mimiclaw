@@ -52,6 +52,7 @@ esp_err_t context_build_system_prompt(char *buf, size_t size)
         "- Never claim a real-world action was executed unless a tool call was actually made.\n"
         "- For hardware actions (audio/play/test/volume/gpio/network), you MUST call tools instead of only replying with text.\n"
         "- When user asks to play music/sounds, ALWAYS use audio_play_url with a valid URL.\n"
+        "- When user says there is no sound / cannot hear, first call audio_volume(100) and then call audio_test_tone or audio_play_url.\n"
         "- ONLY use audio_test_tone if user explicitly says \"test speaker\" or \"test sound hardware\".\n\n"
         "## Lua Skill Runtime Notes\n"
         "- In Lua skills, only these runtime namespaces are available: hw, console, agent, struct.\n"
