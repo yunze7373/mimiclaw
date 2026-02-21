@@ -14,6 +14,7 @@ static led_strip_handle_t s_strip = NULL;
 /* Breathing effect state */
 static TaskHandle_t s_breathing_task = NULL;
 static uint32_t s_breath_period_ms;
+static volatile bool s_breathing_active = false;
 
 static void hsv_to_rgb(float h_deg, float s, float v, uint8_t *r, uint8_t *g, uint8_t *b)
 {
@@ -50,7 +51,7 @@ static void rgb_breathing_task(void *arg)
     /* Full hue cycle in about 6 seconds (50Hz -> ~300 ticks). */
     const float hue_step = 360.0f / 300.0f;
 
-    while (1) {
+    while (s_breathing_active) {
         // Calculate brightness multiplier using sine wave (0.0 to 1.0)
         float brightness = (sinf(phase) + 1.0f) / 2.0f;
         
@@ -60,7 +61,7 @@ static void rgb_breathing_task(void *arg)
         uint8_t r, g, b;
         hsv_to_rgb(hue_deg, 1.0f, brightness, &r, &g, &b);
 
-        // Update hardware directly (bypassing rgb_set lazy init since task implies init is done)
+        // Update hardware directly
         if (s_strip) {
             led_strip_set_pixel(s_strip, 0, g, r, b); // Swap R/G
             led_strip_refresh(s_strip);
@@ -77,6 +78,9 @@ static void rgb_breathing_task(void *arg)
 
         vTaskDelay(pdMS_TO_TICKS(20)); // Update at 50Hz for smooth breathing
     }
+    
+    s_breathing_task = NULL;
+    vTaskDelete(NULL);
 }
 
 esp_err_t rgb_init(void)
@@ -132,14 +136,25 @@ void rgb_start_breathing(uint8_t r, uint8_t g, uint8_t b, uint32_t period_ms)
     s_breath_period_ms = period_ms > 100 ? period_ms : 1000; // minimum 100ms
 
     if (s_breathing_task == NULL) {
-        xTaskCreate(rgb_breathing_task, "rgb_breath", 2048, NULL, 5, &s_breathing_task);
+        s_breathing_active = true;
+        xTaskCreate(rgb_breathing_task, "rgb_breath", 4096, NULL, 5, &s_breathing_task);
     }
 }
 
 void rgb_stop_breathing(void)
 {
-    if (s_breathing_task != NULL) {
-        vTaskDelete(s_breathing_task);
-        s_breathing_task = NULL;
+    if (s_breathing_active && s_breathing_task != NULL) {
+        s_breathing_active = false;
+        // Wait up to ~40ms for task to exit its 20ms delay loop gracefully
+        for(int i=0; i<4; i++) {
+            if (s_breathing_task == NULL) break;
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        
+        if (s_breathing_task != NULL) {
+            // Force delete if it somehow gets stuck, to prevent deadlock
+            vTaskDelete(s_breathing_task);
+            s_breathing_task = NULL;
+        }
     }
 }
