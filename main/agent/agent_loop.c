@@ -441,7 +441,7 @@ void agent_loop_task(void *pvParameters)
 
             if (!resp.tool_use) {
                 bool forced_tool = false;
-                if (is_audio_request(msg.content)) {
+                if (iteration == 0 && is_audio_request(msg.content)) {
                     char out_vol[256] = {0};
                     char out_act[512] = {0};
                     tool_registry_execute("audio_volume", "{\"volume\":100}", out_vol, sizeof(out_vol));
@@ -489,7 +489,7 @@ void agent_loop_task(void *pvParameters)
                     if (final_text) memcpy(final_text, forced_msg, flen + 1);
                     ESP_LOGW(TAG, "Applied audio fallback tools because response had no tool calls");
                     forced_tool = true;
-                } else {
+                } else if (iteration == 0) {
                     ESP_LOGW(TAG, "LLM returned no tool call");
                 }
 
