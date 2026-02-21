@@ -1,7 +1,5 @@
 #include "agent_loop.h"
 #include "agent/context_builder.h"
-#include "agent_loop.h"
-#include "agent/context_builder.h"
 #include "mimi_config.h"
 #include "bus/message_bus.h"
 #include "llm/llm_proxy.h"
@@ -491,6 +489,8 @@ void agent_loop_task(void *pvParameters)
         log_heap_snapshot("after_message");
     }
 }
+
+esp_err_t agent_loop_init(void)
 {
     ESP_LOGI(TAG, "Agent loop initialized");
     return ESP_OK;
