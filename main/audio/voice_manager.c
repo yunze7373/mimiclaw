@@ -15,7 +15,7 @@ esp_err_t tts_speak(const char *text);
 #include <math.h>
 
 // Configurable VAD params
-#define VAD_ENERGY_THRESHOLD 25000  // Adjust this based on mic sensitivity
+#define VAD_ENERGY_THRESHOLD 3000  // Normal talking is ~1000-5000 RMS
 #define VAD_DURATION_MS 300 // Duration of loud noise to trigger wake
 
 static const char *TAG = "voice_mgr";
@@ -97,6 +97,7 @@ static void voice_task(void *arg) {
             // Optional: Start a beep here to indicate listening
 
             uint64_t start_time = esp_timer_get_time() / 1000ULL;
+            audio_mic_start();
             while (s_current_state == VOICE_STATE_LISTENING && total_read < max_capture_size) {
                 int chunk_read = audio_mic_read(audio_buf + total_read, 1024);
                 if (chunk_read > 0) {
@@ -109,6 +110,7 @@ static void voice_task(void *arg) {
                      break; // Safety timeout
                 }
             }
+            audio_mic_stop();
             
             ESP_LOGI(TAG, "Captured %d bytes of audio", total_read);
 
@@ -163,14 +165,21 @@ static void vad_task(void *arg) {
 
     uint32_t active_ticks = 0;
     const uint32_t required_ticks = VAD_DURATION_MS / 10; // Assuming ~10ms per loop
+    bool last_vad_enabled = false;
 
     while (1) {
         if (!s_vad_enabled || s_current_state != VOICE_STATE_IDLE) {
+            if (last_vad_enabled && !s_vad_enabled && s_current_state == VOICE_STATE_IDLE) {
+                audio_mic_stop();
+            }
+            last_vad_enabled = s_vad_enabled;
             vTaskDelay(pdMS_TO_TICKS(100));
             active_ticks = 0;
             continue;
         }
+        last_vad_enabled = s_vad_enabled;
 
+        audio_mic_start();
         // Try to read a small chunk from mic
         int read_bytes = audio_mic_read((uint8_t*)buf, chunk_size);
         if (read_bytes > 0) {
