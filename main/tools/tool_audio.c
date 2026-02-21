@@ -95,7 +95,6 @@ static esp_err_t tool_audio_test(const char *input, char *output, size_t out_len
     
     extern esp_err_t audio_init(void);
     extern esp_err_t audio_speaker_start(void);
-    extern esp_err_t audio_speaker_stop(void);
     extern esp_err_t audio_speaker_write(const uint8_t *data, size_t len);
     
     audio_init();
@@ -132,7 +131,6 @@ static esp_err_t tool_audio_test(const char *input, char *output, size_t out_len
     }
     
     free(buf);
-    audio_speaker_stop();
     snprintf(output, out_len, "Test tone played (%d Hz, %d ms)", freq, duration_ms);
     return ESP_OK;
 }

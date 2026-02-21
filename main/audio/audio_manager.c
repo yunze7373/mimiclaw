@@ -45,10 +45,6 @@ static audio_event_iface_handle_t s_evt = NULL;
 static TaskHandle_t s_mp3_task = NULL;
 static volatile bool s_mp3_stop = false;
 static char *s_current_url = NULL;
-
-// External declarations for audio control
-extern esp_err_t audio_speaker_stop(void);
-extern esp_err_t audio_speaker_start(void);
 #endif // MIMI_HAS_ADF
 
 static bool s_is_playing = false;
@@ -135,8 +131,12 @@ static void mp3_player_task(void *pvParameters)
     int content_length = esp_http_client_fetch_headers(client);
     ESP_LOGI(TAG, "HTTP stream opened, length: %d", content_length);
 
-    mp3dec_t mp3d;
-    mp3dec_init(&mp3d);
+    mp3dec_t *mp3d = calloc(1, sizeof(mp3dec_t));
+    if (!mp3d) {
+        ESP_LOGE(TAG, "Failed to allocate MP3 decoder");
+        goto cleanup_client;
+    }
+    mp3dec_init(mp3d);
     
     #define MP3_BUF_SIZE 16384
     uint8_t *in_buf = malloc(MP3_BUF_SIZE);
@@ -144,6 +144,7 @@ static void mp3_player_task(void *pvParameters)
     
     if (!in_buf || !pcm) {
         ESP_LOGE(TAG, "Failed to allocate MP3 buffers");
+        if(mp3d) free(mp3d);
         if(in_buf) free(in_buf);
         if(pcm) free(pcm);
         goto cleanup_client;
@@ -170,7 +171,7 @@ static void mp3_player_task(void *pvParameters)
 
         if (bytes_in_buf == 0 && eof) break; 
 
-        int samples = mp3dec_decode_frame(&mp3d, in_buf, bytes_in_buf, pcm, &info);
+        int samples = mp3dec_decode_frame(mp3d, in_buf, bytes_in_buf, pcm, &info);
         
         if (info.frame_bytes > 0 && info.frame_bytes <= bytes_in_buf) {
             bytes_in_buf -= info.frame_bytes;
@@ -185,22 +186,29 @@ static void mp3_player_task(void *pvParameters)
             if (!rate_set) {
                 ESP_LOGI(TAG, "MP3 format: %d Hz, %d channels", info.hz, info.channels);
                 audio_set_sample_rate(info.hz);
-                // Give I2S time to adapt to new sample rate
-                vTaskDelay(pdMS_TO_TICKS(50));
                 rate_set = true;
             }
-            
+
             if (info.channels == 2) {
                 for (int i = 0; i < samples; i++) {
                     pcm[i] = (short)(((int)pcm[i*2] + (int)pcm[i*2 + 1]) / 2);
                 }
             }
-            audio_speaker_write((uint8_t*)pcm, samples * sizeof(short));
+
+            // Ensure speaker is started before writing
+            extern esp_err_t audio_speaker_start(void);
+            audio_speaker_start();
+
+            esp_err_t wr_err = audio_speaker_write((uint8_t*)pcm, samples * sizeof(short));
+            if (wr_err != ESP_OK) {
+                ESP_LOGW(TAG, "Speaker write error: %s", esp_err_to_name(wr_err));
+            }
         }
         // Yield enough time for Wi-Fi and LwIP to process packets to avoid connection drops
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 
+    if(mp3d) free(mp3d);
     free(in_buf);
     free(pcm);
 
@@ -288,16 +296,16 @@ static void _audio_stop_pipeline(void)
 
 esp_err_t audio_manager_play_url(const char *url)
 {
-    // Ensure I2S is in a clean state before starting new playback
-    // This handles the case where audio_test_tone was used directly
+    // Ensure previous playback is stopped cleanly
     if (s_is_playing) {
         _audio_stop_pipeline();
+        // Give time for previous task to fully exit
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 
-    // Force speaker to stop and re-init to ensure clean state
-    // This is needed because tool_audio_test may have left I2S in inconsistent state
-    audio_speaker_stop();
-    vTaskDelay(pdMS_TO_TICKS(50));  // Give I2S time to fully stop
+    // Ensure speaker is started before creating playback task
+    // audio_speaker_start is idempotent - safe to call multiple times
+    extern esp_err_t audio_speaker_start(void);
     audio_speaker_start();
 
     ESP_LOGI(TAG, "Playing URL: %s", url);
