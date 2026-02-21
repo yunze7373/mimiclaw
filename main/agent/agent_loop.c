@@ -1,5 +1,7 @@
 #include "agent_loop.h"
 #include "agent/context_builder.h"
+#include "agent_loop.h"
+#include "agent/context_builder.h"
 #include "mimi_config.h"
 #include "bus/message_bus.h"
 #include "llm/llm_proxy.h"
@@ -8,6 +10,7 @@
 #include "telegram/telegram_bot.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "rgb/rgb.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -268,6 +271,8 @@ void agent_loop_task(void *pvParameters)
 
         ESP_LOGI(TAG, "Processing message from %s:%s", msg.channel, msg.chat_id);
 
+        /* Set RGB LED to Cyan (R=0, G=128, B=255) to indicate thinking state */
+        rgb_set(0, 128, 255);
 
         /* 1. Build system prompt */
         context_build_system_prompt(system_prompt, MIMI_CONTEXT_BUF_SIZE);
@@ -479,12 +484,13 @@ void agent_loop_task(void *pvParameters)
         /* Free inbound message content */
         free(msg.content);
 
+        /* Turn off RGB LED to indicate idle state */
+        rgb_set(0, 0, 0);
+
         /* Log memory status */
         log_heap_snapshot("after_message");
     }
 }
-
-esp_err_t agent_loop_init(void)
 {
     ESP_LOGI(TAG, "Agent loop initialized");
     return ESP_OK;
