@@ -4,6 +4,7 @@
 #include "freertos/task.h"
 #include "mimi_config.h"
 #include "esp_heap_caps.h"
+#include <ctype.h>
 
 // Check if ADF is available
 #if __has_include("audio_pipeline.h")
@@ -50,6 +51,28 @@ static char *s_current_url = NULL;
 
 static bool s_is_playing = false;
 static int s_volume = 60;
+
+#if !MIMI_HAS_ADF
+static bool str_contains_ci(const char *haystack, const char *needle)
+{
+    if (!haystack || !needle || !needle[0]) return false;
+    size_t nlen = strlen(needle);
+    for (const char *p = haystack; *p; p++) {
+        size_t i = 0;
+        while (i < nlen && p[i] &&
+               tolower((unsigned char)p[i]) == tolower((unsigned char)needle[i])) {
+            i++;
+        }
+        if (i == nlen) return true;
+    }
+    return false;
+}
+
+static bool url_seems_mp3(const char *url)
+{
+    return str_contains_ci(url, ".mp3");
+}
+#endif
 
 #if MIMI_HAS_ADF
 // Internal: Create I2S Stream Writer (Speaker)
@@ -345,6 +368,11 @@ esp_err_t audio_manager_play_url(const char *url)
     s_is_playing = true;
     return ESP_OK;
 #else
+    if (!url || !url_seems_mp3(url)) {
+        ESP_LOGE(TAG, "Only MP3 URLs are supported in native mode: %s", url ? url : "(null)");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     // Stop old playback task first and wait for a clean handover.
     if (s_mp3_task != NULL) {
         s_mp3_stop = true;
