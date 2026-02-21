@@ -190,30 +190,38 @@ static void stream_flush(agent_stream_ctx_t *ctx)
 static void stream_token_cb(const char *token, void *arg)
 {
     agent_stream_ctx_t *ctx = (agent_stream_ctx_t *)arg;
-    
+    if (!ctx || !token) return;
+
     size_t tlen = strlen(token);
-    /* Flush if buffer full or large enough to send */
-    /* Lower threshold to 20 bytes for better responsiveness, 
-       or flush immediately if token contains newline */
+    /* Flush if buffer full or large enough to send.
+     * Lower threshold to 20 bytes for better responsiveness,
+     * or flush immediately if token contains newline. */
     if (ctx->len + tlen >= sizeof(ctx->buf) - 1 || ctx->len > 32 || strchr(token, '\n')) {
         stream_flush(ctx);
     }
 
-    /* Append to buffer */
-    if (tlen < sizeof(ctx->buf)) {
-        strcat(ctx->buf, token);
-        ctx->len += tlen;
-    } else {
-        /* Giant token */
-        if (ctx->len > 0) stream_flush(ctx);
-        strncpy(ctx->buf, token, sizeof(ctx->buf)-1);
-        ctx->len = strlen(ctx->buf);
-        stream_flush(ctx);
-    }
-    
-    /* Also flush if buffer has accumulated significant data even if not full */
-    if (ctx->len > 20) {
-        stream_flush(ctx);
+    /* Append token in bounded chunks.
+     * Avoid strcat/strlen on potentially unterminated/truncated data. */
+    const char *p = token;
+    size_t remaining = tlen;
+    while (remaining > 0) {
+        size_t space = (sizeof(ctx->buf) - 1) - ctx->len;
+        if (space == 0) {
+            stream_flush(ctx);
+            space = (sizeof(ctx->buf) - 1);
+        }
+
+        size_t n = (remaining < space) ? remaining : space;
+        memcpy(ctx->buf + ctx->len, p, n);
+        ctx->len += n;
+        ctx->buf[ctx->len] = '\0';
+        p += n;
+        remaining -= n;
+
+        /* Keep latency low for UI token rendering */
+        if (ctx->len > 20 || remaining > 0) {
+            stream_flush(ctx);
+        }
     }
 }
 

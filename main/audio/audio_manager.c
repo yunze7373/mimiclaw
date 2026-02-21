@@ -83,9 +83,18 @@ static void mp3_player_task(void *pvParameters)
 {
     ESP_LOGI(TAG, "Native MP3 player task started");
     s_is_playing = true;
+
+    char *url_snapshot = NULL;
+    if (s_current_url) {
+        url_snapshot = strdup(s_current_url);
+    }
+    if (!url_snapshot) {
+        ESP_LOGE(TAG, "No URL to play");
+        goto cleanup;
+    }
     
     esp_http_client_config_t config = {
-        .url = s_current_url,
+        .url = url_snapshot,
         .buffer_size = 4096,
         .timeout_ms = 10000,
         .crt_bundle_attach = esp_crt_bundle_attach,
@@ -177,10 +186,7 @@ cleanup_client:
     
 cleanup:
     ESP_LOGI(TAG, "MP3 player task finished");
-    if (s_current_url) {
-        free(s_current_url);
-        s_current_url = NULL;
-    }
+    if (url_snapshot) free(url_snapshot);
     s_is_playing = false;
     s_mp3_task = NULL;
     vTaskDelete(NULL);
@@ -283,6 +289,10 @@ esp_err_t audio_manager_play_url(const char *url)
         free(s_current_url);
     }
     s_current_url = strdup(url);
+    if (!s_current_url) {
+        ESP_LOGE(TAG, "Failed to allocate URL");
+        return ESP_ERR_NO_MEM;
+    }
     
     // Lower priority to 3 so it doesn't starve the LwIP/Wi-Fi stack
     if (xTaskCreate(mp3_player_task, "mp3_player", 16384, NULL, 3, &s_mp3_task) == pdPASS) {
