@@ -12,6 +12,7 @@
 #include "tools/tool_skill_manage.h"
 #include "tools/tool_mcp.h"
 #include "tools/tool_voice.h"
+#include "tools/tool_audio.h"
 #include "llm/llm_proxy.h"
 
 #include <string.h>
@@ -402,6 +403,7 @@ esp_err_t tool_registry_init(void)
 
     // Audio Voice Tools
     register_voice_tools();
+    register_audio_tools();
 
     ESP_LOGI(TAG, "Tool registry initialized");
     return ESP_OK;
