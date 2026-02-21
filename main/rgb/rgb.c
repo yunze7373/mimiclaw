@@ -13,13 +13,42 @@ static led_strip_handle_t s_strip = NULL;
 
 /* Breathing effect state */
 static TaskHandle_t s_breathing_task = NULL;
-static uint8_t s_breath_r, s_breath_g, s_breath_b;
 static uint32_t s_breath_period_ms;
+
+static void hsv_to_rgb(float h_deg, float s, float v, uint8_t *r, uint8_t *g, uint8_t *b)
+{
+    float c = v * s;
+    float h = h_deg / 60.0f;
+    float x = c * (1.0f - fabsf(fmodf(h, 2.0f) - 1.0f));
+    float m = v - c;
+    float rf = 0.0f, gf = 0.0f, bf = 0.0f;
+
+    if (h < 1.0f) {
+        rf = c; gf = x; bf = 0.0f;
+    } else if (h < 2.0f) {
+        rf = x; gf = c; bf = 0.0f;
+    } else if (h < 3.0f) {
+        rf = 0.0f; gf = c; bf = x;
+    } else if (h < 4.0f) {
+        rf = 0.0f; gf = x; bf = c;
+    } else if (h < 5.0f) {
+        rf = x; gf = 0.0f; bf = c;
+    } else {
+        rf = c; gf = 0.0f; bf = x;
+    }
+
+    *r = (uint8_t)((rf + m) * 255.0f);
+    *g = (uint8_t)((gf + m) * 255.0f);
+    *b = (uint8_t)((bf + m) * 255.0f);
+}
 
 static void rgb_breathing_task(void *arg)
 {
     float phase = 0.0f;
     const float step = (2.0f * M_PI) / (s_breath_period_ms / 20.0f); // 20ms tick
+    float hue_deg = 0.0f;
+    /* Full hue cycle in about 6 seconds (50Hz -> ~300 ticks). */
+    const float hue_step = 360.0f / 300.0f;
 
     while (1) {
         // Calculate brightness multiplier using sine wave (0.0 to 1.0)
@@ -28,9 +57,8 @@ static void rgb_breathing_task(void *arg)
         // Apply minimum brightness to avoid completely turning off (e.g. 5%)
         brightness = 0.05f + (brightness * 0.95f);
 
-        uint8_t r = (uint8_t)(s_breath_r * brightness);
-        uint8_t g = (uint8_t)(s_breath_g * brightness);
-        uint8_t b = (uint8_t)(s_breath_b * brightness);
+        uint8_t r, g, b;
+        hsv_to_rgb(hue_deg, 1.0f, brightness, &r, &g, &b);
 
         // Update hardware directly (bypassing rgb_set lazy init since task implies init is done)
         if (s_strip) {
@@ -41,6 +69,10 @@ static void rgb_breathing_task(void *arg)
         phase += step;
         if (phase >= 2.0f * M_PI) {
             phase -= 2.0f * M_PI;
+        }
+        hue_deg += hue_step;
+        if (hue_deg >= 360.0f) {
+            hue_deg -= 360.0f;
         }
 
         vTaskDelay(pdMS_TO_TICKS(20)); // Update at 50Hz for smooth breathing
@@ -94,9 +126,9 @@ void rgb_start_breathing(uint8_t r, uint8_t g, uint8_t b, uint32_t period_ms)
         }
     }
 
-    s_breath_r = r;
-    s_breath_g = g;
-    s_breath_b = b;
+    (void)r;
+    (void)g;
+    (void)b;
     s_breath_period_ms = period_ms > 100 ? period_ms : 1000; // minimum 100ms
 
     if (s_breathing_task == NULL) {

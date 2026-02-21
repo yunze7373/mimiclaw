@@ -269,8 +269,8 @@ void agent_loop_task(void *pvParameters)
 
         ESP_LOGI(TAG, "Processing message from %s:%s", msg.channel, msg.chat_id);
 
-        /* Set RGB LED to Cyan (R=0, G=128, B=255) to indicate thinking state */
-        rgb_set(0, 128, 255);
+        /* Breathing RGB effect while agent is processing */
+        rgb_start_breathing(0, 128, 255, 1800);
 
         /* 1. Build system prompt */
         context_build_system_prompt(system_prompt, MIMI_CONTEXT_BUF_SIZE);
@@ -482,7 +482,8 @@ void agent_loop_task(void *pvParameters)
         /* Free inbound message content */
         free(msg.content);
 
-        /* Turn off RGB LED to indicate idle state */
+        /* Stop breathing and turn off RGB LED when idle */
+        rgb_stop_breathing();
         rgb_set(0, 0, 0);
 
         /* Log memory status */
