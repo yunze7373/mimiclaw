@@ -141,13 +141,15 @@ static void mp3_player_task(void *pvParameters)
     
     #define MP3_BUF_SIZE 16384
     uint8_t *in_buf = malloc(MP3_BUF_SIZE);
-    short *pcm = malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(short) * 2);
+    int16_t *pcm_raw = malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(int16_t));
+    int16_t *pcm_mono = malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(int16_t));
     
-    if (!in_buf || !pcm) {
+    if (!in_buf || !pcm_raw || !pcm_mono) {
         ESP_LOGE(TAG, "Failed to allocate MP3 buffers");
         if(mp3d) free(mp3d);
         if(in_buf) free(in_buf);
-        if(pcm) free(pcm);
+        if(pcm_raw) free(pcm_raw);
+        if(pcm_mono) free(pcm_mono);
         goto cleanup_client;
     }
 
@@ -175,7 +177,7 @@ static void mp3_player_task(void *pvParameters)
 
         if (bytes_in_buf == 0 && eof) break; 
 
-        int samples = mp3dec_decode_frame(mp3d, in_buf, bytes_in_buf, pcm, &info);
+        int samples = mp3dec_decode_frame(mp3d, in_buf, bytes_in_buf, pcm_raw, &info);
         
         if (info.frame_bytes > 0 && info.frame_bytes <= bytes_in_buf) {
             bytes_in_buf -= info.frame_bytes;
@@ -193,17 +195,32 @@ static void mp3_player_task(void *pvParameters)
                 rate_set = true;
             }
 
+            int mono_samples = samples;
+            const int max_samples = MINIMP3_MAX_SAMPLES_PER_FRAME;
+            if (mono_samples > max_samples) mono_samples = max_samples;
+
             if (info.channels == 2) {
-                for (int i = 0; i < samples; i++) {
-                    pcm[i] = (short)(((int)pcm[i*2] + (int)pcm[i*2 + 1]) / 2);
+                /* minimp3 sample count can vary by integration; keep strictly bounded */
+                if (mono_samples > max_samples / 2) {
+                    mono_samples = mono_samples / 2;
                 }
+                for (int i = 0; i < mono_samples; i++) {
+                    int idx = i * 2;
+                    pcm_mono[i] = (int16_t)(((int)pcm_raw[idx] + (int)pcm_raw[idx + 1]) / 2);
+                }
+            } else if (info.channels == 1) {
+                memcpy(pcm_mono, pcm_raw, (size_t)mono_samples * sizeof(int16_t));
+            } else {
+                ESP_LOGW(TAG, "Unsupported channel count: %d", info.channels);
+                vTaskDelay(pdMS_TO_TICKS(5));
+                continue;
             }
 
             // Ensure speaker is started before writing
             extern esp_err_t audio_speaker_start(void);
             audio_speaker_start();
 
-            esp_err_t wr_err = audio_speaker_write((uint8_t*)pcm, samples * sizeof(short));
+            esp_err_t wr_err = audio_speaker_write((uint8_t*)pcm_mono, (size_t)mono_samples * sizeof(int16_t));
             if (wr_err != ESP_OK) {
                 ESP_LOGW(TAG, "Speaker write error: %s", esp_err_to_name(wr_err));
             }
@@ -214,7 +231,8 @@ static void mp3_player_task(void *pvParameters)
 
     if(mp3d) free(mp3d);
     free(in_buf);
-    free(pcm);
+    free(pcm_raw);
+    free(pcm_mono);
 
 cleanup_client:
     esp_http_client_cleanup(client);

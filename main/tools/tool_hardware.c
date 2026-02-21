@@ -244,12 +244,8 @@ esp_err_t tool_system_status(const char *input, char *output, size_t out_len) {
     cJSON_AddNumberToObject(root, "total_heap_psram", psram_total);
     cJSON_AddNumberToObject(root, "min_free_heap", esp_get_minimum_free_heap_size());
 
-    /* Largest free block */
-    multi_heap_info_t info;
-    heap_caps_get_info(&info, MALLOC_CAP_INTERNAL);
-    cJSON_AddNumberToObject(root, "largest_free_block", info.largest_free_block);
-    cJSON_AddNumberToObject(root, "allocated_blocks", info.allocated_blocks);
-    cJSON_AddNumberToObject(root, "free_blocks", info.free_blocks);
+    /* Avoid deep heap walk here; it can crash if heap metadata was previously corrupted. */
+    cJSON_AddNumberToObject(root, "largest_free_block", heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
 
     /* Temp */
     cJSON_AddNumberToObject(root, "cpu_temp_c", get_cpu_temp());
