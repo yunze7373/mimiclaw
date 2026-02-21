@@ -36,6 +36,7 @@ static audio_event_iface_handle_t s_evt = NULL;
 #else
 #include "audio.h"
 #include "esp_http_client.h"
+#include "esp_crt_bundle.h"
 
 // MINIMP3_IMPLEMENTATION must be defined in exactly one C file
 #define MINIMP3_IMPLEMENTATION
@@ -87,7 +88,7 @@ static void mp3_player_task(void *pvParameters)
         .url = s_current_url,
         .buffer_size = 4096,
         .timeout_ms = 10000,
-        .cert_pem = NULL, 
+        .crt_bundle_attach = esp_crt_bundle_attach,
     };
     
     esp_http_client_handle_t client = esp_http_client_init(&config);
