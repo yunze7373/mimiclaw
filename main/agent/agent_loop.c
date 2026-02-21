@@ -429,49 +429,12 @@ void agent_loop_task(void *pvParameters)
             }
 
             if (!resp.tool_use) {
-                bool forced_tool = false;
+                // LLM did not call any tool. Do NOT auto-execute fallback actions.
+                // If user wants audio/music, LLM should call audio_play_url with a proper URL.
+                // We just pass through the LLM's text response.
+                ESP_LOGW(TAG, "LLM returned no tool call - not applying fallback (LLM should use audio_play_url)");
 
-                if (is_audio_request(msg.content)) {
-                    char out_vol[256] = {0};
-                    char out_act[512] = {0};
-                    tool_registry_execute("audio_volume", "{\"volume\":100}", out_vol, sizeof(out_vol));
-
-                    bool is_play_req =
-                        contains_ci(msg.content, "play") ||
-                        contains_ci(msg.content, "music") ||
-                        contains_ci(msg.content, "stream") ||
-                        contains_ci(msg.content, "url") ||
-                        contains_ci(msg.content, "http") ||
-                        strstr(msg.content, "\xE6\x92\xAD\xE6\x94\xBE") ||    /* 播放 */
-                        strstr(msg.content, "\xE9\x9F\xB3\xE4\xB9\x90") ||    /* 音乐 */
-                        strstr(msg.content, "\xE7\xBD\x91\xE7\xBB\x9C");      /* 网络 */
-                    if (is_play_req) {
-                        tool_registry_execute("audio_play_url",
-                                              "{\"url\":\"https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3\"}",
-                                              out_act, sizeof(out_act));
-                    } else {
-                        int freq = extract_first_number(msg.content, 440);
-                        if (freq < 100 || freq > 5000) freq = 440;
-                        int dur = extract_duration_ms(msg.content);
-                        if (dur < 500) dur = 500;
-                        if (dur > 10000) dur = 10000;
-                        char in_test[96];
-                        snprintf(in_test, sizeof(in_test), "{\"freq\":%d,\"duration_ms\":%d}", freq, dur);
-                        tool_registry_execute("audio_test_tone", in_test, out_act, sizeof(out_act));
-                    }
-
-                    char forced_msg[1024];
-                    snprintf(forced_msg, sizeof(forced_msg),
-                             "Executed real tool calls via fallback (LLM returned no tool call).\n- audio_volume: %s\n- audio action: %s",
-                             out_vol, out_act);
-                    size_t flen = strlen(forced_msg);
-                    final_text = heap_caps_malloc(flen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-                    if (final_text) memcpy(final_text, forced_msg, flen + 1);
-                    ESP_LOGW(TAG, "Applied audio fallback tools because response had no tool calls");
-                    forced_tool = true;
-                }
-
-                if (!forced_tool && resp.text && resp.text_len > 0) {
+                if (resp.text && resp.text_len > 0) {
                     size_t tlen = resp.text_len;
                     final_text = heap_caps_malloc(tlen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                     if (final_text) { memcpy(final_text, resp.text, tlen); final_text[tlen] = '\0'; }

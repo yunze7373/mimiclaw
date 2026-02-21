@@ -3,6 +3,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "mimi_config.h"
+#include "esp_heap_caps.h"
 
 // Check if ADF is available
 #if __has_include("audio_pipeline.h")
@@ -43,6 +44,7 @@ static audio_event_iface_handle_t s_evt = NULL;
 #include <string.h>
 
 static TaskHandle_t s_mp3_task = NULL;
+static void *s_mp3_stack = NULL;  // PSRAM stack pointer
 static volatile bool s_mp3_stop = false;
 static char *s_current_url = NULL;
 #endif // MIMI_HAS_ADF
@@ -219,6 +221,11 @@ cleanup:
     ESP_LOGI(TAG, "MP3 player task finished");
     if (url_snapshot) free(url_snapshot);
     s_is_playing = false;
+    // Free PSRAM stack
+    if (s_mp3_stack) {
+        free(s_mp3_stack);
+        s_mp3_stack = NULL;
+    }
     s_mp3_task = NULL;
     vTaskDelete(NULL);
 }
@@ -342,16 +349,44 @@ esp_err_t audio_manager_play_url(const char *url)
         ESP_LOGE(TAG, "Failed to allocate URL");
         return ESP_ERR_NO_MEM;
     }
-    
-    // Lower priority to 3 so it doesn't starve the LwIP/Wi-Fi stack
-    if (xTaskCreate(mp3_player_task, "mp3_player", 16384, NULL, 3, &s_mp3_task) == pdPASS) {
-        return ESP_OK;
-    } else {
+
+    // Allocate task stack from PSRAM (external SPI RAM)
+    // Stack size: 32KB = 32768 bytes
+    #define MP3_PLAYER_STACK_SIZE 32768
+    static StaticTask_t s_mp3_task_buffer;
+    void *stack_psram = heap_caps_malloc(MP3_PLAYER_STACK_SIZE, MALLOC_CAP_SPIRAM);
+
+    if (!stack_psram) {
+        ESP_LOGE(TAG, "Failed to allocate PSRAM for mp3_player stack");
+        free(s_current_url);
+        s_current_url = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+
+    // Create task pinned to core 0 with PSRAM stack
+    s_mp3_task = xTaskCreateStaticPinnedToCore(
+        mp3_player_task,
+        "mp3_player",
+        MP3_PLAYER_STACK_SIZE,
+        NULL,
+        3,          // Priority
+        stack_psram,
+        &s_mp3_task_buffer,
+        0           // Core 0
+    );
+
+    if (s_mp3_task == NULL) {
         ESP_LOGE(TAG, "Failed to create mp3_player task");
+        free(stack_psram);
         free(s_current_url);
         s_current_url = NULL;
         return ESP_FAIL;
     }
+
+    // Store stack pointer for later cleanup
+    s_mp3_stack = stack_psram;
+    ESP_LOGI(TAG, "MP3 player task created with PSRAM stack (%d bytes)", MP3_PLAYER_STACK_SIZE);
+    return ESP_OK;
 #endif
 }
 
