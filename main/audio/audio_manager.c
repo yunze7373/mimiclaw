@@ -165,7 +165,8 @@ static void mp3_player_task(void *pvParameters)
             }
             audio_speaker_write((uint8_t*)pcm, samples * sizeof(short));
         }
-        vTaskDelay(pdMS_TO_TICKS(2));
+        // Yield enough time for Wi-Fi and LwIP to process packets to avoid connection drops
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 
     free(in_buf);
@@ -283,7 +284,8 @@ esp_err_t audio_manager_play_url(const char *url)
     }
     s_current_url = strdup(url);
     
-    if (xTaskCreate(mp3_player_task, "mp3_player", 16384, NULL, 5, &s_mp3_task) == pdPASS) {
+    // Lower priority to 3 so it doesn't starve the LwIP/Wi-Fi stack
+    if (xTaskCreate(mp3_player_task, "mp3_player", 16384, NULL, 3, &s_mp3_task) == pdPASS) {
         return ESP_OK;
     } else {
         ESP_LOGE(TAG, "Failed to create mp3_player task");
