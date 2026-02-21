@@ -36,4 +36,11 @@ endif()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(esp32claw)
 
-spiffs_create_partition_image(spiffs spiffs_data FLASH_IN_PROJECT)
+# Control whether `idf.py flash` should also flash SPIFFS image.
+# OFF (default): preserve user-edited files across firmware updates.
+option(MIMI_FLASH_SPIFFS_IN_PROJECT "Flash SPIFFS together with firmware" OFF)
+if(MIMI_FLASH_SPIFFS_IN_PROJECT)
+    spiffs_create_partition_image(spiffs spiffs_data FLASH_IN_PROJECT)
+else()
+    spiffs_create_partition_image(spiffs spiffs_data)
+endif()
