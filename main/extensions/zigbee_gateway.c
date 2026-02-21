@@ -13,7 +13,6 @@
 #include "esp_zigbee_core.h"
 #else
 #define MIMI_HAS_ZIGBEE 0
-#warning "ESP-Zigbee-SDK not found. Zigbee Gateway will be stubbed."
 #endif
 
 static const char *TAG = "zigbee_gateway";
@@ -23,9 +22,9 @@ static int s_device_count = 0;
 static bool s_permit_join = false;
 
 // Sentinel to avoid re-init
-static bool s_initialized = false;
 
 #if MIMI_HAS_ZIGBEE
+static bool s_initialized = false;
 /* ── Zigbee SDK Callbacks & Logic ───────────────────────────────── */
 
 static void bdb_start_top_level_commissioning_cb(uint8_t mode_mask)

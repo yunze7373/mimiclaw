@@ -12,9 +12,8 @@
 #define MIMI_MCP_IMPL_ENABLED 0
 #endif
 
-static const char *TAG = "mcp_client";
-
 #if MIMI_MCP_IMPL_ENABLED
+static const char *TAG = "mcp_client";
 
 typedef struct mcp_pending_req_t {
     int id;

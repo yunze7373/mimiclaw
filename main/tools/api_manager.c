@@ -21,7 +21,6 @@ typedef struct {
 
 static api_skill_t s_skills[MAX_API_SKILLS];
 static int s_skill_count = 0;
-static char *s_cached_tools_json = NULL;
 
 /* ── Helper: Load Config ─────────────────────────────────────────── */
 
@@ -110,21 +109,6 @@ static char *api_provider_get_tools_json(void)
     char *json = cJSON_PrintUnformatted(arr);
     cJSON_Delete(arr);
     return json;
-}
-
-static esp_err_t event_handler(esp_http_client_event_t *evt)
-{
-    if (evt->event_id == HTTP_EVENT_ON_DATA) {
-        /* Append data to output buffer */
-        /* Note: Basic implementation. Buffer overflow check needed. */
-        /* The buffer is passed via user_data? No, user_data is client config. */
-        /* Actually execute_tool passes a buffer. We need to write to it. */
-        /* But `esp_http_client_perform` blocks. We can read response after perform, OR capture in event handler. */
-        /* Let's use `esp_http_client_read_response` or simply accumulate in a static/heap buffer attached to client? */
-        /* Simple: Append to a buffer passed in user_data of the client config? */
-        /* Let's try to capture in a custom struct passed as user_data */
-    }
-    return ESP_OK;
 }
 
 typedef struct {

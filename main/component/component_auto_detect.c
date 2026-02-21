@@ -16,7 +16,7 @@ static const char *TAG = "comp_auto";
 #define I2C_MASTER_FREQ_HZ    400000
 
 /* Probe for I2C device presence */
-static bool i2c_probe(uint8_t addr)
+static bool __attribute__((unused)) i2c_probe(uint8_t addr)
 {
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     i2c_master_start(cmd);

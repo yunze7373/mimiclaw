@@ -6,8 +6,6 @@
 
 #if CONFIG_MIMI_ENABLE_MCP
 
-static const char *TAG = "tool_mcp";
-
 esp_err_t tool_mcp_add(const char *input_json, char *output, size_t output_size)
 {
     // Parse input: {"name": "filesystem", "url": "ws://192.168.1.100:8080/mcp", "auto_connect": true}

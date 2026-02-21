@@ -185,7 +185,7 @@ static void handle_mqtt_command(const char *topic, int topic_len, const char *da
 
 // --- MQTT Events ---
 
-static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
+static void __attribute__((unused)) mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     esp_mqtt_event_handle_t event = event_data;
     switch ((esp_mqtt_event_id_t)event_id) {
