@@ -12,10 +12,17 @@
 esp_err_t asr_recognize(const uint8_t *audio_data, size_t len, char **out_text);
 esp_err_t tts_speak(const char *text);
 
+#include <math.h>
+
+// Configurable VAD params
+#define VAD_ENERGY_THRESHOLD 25000  // Adjust this based on mic sensitivity
+#define VAD_DURATION_MS 300 // Duration of loud noise to trigger wake
+
 static const char *TAG = "voice_mgr";
 
 static voice_state_t s_current_state = VOICE_STATE_IDLE;
 static TaskHandle_t s_voice_task = NULL;
+static TaskHandle_t s_vad_task = NULL;
 static bool s_vad_enabled = false;
 
 // Helper to set state
@@ -145,6 +152,50 @@ static void voice_task(void *arg) {
     }
 }
 
+static void vad_task(void *arg) {
+    ESP_LOGI(TAG, "VAD background task started");
+    const int chunk_size = 1024;
+    int16_t *buf = heap_caps_malloc(chunk_size, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        ESP_LOGE(TAG, "Failed to allocate VAD buffer");
+        vTaskDelete(NULL);
+    }
+
+    uint32_t active_ticks = 0;
+    const uint32_t required_ticks = VAD_DURATION_MS / 10; // Assuming ~10ms per loop
+
+    while (1) {
+        if (!s_vad_enabled || s_current_state != VOICE_STATE_IDLE) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            active_ticks = 0;
+            continue;
+        }
+
+        // Try to read a small chunk from mic
+        int read_bytes = audio_mic_read((uint8_t*)buf, chunk_size);
+        if (read_bytes > 0) {
+            int samples = read_bytes / 2;
+            int64_t sum_squares = 0;
+            for (int i=0; i < samples; i++) {
+                sum_squares += buf[i] * buf[i];
+            }
+            int32_t rms = (int32_t)sqrt(sum_squares / samples);
+
+            if (rms > VAD_ENERGY_THRESHOLD) {
+                active_ticks++;
+                if (active_ticks >= required_ticks) {
+                    ESP_LOGI(TAG, "VAD Triggered! (RMS: %ld > %d)", (long)rms, VAD_ENERGY_THRESHOLD);
+                    active_ticks = 0;
+                    voice_manager_start_listening();
+                }
+            } else {
+                active_ticks = 0; // reset if quiet
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
 esp_err_t voice_manager_init(void) {
     if (s_voice_task) return ESP_OK; // Already initialized
 
@@ -152,6 +203,11 @@ esp_err_t voice_manager_init(void) {
     // High stack to handle HTTP requests gracefully
     if (xTaskCreate(voice_task, "voice_mgr", 8192, NULL, 5, &s_voice_task) != pdPASS) {
         ESP_LOGE(TAG, "Failed to create Voice Manager task");
+        return ESP_FAIL;
+    }
+    
+    if (xTaskCreate(vad_task, "vad_mgr", 4096, NULL, 4, &s_vad_task) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create VAD task");
         return ESP_FAIL;
     }
     
@@ -179,6 +235,9 @@ voice_state_t voice_manager_get_state(void) {
 
 esp_err_t voice_vad_enable(bool enable) {
     s_vad_enabled = enable;
+    if (enable && s_current_state == VOICE_STATE_IDLE) {
+       ESP_LOGW(TAG, "Please talk loudly into the microphone when VAD is enabled!");
+    }
     ESP_LOGI(TAG, "VAD %s", s_vad_enabled ? "enabled" : "disabled");
     return ESP_OK;
 }
