@@ -153,25 +153,30 @@ static void mp3_player_task(void *pvParameters)
     }
 
     int bytes_in_buf = 0;
-    bool eof = false;
     bool rate_set = false;
     mp3dec_frame_info_t info;
 
-    while (!s_mp3_stop && !eof) {
+    while (!s_mp3_stop) {
+        // Read more data if buffer is less than half full
         if (bytes_in_buf < MP3_BUF_SIZE / 2) {
             int to_read = MP3_BUF_SIZE - bytes_in_buf;
             int read_len = esp_http_client_read(client, (char*)in_buf + bytes_in_buf, to_read);
             if (read_len < 0) {
                 ESP_LOGE(TAG, "HTTP read error");
                 break;
-            } else if (read_len == 0) {
-                eof = true;
-            } else {
+            } else if (read_len > 0) {
                 bytes_in_buf += read_len;
+                ESP_LOGD(TAG, "Read %d bytes, buffer has %d bytes", read_len, bytes_in_buf);
             }
+            // Note: read_len == 0 means no data available yet (not EOF for streaming)
         }
 
-        if (bytes_in_buf == 0 && eof) break; 
+        // Need at least some data to decode
+        if (bytes_in_buf == 0) {
+            // For streaming, wait for data instead of treating as EOF
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
 
         int samples = mp3dec_decode_frame(mp3d, in_buf, bytes_in_buf, pcm, &info);
         
@@ -179,7 +184,7 @@ static void mp3_player_task(void *pvParameters)
             bytes_in_buf -= info.frame_bytes;
             memmove(in_buf, in_buf + info.frame_bytes, bytes_in_buf);
         } else if (info.frame_bytes == 0) {
-            if (eof) break;
+            // No valid frame found, wait and try again
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
@@ -351,8 +356,8 @@ esp_err_t audio_manager_play_url(const char *url)
     }
 
     // Allocate task stack from PSRAM (external SPI RAM)
-    // Stack size: 32KB = 32768 bytes
-    #define MP3_PLAYER_STACK_SIZE 32768
+    // Stack size: 40KB = 40960 bytes (increased for stable streaming)
+    #define MP3_PLAYER_STACK_SIZE 40960
     static StaticTask_t s_mp3_task_buffer;
     void *stack_psram = heap_caps_malloc(MP3_PLAYER_STACK_SIZE, MALLOC_CAP_SPIRAM);
 
