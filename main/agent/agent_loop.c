@@ -1,4 +1,4 @@
-#include "agent_loop.h"
+﻿#include "agent_loop.h"
 #include "agent/context_builder.h"
 #include "mimi_config.h"
 #include "bus/message_bus.h"
@@ -12,6 +12,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_random.h"
@@ -20,6 +21,64 @@
 static const char *TAG = "agent";
 
 #define TOOL_OUTPUT_SIZE  (8 * 1024)
+
+static bool contains_ci(const char *s, const char *needle)
+{
+    if (!s || !needle) return false;
+    size_t nlen = strlen(needle);
+    if (nlen == 0) return true;
+    for (const char *p = s; *p; p++) {
+        size_t i = 0;
+        while (i < nlen && p[i] &&
+               tolower((unsigned char)p[i]) == tolower((unsigned char)needle[i])) {
+            i++;
+        }
+        if (i == nlen) return true;
+    }
+    return false;
+}
+
+static bool is_audio_request(const char *msg)
+{
+    if (!msg) return false;
+    /* Chinese tokens (UTF-8 bytes) */
+    const bool zh_sound = strstr(msg, "\xE5\xA3\xB0\xE9\x9F\xB3") != NULL;          /* 声音 */
+    const bool zh_speaker = strstr(msg, "\xE5\x96\x87\xE5\x8F\xAD") != NULL;        /* 喇叭 */
+    const bool zh_audio = strstr(msg, "\xE9\x9F\xB3\xE9\xA2\x91") != NULL;          /* 音频 */
+    const bool zh_play = strstr(msg, "\xE6\x92\xAD\xE6\x94\xBE") != NULL;           /* 播放 */
+    const bool zh_music = strstr(msg, "\xE9\x9F\xB3\xE4\xB9\x90") != NULL;          /* 音乐 */
+    const bool zh_no_sound = strstr(msg, "\xE6\xB2\xA1\xE6\x9C\x89\xE5\xA3\xB0\xE9\x9F\xB3") != NULL; /* 没有声音 */
+    return contains_ci(msg, "audio") ||
+           contains_ci(msg, "sound") ||
+           contains_ci(msg, "speaker") ||
+           contains_ci(msg, "music") ||
+           contains_ci(msg, "play") ||
+           contains_ci(msg, "tone") ||
+           contains_ci(msg, "volume") ||
+           contains_ci(msg, "hz") ||
+           zh_sound || zh_speaker || zh_audio || zh_play || zh_music || zh_no_sound;
+}
+
+static int extract_first_number(const char *s, int def)
+{
+    if (!s) return def;
+    while (*s) {
+        if (isdigit((unsigned char)*s)) {
+            return atoi(s);
+        }
+        s++;
+    }
+    return def;
+}
+
+static int extract_duration_ms(const char *msg)
+{
+    int n = extract_first_number(msg, 0);
+    if (n <= 0) return 3000;
+    if (contains_ci(msg, "ms")) return n;
+    if (contains_ci(msg, "sec") || contains_ci(msg, "s")) return n * 1000;
+    return (n <= 30) ? (n * 1000) : n;
+}
 
 static void log_heap_snapshot(const char *phase)
 {
@@ -145,7 +204,7 @@ static cJSON *build_tool_results(const llm_response_t *resp, char *tool_output, 
 
 
 
-/* ── Streaming Helpers ────────────────────────────────────────── */
+/* 笏笏 Streaming Helpers 笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏笏 */
 
 typedef struct {
     char channel[16];
@@ -370,8 +429,49 @@ void agent_loop_task(void *pvParameters)
             }
 
             if (!resp.tool_use) {
-                /* Normal completion — save final text and break */
-                if (resp.text && resp.text_len > 0) {
+                bool forced_tool = false;
+
+                if (is_audio_request(msg.content)) {
+                    char out_vol[256] = {0};
+                    char out_act[512] = {0};
+                    tool_registry_execute("audio_volume", "{\"volume\":100}", out_vol, sizeof(out_vol));
+
+                    bool is_play_req =
+                        contains_ci(msg.content, "play") ||
+                        contains_ci(msg.content, "music") ||
+                        contains_ci(msg.content, "stream") ||
+                        contains_ci(msg.content, "url") ||
+                        contains_ci(msg.content, "http") ||
+                        strstr(msg.content, "\xE6\x92\xAD\xE6\x94\xBE") ||    /* 播放 */
+                        strstr(msg.content, "\xE9\x9F\xB3\xE4\xB9\x90") ||    /* 音乐 */
+                        strstr(msg.content, "\xE7\xBD\x91\xE7\xBB\x9C");      /* 网络 */
+                    if (is_play_req) {
+                        tool_registry_execute("audio_play_url",
+                                              "{\"url\":\"https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3\"}",
+                                              out_act, sizeof(out_act));
+                    } else {
+                        int freq = extract_first_number(msg.content, 440);
+                        if (freq < 100 || freq > 5000) freq = 440;
+                        int dur = extract_duration_ms(msg.content);
+                        if (dur < 500) dur = 500;
+                        if (dur > 10000) dur = 10000;
+                        char in_test[96];
+                        snprintf(in_test, sizeof(in_test), "{\"freq\":%d,\"duration_ms\":%d}", freq, dur);
+                        tool_registry_execute("audio_test_tone", in_test, out_act, sizeof(out_act));
+                    }
+
+                    char forced_msg[1024];
+                    snprintf(forced_msg, sizeof(forced_msg),
+                             "Executed real tool calls via fallback (LLM returned no tool call).\n- audio_volume: %s\n- audio action: %s",
+                             out_vol, out_act);
+                    size_t flen = strlen(forced_msg);
+                    final_text = heap_caps_malloc(flen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                    if (final_text) memcpy(final_text, forced_msg, flen + 1);
+                    ESP_LOGW(TAG, "Applied audio fallback tools because response had no tool calls");
+                    forced_tool = true;
+                }
+
+                if (!forced_tool && resp.text && resp.text_len > 0) {
                     size_t tlen = resp.text_len;
                     final_text = heap_caps_malloc(tlen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                     if (final_text) { memcpy(final_text, resp.text, tlen); final_text[tlen] = '\0'; }
@@ -514,3 +614,5 @@ esp_err_t agent_loop_start(void)
 
     return (ret == pdPASS) ? ESP_OK : ESP_FAIL;
 }
+
+

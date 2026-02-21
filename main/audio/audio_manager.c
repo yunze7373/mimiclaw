@@ -96,7 +96,7 @@ static void mp3_player_task(void *pvParameters)
     esp_http_client_config_t config = {
         .url = url_snapshot,
         .buffer_size = 4096,
-        .timeout_ms = 10000,
+        .timeout_ms = 15000,
         .crt_bundle_attach = esp_crt_bundle_attach,
     };
     
@@ -106,9 +106,17 @@ static void mp3_player_task(void *pvParameters)
         goto cleanup;
     }
 
-    esp_err_t err = esp_http_client_open(client, 0);
+    esp_err_t err = ESP_FAIL;
+    for (int attempt = 1; attempt <= 3; attempt++) {
+        err = esp_http_client_open(client, 0);
+        if (err == ESP_OK) {
+            break;
+        }
+        ESP_LOGW(TAG, "HTTP open attempt %d/3 failed: %s", attempt, esp_err_to_name(err));
+        vTaskDelay(pdMS_TO_TICKS(500 * attempt));
+    }
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to open HTTP connection after retries: %s", esp_err_to_name(err));
         goto cleanup_client;
     }
     

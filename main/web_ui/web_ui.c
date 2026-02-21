@@ -402,6 +402,22 @@ static const char *HTML_PAGE =
 "            </div>"
 "          </div>"
 "          <div class='form-row'>"
+"            <div class='form-group'>"
+"              <label>OpenAI Audio API Key (用于语音)</label>"
+"              <input type='password' id='openai_api_audio' placeholder='sk-xxxx...'>"
+"            </div>"
+"          </div>"
+"          <div class='form-row'>"
+"            <div class='form-group'>"
+"              <label>ASR 端点 (语音识别 URL)</label>"
+"              <input type='text' id='asr_endpoint' placeholder='https://api.openai.com/v1/audio/transcriptions'>"
+"            </div>"
+"            <div class='form-group'>"
+"              <label>TTS 端点 (语音合成 URL)</label>"
+"              <input type='text' id='tts_endpoint' placeholder='https://api.openai.com/v1/audio/speech'>"
+"            </div>"
+"          </div>"
+"          <div class='form-row'>"
 "            <div class='form-group' style='flex-direction:row;align-items:center;gap:12px'>"
 "              <input type='checkbox' id='streaming' style='width:18px;height:18px'>"
 "              <label for='streaming' style='margin:0'>启用流式输出 (Streaming)</label>"
@@ -648,6 +664,9 @@ static const char *HTML_PAGE =
 "        document.getElementById('api_key').value = data.api_key || '';"
 "        document.getElementById('ollama_host').value = data.ollama_host || '';"
 "        document.getElementById('ollama_port').value = data.ollama_port || '11434';"
+"        document.getElementById('openai_api_audio').value = data.openai_api_audio || '';"
+"        document.getElementById('asr_endpoint').value = data.asr_endpoint || '';"
+"        document.getElementById('tts_endpoint').value = data.tts_endpoint || '';"
 "        document.getElementById('streaming').checked = data.streaming !== false;"
 "        updateOllamaFields();"
 "      } catch(e) { console.error(e); }"
@@ -666,6 +685,9 @@ static const char *HTML_PAGE =
 "        api_key: document.getElementById('api_key').value,"
 "        ollama_host: document.getElementById('ollama_host').value,"
 "        ollama_port: document.getElementById('ollama_port').value,"
+"        openai_api_audio: document.getElementById('openai_api_audio').value,"
+"        asr_endpoint: document.getElementById('asr_endpoint').value,"
+"        tts_endpoint: document.getElementById('tts_endpoint').value,"
 "        streaming: document.getElementById('streaming').checked"
 "      };"
 "      try {"
@@ -1596,12 +1618,20 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     const char *model = llm_get_model();
     bool streaming = llm_get_streaming();
 
-    char buf[512];
+    const char *openai_audio = llm_get_openai_api_key_audio();
+    const char *asr_ep = llm_get_asr_endpoint();
+    const char *tts_ep = llm_get_tts_endpoint();
+
+    char buf[768];
     int len = snprintf(buf, sizeof(buf),
-        "{\"provider\":\"%s\",\"model\":\"%s\",\"streaming\":%s}",
+        "{\"provider\":\"%s\",\"model\":\"%s\",\"streaming\":%s,"
+        "\"openai_api_audio\":\"%s\",\"asr_endpoint\":\"%s\",\"tts_endpoint\":\"%s\"}",
         provider ? provider : "",
         model ? model : "",
-        streaming ? "true" : "false");
+        streaming ? "true" : "false",
+        openai_audio ? openai_audio : "",
+        asr_ep ? asr_ep : "",
+        tts_ep ? tts_ep : "");
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, buf, len);
@@ -1640,6 +1670,15 @@ static esp_err_t config_post_handler(httpd_req_t *req)
 
     cJSON *streaming = cJSON_GetObjectItem(root, "streaming");
     if (streaming && cJSON_IsBool(streaming)) llm_set_streaming(cJSON_IsTrue(streaming));
+
+    cJSON *openai_api_audio = cJSON_GetObjectItem(root, "openai_api_audio");
+    if (openai_api_audio && cJSON_IsString(openai_api_audio)) llm_set_openai_api_key_audio(openai_api_audio->valuestring);
+
+    cJSON *asr_endpoint = cJSON_GetObjectItem(root, "asr_endpoint");
+    if (asr_endpoint && cJSON_IsString(asr_endpoint)) llm_set_asr_endpoint(asr_endpoint->valuestring);
+
+    cJSON *tts_endpoint = cJSON_GetObjectItem(root, "tts_endpoint");
+    if (tts_endpoint && cJSON_IsString(tts_endpoint)) llm_set_tts_endpoint(tts_endpoint->valuestring);
 
     cJSON_Delete(root);
 

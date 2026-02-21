@@ -11,6 +11,8 @@
 #include "esp_timer.h"
 #include "nvs.h"
 #include "cJSON.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "llm";
 
@@ -415,26 +417,39 @@ static esp_err_t llm_http_direct(const char *post_data, http_req_ctx_t *ctx, int
         .keep_alive_enable = false,
     };
 
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) return ESP_FAIL;
+    esp_err_t err = ESP_FAIL;
+    *out_status = 0;
 
-    esp_http_client_set_method(client, HTTP_METHOD_POST);
-    esp_http_client_set_header(client, "Content-Type", "application/json");
-    if (provider_uses_openai_format()) {
-        if (s_api_key[0]) {
-            char auth[320];
-            snprintf(auth, sizeof(auth), "Bearer %s", s_api_key);
-            esp_http_client_set_header(client, "Authorization", auth);
+    for (int attempt = 1; attempt <= 3; attempt++) {
+        esp_http_client_handle_t client = esp_http_client_init(&config);
+        if (!client) return ESP_FAIL;
+
+        esp_http_client_set_method(client, HTTP_METHOD_POST);
+        esp_http_client_set_header(client, "Content-Type", "application/json");
+        if (provider_uses_openai_format()) {
+            if (s_api_key[0]) {
+                char auth[320];
+                snprintf(auth, sizeof(auth), "Bearer %s", s_api_key);
+                esp_http_client_set_header(client, "Authorization", auth);
+            }
+        } else {
+            esp_http_client_set_header(client, "x-api-key", s_api_key);
+            esp_http_client_set_header(client, "anthropic-version", MIMI_LLM_API_VERSION);
         }
-    } else {
-        esp_http_client_set_header(client, "x-api-key", s_api_key);
-        esp_http_client_set_header(client, "anthropic-version", MIMI_LLM_API_VERSION);
-    }
-    esp_http_client_set_post_field(client, post_data, strlen(post_data));
+        esp_http_client_set_post_field(client, post_data, strlen(post_data));
 
-    esp_err_t err = esp_http_client_perform(client);
-    *out_status = esp_http_client_get_status_code(client);
-    esp_http_client_cleanup(client);
+        err = esp_http_client_perform(client);
+        *out_status = esp_http_client_get_status_code(client);
+        esp_http_client_cleanup(client);
+
+        if (err == ESP_OK) {
+            return ESP_OK;
+        }
+
+        ESP_LOGW(TAG, "HTTP perform attempt %d/3 failed: %s", attempt, esp_err_to_name(err));
+        vTaskDelay(pdMS_TO_TICKS(300 * attempt));
+    }
+
     return err;
 }
 
@@ -1432,6 +1447,62 @@ esp_err_t llm_set_streaming(bool enable)
     s_streaming = enable;
     ESP_LOGI(TAG, "Streaming %s", enable ? "enabled" : "disabled");
     return ESP_OK;
+}
+
+/* ── Audio Providers / Endpoints (Phase 1.3) ────────────────────── */
+
+esp_err_t llm_set_openai_api_key_audio(const char *api_key)
+{
+    if (!api_key) return ESP_ERR_INVALID_ARG;
+    safe_copy(s_openai_api_key_audio, sizeof(s_openai_api_key_audio), api_key);
+    
+    nvs_handle_t nvs;
+    if (nvs_open(MIMI_NVS_LLM, NVS_READWRITE, &nvs) != ESP_OK) return ESP_FAIL;
+    nvs_set_str(nvs, "openai_api_audio", s_openai_api_key_audio);
+    nvs_commit(nvs);
+    nvs_close(nvs);
+    return ESP_OK;
+}
+
+esp_err_t llm_set_asr_endpoint(const char *endpoint)
+{
+    if (!endpoint) return ESP_ERR_INVALID_ARG;
+    safe_copy(s_asr_endpoint, sizeof(s_asr_endpoint), endpoint);
+    
+    nvs_handle_t nvs;
+    if (nvs_open(MIMI_NVS_LLM, NVS_READWRITE, &nvs) != ESP_OK) return ESP_FAIL;
+    nvs_set_str(nvs, "asr_endpoint", s_asr_endpoint);
+    nvs_commit(nvs);
+    nvs_close(nvs);
+    return ESP_OK;
+}
+
+esp_err_t llm_set_tts_endpoint(const char *endpoint)
+{
+    if (!endpoint) return ESP_ERR_INVALID_ARG;
+    safe_copy(s_tts_endpoint, sizeof(s_tts_endpoint), endpoint);
+    
+    nvs_handle_t nvs;
+    if (nvs_open(MIMI_NVS_LLM, NVS_READWRITE, &nvs) != ESP_OK) return ESP_FAIL;
+    nvs_set_str(nvs, "tts_endpoint", s_tts_endpoint);
+    nvs_commit(nvs);
+    nvs_close(nvs);
+    return ESP_OK;
+}
+
+const char *llm_get_openai_api_key_audio(void)
+{
+    return s_openai_api_key_audio;
+}
+
+const char *llm_get_asr_endpoint(void)
+{
+    return s_asr_endpoint;
+}
+
+const char *llm_get_tts_endpoint(void)
+{
+    return s_tts_endpoint;
 }
 
 bool llm_get_streaming(void)

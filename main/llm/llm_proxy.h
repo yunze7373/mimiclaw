@@ -57,6 +57,38 @@ esp_err_t llm_set_streaming(bool enable);
  */
 bool llm_get_streaming(void);
 
+/* ── Audio Providers / Endpoints (Phase 1.3) ────────────────────── */
+
+/**
+ * Save the OpenAI compatible API key for audio to NVS.
+ */
+esp_err_t llm_set_openai_api_key_audio(const char *api_key);
+
+/**
+ * Save the ASR (Speech-to-Text) endpoint URL to NVS.
+ */
+esp_err_t llm_set_asr_endpoint(const char *endpoint);
+
+/**
+ * Save the TTS (Text-to-Speech) endpoint URL to NVS.
+ */
+esp_err_t llm_set_tts_endpoint(const char *endpoint);
+
+/**
+ * Get the current OpenAI compatible API key for audio.
+ */
+const char *llm_get_openai_api_key_audio(void);
+
+/**
+ * Get the current ASR (Speech-to-Text) endpoint URL.
+ */
+const char *llm_get_asr_endpoint(void);
+
+/**
+ * Get the current TTS (Text-to-Speech) endpoint URL.
+ */
+const char *llm_get_tts_endpoint(void);
+
 /**
  * Send a chat completion request to the configured LLM API (non-streaming).
  *

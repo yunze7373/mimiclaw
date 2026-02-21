@@ -9,8 +9,8 @@
 static const char *TAG = "tts_client";
 
 // Expose these from llm_proxy
-extern char s_openai_api_key_audio[];
-extern char s_tts_endpoint[];
+// extern char s_openai_api_key_audio[];
+// extern char s_tts_endpoint[];
 
 // Helper to handle the audio stream coming back from OpenAI
 // We request PCM, 24kHz or 16k, so we can just blast it into i2s_write
@@ -35,8 +35,11 @@ static esp_err_t _http_event_handle_tts(esp_http_client_event_t *evt) {
 }
 
 esp_err_t tts_speak(const char *text) {
+    const char *api_key = llm_get_openai_api_key_audio();
+    const char *endpoint = llm_get_tts_endpoint();
+
     if (!text || strlen(text) == 0) return ESP_ERR_INVALID_ARG;
-    if (strlen(s_openai_api_key_audio) == 0) {
+    if (!api_key || strlen(api_key) == 0) {
         ESP_LOGE(TAG, "Audio API key not configured");
         return ESP_ERR_INVALID_STATE;
     }
@@ -44,7 +47,7 @@ esp_err_t tts_speak(const char *text) {
     ESP_LOGI(TAG, "Sending text to TTS: %.50s...", text);
 
     esp_http_client_config_t config = {
-        .url = s_tts_endpoint,
+        .url = endpoint,
         .timeout_ms = 30000,
         .method = HTTP_METHOD_POST,
         .event_handler = _http_event_handle_tts
@@ -54,7 +57,7 @@ esp_err_t tts_speak(const char *text) {
     if (!client) return ESP_FAIL;
 
     char auth_header[256];
-    snprintf(auth_header, sizeof(auth_header), "Bearer %s", s_openai_api_key_audio);
+    snprintf(auth_header, sizeof(auth_header), "Bearer %s", api_key);
 
     esp_http_client_set_header(client, "Content-Type", "application/json");
     esp_http_client_set_header(client, "Authorization", auth_header);

@@ -7,22 +7,27 @@
 
 static const char *TAG = "asr_client";
 
-// Expose these from llm_proxy since we set them there
-extern char s_openai_api_key_audio[];
-extern char s_asr_endpoint[];
+// Use getters from llm_proxy.h instead of extern arrays
 
 esp_err_t asr_recognize(const uint8_t *audio_data, size_t len, char **out_text) {
+    const char *api_key = llm_get_openai_api_key_audio();
+    const char *endpoint = llm_get_asr_endpoint();
+
     if (!audio_data || len == 0 || !out_text) return ESP_ERR_INVALID_ARG;
-    if (strlen(s_openai_api_key_audio) == 0) {
+    if (!api_key || strlen(api_key) == 0) {
         ESP_LOGE(TAG, "Audio API key not configured");
         return ESP_ERR_INVALID_STATE;
     }
+    if (!endpoint || strlen(endpoint) == 0) {
+        ESP_LOGE(TAG, "ASR endpoint not configured");
+        return ESP_ERR_INVALID_STATE;
+    }
 
-    ESP_LOGI(TAG, "Sending %d bytes of audio to ASR endpoint: %s", len, s_asr_endpoint);
+    ESP_LOGI(TAG, "Sending %d bytes of audio to ASR endpoint: %s", len, endpoint);
 
     // Build standard HTTP client request for multipart/form-data
     esp_http_client_config_t config = {
-        .url = s_asr_endpoint,
+        .url = endpoint,
         .timeout_ms = 30000,
         .method = HTTP_METHOD_POST
     };
@@ -36,7 +41,7 @@ esp_err_t asr_recognize(const uint8_t *audio_data, size_t len, char **out_text) 
     snprintf(content_type, sizeof(content_type), "multipart/form-data; boundary=%s", boundary);
 
     char auth_header[256];
-    snprintf(auth_header, sizeof(auth_header), "Bearer %s", s_openai_api_key_audio);
+    snprintf(auth_header, sizeof(auth_header), "Bearer %s", api_key);
 
     esp_http_client_set_header(client, "Content-Type", content_type);
     esp_http_client_set_header(client, "Authorization", auth_header);
