@@ -50,3 +50,4 @@ references/
 roadmap.md
 HARD_WRITING.md
 AGENTS.md
+.claude/settings.local.json
