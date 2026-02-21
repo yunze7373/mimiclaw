@@ -45,6 +45,10 @@ static audio_event_iface_handle_t s_evt = NULL;
 static TaskHandle_t s_mp3_task = NULL;
 static volatile bool s_mp3_stop = false;
 static char *s_current_url = NULL;
+
+// External declarations for audio control
+extern esp_err_t audio_speaker_stop(void);
+extern esp_err_t audio_speaker_start(void);
 #endif // MIMI_HAS_ADF
 
 static bool s_is_playing = false;
@@ -181,6 +185,8 @@ static void mp3_player_task(void *pvParameters)
             if (!rate_set) {
                 ESP_LOGI(TAG, "MP3 format: %d Hz, %d channels", info.hz, info.channels);
                 audio_set_sample_rate(info.hz);
+                // Give I2S time to adapt to new sample rate
+                vTaskDelay(pdMS_TO_TICKS(50));
                 rate_set = true;
             }
             
@@ -282,9 +288,17 @@ static void _audio_stop_pipeline(void)
 
 esp_err_t audio_manager_play_url(const char *url)
 {
+    // Ensure I2S is in a clean state before starting new playback
+    // This handles the case where audio_test_tone was used directly
     if (s_is_playing) {
         _audio_stop_pipeline();
     }
+
+    // Force speaker to stop and re-init to ensure clean state
+    // This is needed because tool_audio_test may have left I2S in inconsistent state
+    audio_speaker_stop();
+    vTaskDelay(pdMS_TO_TICKS(50));  // Give I2S time to fully stop
+    audio_speaker_start();
 
     ESP_LOGI(TAG, "Playing URL: %s", url);
     

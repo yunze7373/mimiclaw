@@ -95,6 +95,7 @@ static esp_err_t tool_audio_test(const char *input, char *output, size_t out_len
     
     extern esp_err_t audio_init(void);
     extern esp_err_t audio_speaker_start(void);
+    extern esp_err_t audio_speaker_stop(void);
     extern esp_err_t audio_speaker_write(const uint8_t *data, size_t len);
     
     audio_init();
@@ -131,6 +132,7 @@ static esp_err_t tool_audio_test(const char *input, char *output, size_t out_len
     }
     
     free(buf);
+    audio_speaker_stop();
     snprintf(output, out_len, "Test tone played (%d Hz, %d ms)", freq, duration_ms);
     return ESP_OK;
 }
@@ -242,8 +244,8 @@ void register_audio_tools(void)
     };
     static const mimi_tool_t tool_test = {
         .name = "audio_test_tone",
-        .description = "Play a pure sine wave test tone to debug speaker hardware. Input: {\"freq\": 440, \"duration_ms\": 1000}",
-        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"freq\":{\"type\":\"integer\"},\"duration_ms\":{\"type\":\"integer\"}},\"required\":[]}",
+        .description = "[DEBUGGING TOOL - DO NOT USE for normal playback] Play a pure sine wave test tone ONLY to verify speaker hardware is working. Use audio_play_url for playing music/sounds. Input: {\"freq\": 440, \"duration_ms\": 1000}, defaults to 440Hz 1000ms.",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"freq\":{\"type\":\"integer\",\"description\":\"Frequency in Hz (100-5000)\"},\"duration_ms\":{\"type\":\"integer\",\"description\":\"Duration in milliseconds (100-5000)\"}},\"required\":[]}",
         .execute = tool_audio_test,
     };
     static const mimi_tool_t tool_test_mic = {
