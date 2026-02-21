@@ -7,10 +7,12 @@
 #include "esp_heap_caps.h"
 #include "driver/i2s.h"
 #include "driver/gpio.h"
+#include "rgb/rgb.h"
 
 static const char *TAG = "audio";
 
 static bool s_mic_started = false;
+static bool s_mic_receiving = false;
 static bool s_speaker_started = false;
 static bool s_mic_i2s_installed = false;
 static bool s_spk_i2s_installed = false;
@@ -148,6 +150,7 @@ esp_err_t audio_mic_start(void)
     }
 
     s_mic_started = true;
+    s_mic_receiving = false;
     ESP_LOGI(TAG, "Microphone started");
     return ESP_OK;
 }
@@ -160,6 +163,9 @@ esp_err_t audio_mic_stop(void)
 
     i2s_stop(AUDIO_MIC_I2S_PORT);
     s_mic_started = false;
+    s_mic_receiving = false;
+    rgb_stop_breathing();
+    rgb_set(0, 0, 0);
     ESP_LOGI(TAG, "Microphone stopped");
     return ESP_OK;
 }
@@ -175,6 +181,12 @@ int audio_mic_read(uint8_t *buffer, size_t len)
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "I2S read error: %s", esp_err_to_name(ret));
         return 0;
+    }
+
+    if (bytes_read > 0 && !s_mic_receiving) {
+        s_mic_receiving = true;
+        rgb_start_breathing(0, 255, 0, 1200);
+        ESP_LOGI(TAG, "Microphone receiving data, green breathing enabled");
     }
 
     return (int)bytes_read;

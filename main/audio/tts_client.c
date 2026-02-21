@@ -46,6 +46,14 @@ esp_err_t tts_speak(const char *text) {
 
     ESP_LOGI(TAG, "Sending text to TTS: %.50s...", text);
 
+    // Stop any ongoing MP3 playback first
+    extern esp_err_t audio_manager_stop(void);
+    audio_manager_stop();
+
+    // Start speaker and force 24kHz sample rate (OpenAI standard for PCM)
+    audio_speaker_start();
+    audio_set_sample_rate(24000);
+
     esp_http_client_config_t config = {
         .url = endpoint,
         .timeout_ms = 30000,
@@ -54,7 +62,10 @@ esp_err_t tts_speak(const char *text) {
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) return ESP_FAIL;
+    if (!client) {
+        audio_speaker_stop();
+        return ESP_FAIL;
+    }
 
     esp_http_client_set_header(client, "Content-Type", "application/json");
     if (api_key && strlen(api_key) > 0) {
@@ -76,6 +87,7 @@ esp_err_t tts_speak(const char *text) {
     
     if (!post_data) {
         esp_http_client_cleanup(client);
+        audio_speaker_stop();
         return ESP_ERR_NO_MEM;
     }
 
@@ -95,5 +107,8 @@ esp_err_t tts_speak(const char *text) {
 
     free(post_data);
     esp_http_client_cleanup(client);
+    
+    vTaskDelay(pdMS_TO_TICKS(100)); // drain remaining I2S buffer
+    audio_speaker_stop();
     return err;
 }

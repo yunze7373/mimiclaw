@@ -44,7 +44,6 @@ static audio_event_iface_handle_t s_evt = NULL;
 #include <string.h>
 
 static TaskHandle_t s_mp3_task = NULL;
-static void *s_mp3_stack = NULL;  // PSRAM stack pointer
 static volatile bool s_mp3_stop = false;
 static char *s_current_url = NULL;
 #endif // MIMI_HAS_ADF
@@ -153,10 +152,11 @@ static void mp3_player_task(void *pvParameters)
     }
 
     int bytes_in_buf = 0;
+    bool eof = false;
     bool rate_set = false;
     mp3dec_frame_info_t info;
 
-    while (!s_mp3_stop) {
+    while (!s_mp3_stop && !eof) {
         // Read more data if buffer is less than half full
         if (bytes_in_buf < MP3_BUF_SIZE / 2) {
             int to_read = MP3_BUF_SIZE - bytes_in_buf;
@@ -164,19 +164,16 @@ static void mp3_player_task(void *pvParameters)
             if (read_len < 0) {
                 ESP_LOGE(TAG, "HTTP read error");
                 break;
-            } else if (read_len > 0) {
+            } else if (read_len == 0) {
+                if (esp_http_client_is_complete_data_received(client)) {
+                    eof = true;
+                }
+            } else {
                 bytes_in_buf += read_len;
-                ESP_LOGD(TAG, "Read %d bytes, buffer has %d bytes", read_len, bytes_in_buf);
             }
-            // Note: read_len == 0 means no data available yet (not EOF for streaming)
         }
 
-        // Need at least some data to decode
-        if (bytes_in_buf == 0) {
-            // For streaming, wait for data instead of treating as EOF
-            vTaskDelay(pdMS_TO_TICKS(50));
-            continue;
-        }
+        if (bytes_in_buf == 0 && eof) break; 
 
         int samples = mp3dec_decode_frame(mp3d, in_buf, bytes_in_buf, pcm, &info);
         
@@ -184,7 +181,7 @@ static void mp3_player_task(void *pvParameters)
             bytes_in_buf -= info.frame_bytes;
             memmove(in_buf, in_buf + info.frame_bytes, bytes_in_buf);
         } else if (info.frame_bytes == 0) {
-            // No valid frame found, wait and try again
+            if (eof) break;
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
@@ -226,11 +223,6 @@ cleanup:
     ESP_LOGI(TAG, "MP3 player task finished");
     if (url_snapshot) free(url_snapshot);
     s_is_playing = false;
-    // Free PSRAM stack
-    if (s_mp3_stack) {
-        free(s_mp3_stack);
-        s_mp3_stack = NULL;
-    }
     s_mp3_task = NULL;
     vTaskDelete(NULL);
 }
@@ -355,43 +347,15 @@ esp_err_t audio_manager_play_url(const char *url)
         return ESP_ERR_NO_MEM;
     }
 
-    // Allocate task stack from PSRAM (external SPI RAM)
-    // Stack size: 40KB = 40960 bytes (increased for stable streaming)
-    #define MP3_PLAYER_STACK_SIZE 40960
-    static StaticTask_t s_mp3_task_buffer;
-    void *stack_psram = heap_caps_malloc(MP3_PLAYER_STACK_SIZE, MALLOC_CAP_SPIRAM);
-
-    if (!stack_psram) {
-        ESP_LOGE(TAG, "Failed to allocate PSRAM for mp3_player stack");
-        free(s_current_url);
-        s_current_url = NULL;
-        return ESP_ERR_NO_MEM;
-    }
-
-    // Create task pinned to core 0 with PSRAM stack
-    s_mp3_task = xTaskCreateStaticPinnedToCore(
-        mp3_player_task,
-        "mp3_player",
-        MP3_PLAYER_STACK_SIZE,
-        NULL,
-        3,          // Priority
-        stack_psram,
-        &s_mp3_task_buffer,
-        0           // Core 0
-    );
-
-    if (s_mp3_task == NULL) {
+    // Lower priority to 3 so it doesn't starve the LwIP/Wi-Fi stack
+    if (xTaskCreate(mp3_player_task, "mp3_player", 16384, NULL, 3, &s_mp3_task) == pdPASS) {
+        return ESP_OK;
+    } else {
         ESP_LOGE(TAG, "Failed to create mp3_player task");
-        free(stack_psram);
         free(s_current_url);
         s_current_url = NULL;
         return ESP_FAIL;
     }
-
-    // Store stack pointer for later cleanup
-    s_mp3_stack = stack_psram;
-    ESP_LOGI(TAG, "MP3 player task created with PSRAM stack (%d bytes)", MP3_PLAYER_STACK_SIZE);
-    return ESP_OK;
 #endif
 }
 
