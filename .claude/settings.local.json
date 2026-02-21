@@ -6,7 +6,12 @@
       "Bash(xxd:*)",
       "WebFetch(domain:rcn4qyi58ici.feishu.cn)",
       "Bash(git checkout:*)",
-      "Bash(git merge:*)"
+      "Bash(git merge:*)",
+      "Bash(git stash pop:*)",
+      "Bash(git stash drop)",
+      "Bash(git push:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

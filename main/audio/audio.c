@@ -192,6 +192,11 @@ int audio_mic_read(uint8_t *buffer, size_t len)
     return (int)bytes_read;
 }
 
+bool audio_mic_is_receiving(void)
+{
+    return s_mic_receiving;
+}
+
 esp_err_t audio_speaker_start(void)
 {
     if (s_speaker_started) {

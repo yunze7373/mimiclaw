@@ -48,6 +48,11 @@ esp_err_t audio_mic_stop(void);
 int audio_mic_read(uint8_t *buffer, size_t len);
 
 /**
+ * Returns true when microphone is actively receiving audio data.
+ */
+bool audio_mic_is_receiving(void);
+
+/**
  * Start speaker playback
  */
 esp_err_t audio_speaker_start(void);

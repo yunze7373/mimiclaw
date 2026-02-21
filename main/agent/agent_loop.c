@@ -6,6 +6,8 @@
 #include "memory/session_mgr.h"
 #include "tools/tool_registry.h"
 #include "telegram/telegram_bot.h"
+#include "audio/audio.h"
+#include "audio/voice_manager.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "rgb/rgb.h"
@@ -19,6 +21,7 @@
 #include "cJSON.h"
 
 static const char *TAG = "agent";
+static volatile bool s_agent_processing = false;
 
 #define TOOL_OUTPUT_SIZE  (8 * 1024)
 
@@ -334,10 +337,18 @@ void agent_loop_task(void *pvParameters)
         esp_err_t err = message_bus_pop_inbound_prefer_websocket(&msg, UINT32_MAX);
         if (err != ESP_OK) continue;
 
+        s_agent_processing = true;
         ESP_LOGI(TAG, "Processing message from %s:%s", msg.channel, msg.chat_id);
 
-        /* Breathing RGB effect while agent is processing */
-        rgb_start_breathing(0, 128, 255, 1800);
+        /* Agent and mic capture should not run concurrently. */
+        voice_vad_enable(false);
+        audio_mic_stop();
+
+        /* Breathing RGB effect while agent is processing.
+         * Do not override mic-active green breathing. */
+        if (!audio_mic_is_receiving()) {
+            rgb_start_breathing(0, 128, 255, 1800);
+        }
 
         /* 1. Build system prompt */
         context_build_system_prompt(system_prompt, MIMI_CONTEXT_BUF_SIZE);
@@ -553,12 +564,16 @@ void agent_loop_task(void *pvParameters)
         /* Free inbound message content */
         free(msg.content);
 
-        /* Stop breathing and turn off RGB LED when idle */
-        rgb_stop_breathing();
-        rgb_set(0, 0, 0);
+        /* Stop breathing and turn off RGB LED when idle.
+         * Preserve mic-active green breathing. */
+        if (!audio_mic_is_receiving()) {
+            rgb_stop_breathing();
+            rgb_set(0, 0, 0);
+        }
 
         /* Log memory status */
         log_heap_snapshot("after_message");
+        s_agent_processing = false;
     }
 }
 
@@ -576,6 +591,11 @@ esp_err_t agent_loop_start(void)
         MIMI_AGENT_PRIO, NULL, MIMI_AGENT_CORE);
 
     return (ret == pdPASS) ? ESP_OK : ESP_FAIL;
+}
+
+bool agent_loop_is_processing(void)
+{
+    return s_agent_processing;
 }
 
 

@@ -1,5 +1,6 @@
 #include "audio/voice_manager.h"
 #include "audio.h"
+#include "agent/agent_loop.h"
 #include "llm/llm_proxy.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -225,6 +226,19 @@ esp_err_t voice_manager_init(void) {
 }
 
 esp_err_t voice_manager_start_listening(void) {
+    if (agent_loop_is_processing()) {
+        ESP_LOGW(TAG, "Agent is busy; reject voice start");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!s_voice_task || !s_vad_task) {
+        esp_err_t init_err = voice_manager_init();
+        if (init_err != ESP_OK) {
+            ESP_LOGE(TAG, "Voice manager not ready: %s", esp_err_to_name(init_err));
+            return init_err;
+        }
+    }
+
     if (s_current_state != VOICE_STATE_IDLE && s_current_state != VOICE_STATE_LISTENING) {
         ESP_LOGW(TAG, "Cannot start listening, current state is %d", s_current_state);
         return ESP_ERR_INVALID_STATE;
