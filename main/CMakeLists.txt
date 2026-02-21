@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "mimi.c"
         "audio/audio.c"
+        "audio/audio_manager.c"
         "audio/voice_manager.c"
         "audio/asr_client.c"
         "audio/tts_client.c"
@@ -40,6 +41,7 @@ idf_component_register(
         "tools/tool_skill_manage.c"
         "tools/tool_mcp.c"
         "tools/tool_voice.c"
+        "tools/tool_audio.c"
         "tools/api_manager.c"
         "skills/skill_engine.c"
         "skills/skill_hw_api.c"

@@ -3,6 +3,7 @@
 #include "cJSON.h"
 #include "esp_log.h"
 #include <string.h>
+#include <math.h>
 
 static const char *TAG = "tool_audio";
 
@@ -75,6 +76,66 @@ static esp_err_t tool_audio_volume(const char *input, char *output, size_t out_l
 }
 
 /* -------------------------------------------------------------------------
+ * Tool: audio_test
+ * Input: {"freq": 440, "duration_ms": 1000}
+ * ------------------------------------------------------------------------- */
+static esp_err_t tool_audio_test(const char *input, char *output, size_t out_len)
+{
+    cJSON *root = cJSON_Parse(input);
+    int freq = 440;
+    int duration_ms = 1000;
+    
+    if (root) {
+        cJSON *f = cJSON_GetObjectItem(root, "freq");
+        cJSON *d = cJSON_GetObjectItem(root, "duration_ms");
+        if (cJSON_IsNumber(f)) freq = f->valueint;
+        if (cJSON_IsNumber(d)) duration_ms = d->valueint;
+        cJSON_Delete(root);
+    }
+    
+    extern esp_err_t audio_init(void);
+    extern esp_err_t audio_speaker_start(void);
+    extern esp_err_t audio_speaker_write(const uint8_t *data, size_t len);
+    
+    audio_init();
+    audio_speaker_start();
+    
+    // Generate a simple sine wave at 44100Hz 16-bit
+    int sample_rate = 44100;
+    int num_samples = (sample_rate * duration_ms) / 1000;
+    int buf_samples = 1024;
+    int16_t *buf = malloc(buf_samples * sizeof(int16_t) * 2); // stereo buffer for MAX98357a
+    if (!buf) {
+        snprintf(output, out_len, "Error: OOM for test tone");
+        return ESP_FAIL;
+    }
+    
+    float phase = 0.0f;
+    float phase_inc = (2.0f * 3.14159265f * freq) / sample_rate;
+    int samples_played = 0;
+    
+    ESP_LOGI(TAG, "Playing %dHz test tone for %dms", freq, duration_ms);
+    
+    while (samples_played < num_samples) {
+        int to_play = (num_samples - samples_played > buf_samples) ? buf_samples : (num_samples - samples_played);
+        for (int i = 0; i < to_play; i++) {
+            // Sine wave amplitude scaled down to avoid clipping/loudness max
+            int16_t val = (int16_t)(10000.0f * sinf(phase));
+            buf[i*2] = val;     // Left channel
+            buf[i*2 + 1] = val; // Right channel duplicated
+            phase += phase_inc;
+            if (phase >= 2.0f * 3.14159265f) phase -= 2.0f * 3.14159265f;
+        }
+        audio_speaker_write((uint8_t*)buf, to_play * sizeof(int16_t) * 2);
+        samples_played += to_play;
+    }
+    
+    free(buf);
+    snprintf(output, out_len, "Test tone played (%d Hz, %d ms)", freq, duration_ms);
+    return ESP_OK;
+}
+
+/* -------------------------------------------------------------------------
  * Registration
  * ------------------------------------------------------------------------- */
 void register_audio_tools(void)
@@ -97,9 +158,16 @@ void register_audio_tools(void)
         .input_schema_json = "{\"type\":\"object\",\"properties\":{\"volume\":{\"type\":\"integer\"}},\"required\":[]}",
         .execute = tool_audio_volume,
     };
+    static const mimi_tool_t tool_test = {
+        .name = "audio_test_tone",
+        .description = "Play a pure sine wave test tone to debug speaker hardware. Input: {\"freq\": 440, \"duration_ms\": 1000}",
+        .input_schema_json = "{\"type\":\"object\",\"properties\":{\"freq\":{\"type\":\"integer\"},\"duration_ms\":{\"type\":\"integer\"}},\"required\":[]}",
+        .execute = tool_audio_test,
+    };
 
     tool_registry_register(&tool_play_url);
     tool_registry_register(&tool_stop);
     tool_registry_register(&tool_volume);
+    tool_registry_register(&tool_test);
     ESP_LOGI(TAG, "Audio tools registered");
 }
